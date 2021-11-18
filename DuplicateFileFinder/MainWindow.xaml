@@ -1,0 +1,79 @@
+﻿<Window x:Class="DuplicateFileFinder.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="clr-namespace:DuplicateFileFinder.Models"
+        xmlns:duplicateFileFinder="clr-namespace:DuplicateFileFinder.Converters"
+        xmlns:util="clr-namespace:DuplicateFileFinder.Util"
+        mc:Ignorable="d"
+        Title="Duplicate File Finder" Height="450" Width="800"
+        DataContext ="{Binding RelativeSource={RelativeSource Self}}">
+    
+    <Window.Resources>
+        <duplicateFileFinder:BoolNegationConverter x:Key="NegateConverter"/>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <ToolBarTray DockPanel.Dock="Top">
+            <ToolBar Name="AppToolbar" Height="64">
+                <Button Name="AddSource" Click="AddSource_OnClick" 
+                        IsEnabled="{Binding DuplicateFiles.IsScanning, Converter={StaticResource NegateConverter} }">
+                    <util:AutoDisableImage Source="/Resources/addIcon.png"/>
+                </Button>
+                <Button Name="StartScan" Click="StartScan_OnClick"
+                        IsEnabled="{Binding DuplicateFiles.ReadyToScan}">
+                    <util:AutoDisableImage Source="/Resources/startIcon.png"/>
+                </Button>
+                <Button Name="StopScan" Click="StopScan_OnClick" Visibility="Hidden"
+                        IsEnabled="{Binding DuplicateFiles.IsScanning}">
+                    <util:AutoDisableImage Source="/Resources/stopIcon.png"/>
+                </Button>
+            </ToolBar>
+        </ToolBarTray>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="0.5*"></ColumnDefinition>
+                <ColumnDefinition Width="0.5*"></ColumnDefinition>
+            </Grid.ColumnDefinitions>
+
+
+            <Label Content="File Sources" Grid.Row="0" Grid.Column="0" ></Label>
+            <ScrollViewer Name="SourceDirSv" Grid.Row="1" Grid.Column="0">
+                <ListView Name="SourcesListView" ItemsSource="{Binding DuplicateFiles.SearchPaths}">
+                </ListView>
+            </ScrollViewer>
+
+            <Label Content="Duplicate Files" Grid.Row="0" Grid.Column="1"></Label>
+
+            <DataGrid Grid.Row="1" Grid.Column="1" Name="dgDuplicateFiles" AutoGenerateColumns="False" IsReadOnly="True" CanUserResizeColumns="True" CanUserAddRows="False" ItemsSource="{Binding Path=DuplicateFiles.DuplicateFiles}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Name" Binding="{Binding FileName}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Size" Binding="{Binding FileSize}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Date" Binding="{Binding CreationDate}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Folder" Binding="{Binding Folder}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Group" Binding="{Binding FileGroup}"></DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <StatusBar Grid.Row ="2" Grid.ColumnSpan="2" DataContext="{Binding}">
+                <StackPanel Orientation="Horizontal">
+                    <ProgressBar Width="100" Height="15" Value="{Binding Path=DuplicateFiles.Progress}"></ProgressBar>
+                    <Label Name="lOperation" Width="200" Content="{Binding Path=DuplicateFiles.Operation}"></Label>
+                    <Label >Files Scanned:</Label>
+                    <Label  Name="lNumFilesScanned" Content="{Binding Path=DuplicateFiles.FilesScanned}"></Label>
+                    <Label>DuplicatesFound:</Label>
+                    <Label Name="lDuplicatesFound" Content="{Binding Path=DuplicateFiles.DuplicatesFound}"></Label>
+                    <Label>Space Taken:</Label>
+                    <Label Name="lSpaceTakenByDuplicates" Content="{Binding Path=DuplicateFiles.SpaceTaken}"></Label>
+                </StackPanel>
+            </StatusBar>
+        </Grid>
+    </DockPanel>
+</Window>

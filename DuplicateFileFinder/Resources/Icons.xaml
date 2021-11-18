@@ -1,0 +1,26 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Add Icon -->
+    <Path x:Key="AddIcon" Fill="#FF008000">
+        <Path.Data>
+            <PathGeometry Figures="m58.017 598.48v5.9062h-5.9062v4.1875h5.9062v5.9062h4.1875v-5.9062h5.9062v-4.1875h-5.9062v-5.9062h-4.1875z" FillRule="NonZero"/>
+        </Path.Data>
+    </Path>
+
+    
+
+    <Style x:Key="ToolbarPathStyle"
+           TargetType="{x:Type Path}">
+        <Setter Property="Stretch"
+                Value="Uniform" />
+        <Setter Property="Height"
+                Value="40"/>
+        <Setter Property="Width"
+                Value="40"/>
+
+    </Style>
+
+
+
+</ResourceDictionary>
