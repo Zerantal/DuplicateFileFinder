@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.11.0" />
+    <PackageReference Include="MSTest.TestAdapter" Version="2.2.7" />
+    <PackageReference Include="MSTest.TestFramework" Version="2.2.7" />
+    <PackageReference Include="coverlet.collector" Version="3.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="TestData\**\*.*">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <DeploymentContent>True</DeploymentContent>        
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="TestData\EmptyDir\" />
+    <Folder Include="TestData\TestDir1\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="TestData\FolderNodeWriteCsvTest.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="xcopy /Y /E &quot;$(ProjectDir)TestData&quot; &quot;$(TargetDir)TestData&quot;" />
+  </Target>
+
+</Project>

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "FileHasher": {
+      "commandName": "Project",
+      "commandLineArgs": "scan -d \"C:\\Users\\toby_\\source\\repos\\DuplicateFileFinder\\DuplicateFileFinderLibTests\\TestData\\TestDir2\" -o test.csv"
+    }
+  }
+}

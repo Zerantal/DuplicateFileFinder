@@ -69,5 +69,10 @@ using TreeView = System.Windows.Controls.TreeView;
                 if (view.Parent is UIElement parent) parent.RaiseEvent(eventArgs);
             }
         }
+
+        private void ScanLocation_OnClick(object sender, RoutedEventArgs e)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

@@ -49,7 +49,7 @@ namespace DuplicateFileFinder.ViewModels
             SpaceTaken = 0;
             foreach (var dir in SearchPaths.Select(x => new DirectoryInfo(x)))
             {
-                 await SearchDirectory(dir, duplicates, progressSlice);
+                  SearchDirectory(dir, duplicates, progressSlice);
             }
 
             //Operation = "Collating duplicate file list...";
@@ -72,7 +72,7 @@ namespace DuplicateFileFinder.ViewModels
 
         }
 
-        private async Task SearchDirectory(DirectoryInfo dir, HashSet<DuplicateFiles> duplicates, double progressSlice)
+        private void SearchDirectory(DirectoryInfo dir, HashSet<DuplicateFiles> duplicates, double progressSlice)
         {
             int numFolderObjects = dir.GetFiles().Length + dir.GetDirectories().Length;
 
@@ -104,7 +104,7 @@ namespace DuplicateFileFinder.ViewModels
 
             foreach (var subdir in dir.GetDirectories())
             {
-                _ = SearchDirectory(subdir, duplicates, newProgressSlice);
+                //__ = SearchDirectory(subdir, duplicates, newProgressSlice);
             }
 
         }
