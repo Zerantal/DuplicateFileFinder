@@ -5,43 +5,23 @@ using NLog;
 
 namespace DuplicateFileFinderLib
 {
-    public class FolderNode
+    public class FolderNode : FileSystemNode
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        public string Checksum { get; private set; } = string.Empty;
-
-
-
-        public string FolderPath { get; internal set; }
-
-        public long AggregateSize { get; internal set; }
-
-        public int Group { get; internal set; } = -2;
-
-        public int AggregateFileCount { get; internal set; }
+        public int AggregateFileCount { get; private set; }
 
         public int AggregateFolderCount { get; private set; }
 
-        public ReadOnlyCollection<FileNode> Files => new(_files);
 
-        public ReadOnlyCollection<FolderNode> SubFolders => new(_subFolders);
-
-        private List<FileNode> _files;
-        private List<FolderNode> _subFolders;
-
-        public FolderNode(string path)
+        public FolderNode(string path) : base(path)
         {
-            this.FolderPath = path ?? throw new ArgumentNullException(nameof(path));
-
-            _files = new List<FileNode>();
-            _subFolders = new List<FolderNode>();
             AggregateFolderCount = 1;
         }
 
         internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path)
         {
-            AggregateSize = rowInfo.Size;
+            Size = rowInfo.Size;
             AggregateFileCount = rowInfo.FileCount;
             Checksum = rowInfo.Checksum;
             Group = rowInfo.Group;
@@ -58,23 +38,20 @@ namespace DuplicateFileFinderLib
             if (up != null) await up(this);
         }
 
-        public void WriteCsvEntries(TextWriter writer)
+        protected override void WriteCsvEntry(TextWriter writer)
         {
-            writer.WriteLine("Folder,\"{0}\",{1},{2},,{3},{4}", FolderPath, AggregateSize, AggregateFileCount, Checksum, Group);
-            foreach (var f in Files)
-                f.WritesCsvEntry(writer);
-
-            foreach (var d in SubFolders)
-                d.WriteCsvEntries(writer);
+            writer.WriteLine("Folder,\"{0}\",{1},{2},,{3},{4}", Path, Size, AggregateFileCount, Checksum, Group);
         }
 
         public void PopulateFolderInfo()
         {
             try
             {
-                var di = new DirectoryInfo(FolderPath);
-                _files = di.GetFiles("*.*").OrderBy(f => f.Name).Select(f => new FileNode(f.FullName)).ToList();
-                _subFolders = di.GetDirectories().OrderBy(f => f.Name).Select(d => new FolderNode(d.FullName)).ToList();
+                var di = new DirectoryInfo(Path);
+
+                Children.AddRange(di.GetDirectories().OrderBy(f => f.Name).Select(d => new FolderNode(d.FullName)));
+
+                Children.AddRange(di.GetFiles().OrderBy(f => f.Name).Select(f => new FileNode(f.FullName)));
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
             {
@@ -85,7 +62,7 @@ namespace DuplicateFileFinderLib
         public void UpdateFolderStats()
         {
             AggregateFileCount = Files.Count + SubFolders.Sum(s => s.AggregateFileCount);
-            AggregateSize = Files.Sum(f => f.Size) + SubFolders.Sum(s => s.AggregateSize);
+            Size = Children.Sum(n => n.Size);
             AggregateFolderCount = SubFolders.Count + SubFolders.Sum(s => s.AggregateFolderCount);
         }
 
@@ -96,7 +73,7 @@ namespace DuplicateFileFinderLib
         {
             string aggregateHashStr = "";
 
-            foreach (var file in _files)
+            foreach (var file in Files)
             {
                 if (file.Checksum == string.Empty)
                     return; // abort
@@ -104,7 +81,7 @@ namespace DuplicateFileFinderLib
                 aggregateHashStr += file.Checksum;
             }
 
-            foreach (var folder in _subFolders)
+            foreach (var folder in SubFolders)
             {
                 if (folder.Checksum == string.Empty)
                     return; // abort

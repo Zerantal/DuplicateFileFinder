@@ -14,46 +14,43 @@
         <duplicateFileFinder:BoolNegationConverter x:Key="NegateConverter"/>
     </Window.Resources>
 
-    <DockPanel LastChildFill="True">
-        <ToolBarTray DockPanel.Dock="Top">
-            <ToolBar Name="AppToolbar" Height="64">
-                <Button Name="ScanLocation" Click="ScanLocation_OnClick" 
-                        IsEnabled="{Binding DuplicateFiles.IsScanning, Converter={StaticResource NegateConverter} }">
-                    <util:AutoDisableImage Source="/Resources/addIcon.png"/>
-                </Button>
-            </ToolBar>
-        </ToolBarTray>
+    <DockPanel>
 
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.0*"></ColumnDefinition>
-            </Grid.ColumnDefinitions>
-            <ScrollViewer Name="SourceDirSv" Grid.Row="0" Grid.Column="0"/>
+        <Menu Name="MainMenu" DockPanel.Dock="Top" >
+            <MenuItem Header="_File">
+                <MenuItem Header="_Clear"></MenuItem>
+                <MenuItem Header="_Save"></MenuItem>
+                <MenuItem Header="Save _As"></MenuItem>
+                <MenuItem Header="_Import"></MenuItem>
+                <MenuItem Header="E_xit"></MenuItem>
+            </MenuItem>
+            <MenuItem Header="_Analyze">
+                <MenuItem Header="_Scan Location"></MenuItem>
+            </MenuItem>
+        </Menu>
 
-            <DataGrid Grid.Row="0" Grid.Column="0" Name="dgDuplicateFiles" AutoGenerateColumns="False" IsReadOnly="True" CanUserResizeColumns="True" CanUserAddRows="False" ItemsSource="{Binding Path=DuplicateFiles.DuplicateFiles}">
+        <StatusBar DataContext="{Binding}" DockPanel.Dock="Bottom">
+            <StackPanel Orientation="Horizontal">
+                <Label >Files Scanned:</Label>
+                <Label  Name="NumFilesScanned" Content="{Binding Path=DuplicateFiles.FilesScanned}"></Label>
+                <Label>DuplicatesFound:</Label>
+                <Label Name="DuplicatesFound" Content="{Binding Path=DuplicateFiles.DuplicatesFound}"></Label>
+                <Label>Space Taken:</Label>
+                <Label Name="SpaceTakenByDuplicates" Content="{Binding Path=DuplicateFiles.SpaceTaken}"></Label>
+            </StackPanel>
+        </StatusBar>
+
+        <ScrollViewer>
+            <DataGrid Name="DgDuplicateFiles" AutoGenerateColumns="False" IsReadOnly="True" CanUserResizeColumns="True" CanUserAddRows="False" ItemsSource="{Binding Path=DuplicateFiles.DuplicateFiles}">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Name" Binding="{Binding FileName}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Full Name" Binding="{Binding FileName}"></DataGridTextColumn>
                     <DataGridTextColumn Header="Size" Binding="{Binding FileSize}"></DataGridTextColumn>
-                    <DataGridTextColumn Header="Date" Binding="{Binding CreationDate}"></DataGridTextColumn>
-                    <DataGridTextColumn Header="Folder" Binding="{Binding Folder}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="File Count" Binding="{Binding CreationDate}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="Type" Binding="{Binding Folder}"></DataGridTextColumn>
+                    <DataGridTextColumn Header="MD5" Binding="{Binding FileGroup}"></DataGridTextColumn>
                     <DataGridTextColumn Header="Group" Binding="{Binding FileGroup}"></DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
-
-            <StatusBar Grid.Row ="1" Grid.ColumnSpan="2" DataContext="{Binding}">
-                <StackPanel Orientation="Horizontal">
-                    <Label >Files Scanned:</Label>
-                    <Label  Name="NumFilesScanned" Content="{Binding Path=DuplicateFiles.FilesScanned}"></Label>
-                    <Label>DuplicatesFound:</Label>
-                    <Label Name="DuplicatesFound" Content="{Binding Path=DuplicateFiles.DuplicatesFound}"></Label>
-                    <Label>Space Taken:</Label>
-                    <Label Name="SpaceTakenByDuplicates" Content="{Binding Path=DuplicateFiles.SpaceTaken}"></Label>
-                </StackPanel>
-            </StatusBar>
-        </Grid>
+        </ScrollViewer>
     </DockPanel>
 </Window>

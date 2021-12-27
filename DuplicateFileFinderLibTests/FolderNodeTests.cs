@@ -70,7 +70,7 @@ namespace DuplicateFileFinderLibTests
 
             Assert.AreEqual(2, folder.AggregateFileCount);
             Assert.AreEqual(2, folder.AggregateFolderCount);
-            Assert.AreEqual(78, folder.AggregateSize);
+            Assert.AreEqual(78, folder.Size);
             Assert.AreEqual(2, folder.Files.Count);
             Assert.AreEqual(1, folder.SubFolders.Count);
         }

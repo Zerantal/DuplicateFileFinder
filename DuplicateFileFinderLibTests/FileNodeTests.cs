@@ -35,7 +35,7 @@ namespace DuplicateFileFinderLibTests
             file.ComputeChecksum().Wait();
 
             StringWriter sw = new StringWriter();
-            file.WritesCsvEntry(sw);
+            file.WriteCsvEntries(sw);
             sw.Close();
 
             Assert.IsTrue(TestData.CsvStringCompare(expected, sw.ToString()));

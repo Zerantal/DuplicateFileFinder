@@ -5,6 +5,7 @@
 
 using System.Diagnostics;
 using System.Reflection.Metadata;
+using System.Runtime.InteropServices.ComTypes;
 using System.Threading.Channels;
 using NLog;
 
@@ -16,7 +17,7 @@ namespace DuplicateFileFinderLib
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        private readonly List<FolderNode> _locations = new();
+        private readonly RootNode _root = new RootNode();
 
         private readonly FileSystemGroups _groups = new();
 
@@ -78,7 +79,7 @@ namespace DuplicateFileFinderLib
             var folder = new FolderNode(location);
             if (LocationAlreadyAdded(folder))
                 return;
-            _locations.Add(folder);
+            _root.AddFileSystemNode(folder);
 
             // build directory tree
             (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport("Scanning directory structure..."));
@@ -92,7 +93,7 @@ namespace DuplicateFileFinderLib
 
             // build duplicate file/folder groups
             (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport("Grouping duplicate files/folders..."));
-            await _groups.AssignGroups(_locations.ToArray());
+            await _groups.AssignGroups(_root);
 
             (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport());
         }
@@ -101,14 +102,14 @@ namespace DuplicateFileFinderLib
         {
             bool result = false;
 
-            foreach (var location in _locations)
+            foreach (var location in _root.SubFolders)
             {
                 if (!result)
                 {
                     location.TraverseFolders((f) =>
                     {
                         if (result) return Task.CompletedTask;
-                        if (f.FolderPath == folder.FolderPath)
+                        if (f.Path == folder.Path)
                             result = true;
 
                         return Task.CompletedTask;
@@ -160,8 +161,8 @@ namespace DuplicateFileFinderLib
 
             // producer task
             int fileProcessedCounter = 0;
-            var fileCount = _locations.Sum((l) => l.AggregateFileCount);
-            foreach (var location in _locations)
+            var fileCount = _root.SubFolders.Sum((l) => l.AggregateFileCount);
+            foreach (var location in _root.SubFolders)
             {
                 await location.TraverseFolders(async (folder) =>
                 {
@@ -184,7 +185,7 @@ namespace DuplicateFileFinderLib
             await Task.WhenAll(md5ComputeTasks);
 
             // computer folder hashes (only folders where all sub objects have been hashed)
-            foreach (var location in _locations)
+            foreach (var location in _root.SubFolders)
                 location.TraverseFolders(up: (folder) =>
                 {
                     if (folder.Checksum == "")
@@ -199,8 +200,7 @@ namespace DuplicateFileFinderLib
         public void ExportToCsv(TextWriter writer)
         {
             writer.WriteLine("File/Folder,Path,Size,File Count,Extension,MD5,Group");
-            foreach (var location in _locations)
-                location.WriteCsvEntries(writer);
+            _root.WriteCsvEntries(writer);
         }
 
 
@@ -212,26 +212,58 @@ namespace DuplicateFileFinderLib
             const int numColumnsRequired = 7;
 
             var line = reader.ReadLine();
-            if (line == null) throw new InvalidFormatException("Null stream");
+            if (line == null) throw new InvalidFormatException("Empty File");
             var fields = line.Split(',');
             if (fields.Length < numColumnsRequired)
                 throw new InvalidFormatException("Insufficient number of headings detected");
+
+            Dictionary<string, FileNode> fileDictionary = new();
+            Dictionary<string, FolderNode> folderDictionary = new();
 
             int row = 1;
             while ((line = reader.ReadLine()) != null)
             {
                 if (tryParseCsvRow(line, out var rowInfo))
                 {
-                    if (rowInfo!.IsFile)
-                        AddFile(new FileNode(rowInfo));
+                    Debug.Assert(rowInfo != null, nameof(rowInfo) + " != null");
+                    if (rowInfo.IsFile)
+                        fileDictionary[rowInfo.Path] = new FileNode(rowInfo);
                     else
-                        AddFolder(new FolderNode(rowInfo));
+                        folderDictionary[rowInfo.Path] = new FolderNode(rowInfo);
 
+                    row++;
                     continue;
                 }
 
                 throw new InvalidFormatException("Error parsing data on row " + row);
             }
+
+            ConstructFolderTree(folderDictionary, fileDictionary);
+
+        }
+
+        private void ConstructFolderTree(Dictionary<string, FolderNode> folderDictionary, Dictionary<string, FileNode> fileDictionary)
+        {
+            foreach (var (folderPath, folderNode) in folderDictionary)
+            {
+                string parentPath = Path.GetFullPath(folderPath + @"\..");
+                if (folderDictionary.TryGetValue(parentPath, out var parentNode))
+                    parentNode.AddFileSystemNode(folderNode);
+                else
+                    _root.AddFileSystemNode(folderNode);
+            }
+
+            foreach (var (filePath, fileNode) in fileDictionary)
+            {
+                string parentFolderPath = Path.GetFullPath(filePath + @"\..");
+                if (folderDictionary.TryGetValue(parentFolderPath, out var parentFolderNode))
+                    parentFolderNode.AddFileSystemNode(fileNode);
+                else
+                {
+                    Logger.Log(LogLevel.Warn, @"Can't find parent folder entry for file when importing csv: " + filePath);
+                }
+            }
+
         }
 
         private bool tryParseCsvRow(string line, out CsvRowData? rowInfo)
@@ -243,34 +275,24 @@ namespace DuplicateFileFinderLib
                 return false;
 
             
-            if (fields[0] != "File" || fields[0] != "Folder") return false;
+            if (!(fields[0] == "File" || fields[0] == "Folder")) return false;
             bool isFile = fields[0] == "File";
             
             if (!long.TryParse(fields[2], out var size)) return false;
 
-            if (!int.TryParse(fields[3], out var fileCount)) return false;
+            var fileCount = 0;
+            if (!isFile && !int.TryParse(fields[3], out fileCount)) return false;
 
             if (!int.TryParse(fields[6], out var group)) return false;
 
             rowInfo = new CsvRowData
             {
-                IsFile = isFile, Path = fields[1], Size = size, FileCount = fileCount, Extension = fields[4],
+                IsFile = isFile, Path = fields[1].Replace("\"", ""), Size = size, FileCount = fileCount, Extension = fields[4].Replace("\"", ""),
                 Checksum = fields[5], Group = group
             };
 
             return true;
         }
-
-        private void AddFolder(FolderNode folder)
-        {
-            throw new NotImplementedException();
-        }
-
-        private void AddFile(FileNode file)
-        {
-            throw new NotImplementedException();
-        }
-
 
     }
 }

@@ -3,35 +3,22 @@ using NLog;
 
 namespace DuplicateFileFinderLib
 {
-    public class FileNode
+    public class FileNode : FileSystemNode
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        public string FilePath { get; internal set; }
+        public string Extension => System.IO.Path.GetExtension(Path);
 
-        public long Size { get; init; }
-
-        public string Extension { get; init; }
-
-        public string Checksum { get; private set; } = string.Empty;
-
-        public int Group { get; internal set; } = -1;
-
-        public FileNode(string filePath)
+        public FileNode(string path) : base(path)
         {
-            this.FilePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
-
-            FileInfo fi = new FileInfo(filePath);
-
+            var fi = new FileInfo(path);
             Size = fi.Length;
-            Extension = fi.Extension;
+            Group = -1;
         }
 
-        internal FileNode(CsvRowData rowInfo)
+        internal FileNode(CsvRowData rowInfo) : base(rowInfo.Path)
         {
-            FilePath = rowInfo.Path;
             Size = rowInfo.Size;
-            Extension = rowInfo.Extension;
             Checksum = rowInfo.Checksum;
             Group = rowInfo.Group;
         }
@@ -41,7 +28,7 @@ namespace DuplicateFileFinderLib
             using var md5 = MD5.Create();
             try
             {
-                await using var stream = File.OpenRead(FilePath);
+                await using var stream = File.OpenRead(Path);
                 var hashBytes = await md5.ComputeHashAsync(stream);
 
                 Checksum = string.Concat(hashBytes.Select(x => x.ToString("X2")));
@@ -52,9 +39,14 @@ namespace DuplicateFileFinderLib
             }
         }
 
-        public void WritesCsvEntry(TextWriter writer)
+        protected override void WriteCsvEntry(TextWriter writer)
         {
-            writer.WriteLine("File,\"{0}\",{1},,\"{2}\",{3}, {4}", FilePath, Size, Extension, Checksum, Group);
+            writer.WriteLine("File,\"{0}\",{1},,\"{2}\",{3}, {4}", Path, Size, Extension, Checksum, Group);
+        }
+
+        public override void AddFileSystemNode(FileSystemNode node)
+        {
+            throw new InvalidOperationException("Can't add node to FileNode object");
         }
     }
 }

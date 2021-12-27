@@ -23,22 +23,19 @@ namespace DuplicateFileFinderLib
             _folderGroup[string.Empty] = new FolderGroup(-2);
         }
 
-        public async Task AssignGroups(FolderNode [] locations)
+        public async Task AssignGroups(FolderNode folder)
         {
             Stopwatch watch = new Stopwatch();
             watch.Start();
 
-            foreach (var loc in locations)
-            {
 #pragma warning disable CS1998
-                await loc.TraverseFolders(async (folder) =>
+            await folder.TraverseFolders(async (folder) =>
 #pragma warning restore CS1998
-                {
-                    AssignFolderToGroup(folder);
+            {
+                AssignFolderToGroup(folder);
 
-                    AssignFilesToGroups(folder);
-                });
-            }
+                AssignFilesToGroups(folder);
+            });
 
             watch.Stop();
             Logger.Info("Group assignment completed in {0} ms", watch.ElapsedMilliseconds);
