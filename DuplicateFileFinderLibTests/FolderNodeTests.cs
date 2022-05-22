@@ -3,86 +3,89 @@ using System.IO;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace DuplicateFileFinderLibTests
+namespace DuplicateFileFinderLibTests;
+
+[TestClass]
+public class FolderNodeTests
 {
-    [TestClass()]
-    public class FolderNodeTests
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public void FolderNodeTest_null()
     {
-        public TestContext TestContext { get; set; } = null!;
-
-        [TestMethod()]
-        public void FolderNodeTest_null()
+        void Actual()
         {
-            void Actual() => new FolderNode(null!);
-            Assert.ThrowsException<ArgumentNullException>((Action)Actual);
-        }
-        [TestMethod()]
-        public void FolderNodeTest()
-        {
-            var actual = new FolderNode(TestData.Path + "TestDir1");
-
-            Assert.AreEqual(1, actual.AggregateFolderCount);
-            Assert.AreEqual(0, actual.Files.Count);
-            Assert.AreEqual(0, actual.SubFolders.Count);
+            // ReSharper disable once ObjectCreationAsStatement
+            new FolderNode(null!);
         }
 
-        [TestMethod()]
-        public void WriteCsvEntriesTest()
-        {
-            var folder = new FolderNode(TestData.Path + "TestDir1");
-            folder.PopulateFolderInfo();
-            folder.UpdateFolderStats();
-            foreach (var file in folder.Files)
-                file.ComputeChecksum().Wait();
+        Assert.ThrowsException<ArgumentNullException>((Action)Actual);
+    }
+    [TestMethod]
+    public void FolderNodeTest()
+    {
+        var actual = new FolderNode(TestData.Path + "TestDir1");
 
-            folder.ComputeChecksum();
-            folder.UpdateFolderStats();
+        Assert.AreEqual(1, actual.AggregateFolderCount);
+        Assert.AreEqual(0, actual.Files.Count);
+        Assert.AreEqual(0, actual.SubFolders.Count);
+    }
 
-            var testDir = TestData.Path + "TestDir1";
-            var expectedFile = TestData.Path + "Folder_" + TestContext.TestName + "_expected.csv";
-            var actualFile = TestData.Path + "Folder_" + TestContext.TestName + "_actual.csv";
+    [TestMethod]
+    public void WriteCsvEntriesTest()
+    {
+        var folder = new FolderNode(TestData.Path + "TestDir1");
+        folder.PopulateFolderInfo();
+        folder.UpdateFolderStats();
+        foreach (var file in folder.Files)
+            file.ComputeChecksum().Wait();
 
-            StreamWriter sw = new StreamWriter(actualFile);
-            folder.WriteCsvEntries(sw);
-            sw.Close();
+        folder.ComputeChecksum();
+        folder.UpdateFolderStats();
 
-            Assert.IsTrue(TestData.CsvFileCompare(expectedFile, actualFile));
-        }
+        var expectedFile = TestData.Path + "Folder_" + TestContext.TestName + "_expected.csv";
+        var actualFile = TestData.Path + "Folder_" + TestContext.TestName + "_actual.csv";
 
-        [TestMethod()]
-        public void PopulateFolderInfoTest()
-        {
-            var folder = new FolderNode(TestData.Path + "TestDir1");
+        StreamWriter sw = new StreamWriter(actualFile);
+        folder.WriteCsvEntries(sw);
+        sw.Close();
 
-            folder.PopulateFolderInfo();
+        Assert.IsTrue(TestData.CsvFileCompare(expectedFile, actualFile));
+    }
 
-            Assert.AreEqual(2, folder.Files.Count);
-            Assert.AreEqual(1,folder.SubFolders.Count);
-        }
+    [TestMethod]
+    public void PopulateFolderInfoTest()
+    {
+        var folder = new FolderNode(TestData.Path + "TestDir1");
 
-        [TestMethod()]
-        public void UpdateFolderStatsTest()
-        {
-            var folder = new FolderNode(TestData.Path + "TestDir1");
+        folder.PopulateFolderInfo();
 
-            folder.PopulateFolderInfo();
-            folder.UpdateFolderStats();
+        Assert.AreEqual(2, folder.Files.Count);
+        Assert.AreEqual(1,folder.SubFolders.Count);
+    }
 
-            Assert.AreEqual(2, folder.AggregateFileCount);
-            Assert.AreEqual(2, folder.AggregateFolderCount);
-            Assert.AreEqual(78, folder.Size);
-            Assert.AreEqual(2, folder.Files.Count);
-            Assert.AreEqual(1, folder.SubFolders.Count);
-        }
+    [TestMethod]
+    public void UpdateFolderStatsTest()
+    {
+        var folder = new FolderNode(TestData.Path + "TestDir1");
 
-        [TestMethod()]
-        public void ComputeChecksumTest()
-        {
-            var folder = new FolderNode(TestData.Path + "TestDir1");
+        folder.PopulateFolderInfo();
+        folder.UpdateFolderStats();
 
-            folder.ComputeChecksum();
+        Assert.AreEqual(2, folder.AggregateFileCount);
+        Assert.AreEqual(2, folder.AggregateFolderCount);
+        Assert.AreEqual(78, folder.Size);
+        Assert.AreEqual(2, folder.Files.Count);
+        Assert.AreEqual(1, folder.SubFolders.Count);
+    }
 
-            Assert.AreEqual("D41D8CD98F00B204E9800998ECF8427E", folder.Checksum);
-        }
+    [TestMethod]
+    public void ComputeChecksumTest()
+    {
+        var folder = new FolderNode(TestData.Path + "TestDir1");
+
+        folder.ComputeChecksum();
+
+        Assert.AreEqual("D41D8CD98F00B204E9800998ECF8427E", folder.Checksum);
     }
 }
