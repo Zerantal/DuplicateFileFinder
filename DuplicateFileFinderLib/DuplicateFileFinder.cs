@@ -20,7 +20,7 @@ public class DuplicateFileFinder
 
     private IList<FolderNode> _scanLocations = new List<FolderNode>();
 
-    public int ChecksumTestSize { get; set; } = 1000000;   
+    public int ChecksumTestSize { get; set; } = 1000000;
 
     private static async Task BuildFolderStructure(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
     {
@@ -53,7 +53,7 @@ public class DuplicateFileFinder
             }
             await Task.CompletedTask;
         }
-            
+
         await folder.TraverseFolders(ScanFolderStructure, BuildFileStats);
     }
 
@@ -70,7 +70,7 @@ public class DuplicateFileFinder
         await BuildFolderStructure(folder, progressIndicator, cancelToken);
 
         watch.Stop();
-            
+
         Logger.Info("Scanned directory tree(s) in {0} ms", watch.ElapsedMilliseconds);
     }
 
@@ -184,7 +184,7 @@ public class DuplicateFileFinder
         var fileCount = Root.SubFolders.Sum(l => l.AggregateFileCount);
         foreach (var location in Root.SubFolders)
         {
-            await location.TraverseFolders(async folder  =>
+            await location.TraverseFolders(async folder =>
             {
                 if (cancelToken.IsCancellationRequested) return;
                 foreach (var f in folder.Files)
@@ -285,12 +285,12 @@ public class DuplicateFileFinder
                 return;
             }
 
-            if (folderDictionary.TryGetValue(parentFolderPath, out var parentNode) || 
+            if (folderDictionary.TryGetValue(parentFolderPath, out var parentNode) ||
                 dummyNodes.TryGetValue(parentFolderPath, out parentNode))
             {
                 parentNode.AddFileSystemNode(node);
             }
-            else 
+            else
             {
                 var newParent = new FolderNode(parentFolderPath);
                 newParent.AddFileSystemNode(node);

@@ -19,5 +19,5 @@ internal class FolderGroup : GroupBase
         _folders.Add(folder);
     }
 
-    public override int DuplicateCount => _folders.Count; 
+    public override int DuplicateCount => _folders.Count;
 }

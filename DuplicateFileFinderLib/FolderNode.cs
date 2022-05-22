@@ -56,7 +56,7 @@ public class FolderNode : FileSystemNode
 
     public void PopulateFolderInfo()
     {
-        Children.Clear(); 
+        Children.Clear();
         try
         {
             var di = new DirectoryInfo(Path);
@@ -79,7 +79,7 @@ public class FolderNode : FileSystemNode
     }
 
     // compute MD5 hash of folder by computer hash of the concatenation of file and subfolder hashes
-    // Note: files and subfolders ARE stored in name sorted order so duplicate folders should have the 
+    // Note: files and subfolders ARE stored in name sorted order so duplicate folders should have the
     // same AggregateHashStr
     public void ComputeChecksum()
     {

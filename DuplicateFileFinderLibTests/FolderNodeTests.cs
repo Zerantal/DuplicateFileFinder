@@ -112,7 +112,7 @@ public class FolderNodeTests
         // is this test right?
         TestDir testDir = CreateTestDir();
         var folder = new FolderNode(testDir.DirName);
-        
+
         folder.ComputeChecksum();
 
         Assert.AreEqual("D41D8CD98F00B204E9800998ECF8427E", folder.Checksum);

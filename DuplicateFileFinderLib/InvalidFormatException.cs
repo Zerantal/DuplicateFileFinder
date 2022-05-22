@@ -13,7 +13,7 @@ public class InvalidFormatException : Exception
     { }
 
     public InvalidFormatException(string errMsg) :base (errMsg) { }
-        
+
     public InvalidFormatException(string errMsg, Exception e) : base(errMsg, e) { }
 
     public InvalidFormatException(string file, string errMsg) : base(errMsg)
