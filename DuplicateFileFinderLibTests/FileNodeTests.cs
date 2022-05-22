@@ -2,43 +2,46 @@
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace DuplicateFileFinderLibTests
+namespace DuplicateFileFinderLibTests;
+
+[TestClass]
+public class FileNodeTests
 {
-    [TestClass()]
-    public class FileNodeTests
+    [TestMethod]
+    public void FileNodeTest()
     {
-        [TestMethod()]
-        public void FileNodeTest()
-        {
-            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
+        var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-            Assert.AreEqual(78, file.Size);
-        }
+        Assert.AreEqual(78, file.Size);
+    }
 
-        [TestMethod()]
-        public void ComputeChecksumTest()
-        {
-            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
+    [TestMethod]
+    public void ComputeChecksumTest()
+    {
+        var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-            file.ComputeChecksum().Wait();
-            Assert.AreEqual("a1a6c61c583a44697837bfe06267fd51".ToUpper(), file.Checksum);
-        }
+        // full checksum
+        file.ComputeChecksum().Wait();
+        Assert.AreEqual("a1a6c61c583a44697837bfe06267fd51".ToUpper(), file.Checksum);
 
-        [TestMethod()]
-        public void WritesCsvEntryTest()
-        {
-            string expected =
-                "File,\"\\TestData\\TestDir1\\file2.txt\",78,,\".txt\",A1A6C61C583A44697837BFE06267FD51, -1";
+        // partial checksum
+        file.ComputeChecksum(testSize: 49).Wait();
+        Assert.AreEqual("13bfc5b5f7207aea4c873e32c46fa5aa".ToUpper(), file.Checksum);
+    }
 
-            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
+    [TestMethod]
+    public void WritesCsvEntryTest()
+    {
+        const string expected = "File,\"\\TestData\\TestDir1\\file2.txt\",78,,\".txt\",A1A6C61C583A44697837BFE06267FD51";
 
-            file.ComputeChecksum().Wait();
+        var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-            StringWriter sw = new StringWriter();
-            file.WriteCsvEntries(sw);
-            sw.Close();
+        file.ComputeChecksum().Wait();
 
-            Assert.IsTrue(TestData.CsvStringCompare(expected, sw.ToString()));
-        }
+        StringWriter sw = new StringWriter();
+        file.WriteCsvEntries(sw);
+        sw.Close();
+
+        Assert.IsTrue(TestData.CsvStringCompare(expected, sw.ToString()));
     }
 }

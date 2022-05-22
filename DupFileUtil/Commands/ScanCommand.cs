@@ -3,46 +3,45 @@ using CommandLine;
 using DupFileUtil.Util;
 using DuplicateFileFinderLib;
 
-namespace DupFileUtil.Commands
+namespace DupFileUtil.Commands;
+
+[Verb("scan", HelpText = "Scan directories and compute hash values")]
+internal class ScanCommand : ICommand
 {
-    [Verb("scan", HelpText = "Scan directories and compute hash values")]
-    internal class ScanCommand : ICommand
+    [Option('d', "directories", Min=1, Required = true, Separator = ',', HelpText = "Comma delimited list of directories")]
+    public IEnumerable<string>? Directories { get; set; }
+
+    [Option('o', "out", Required = true, HelpText = "output csv file")]
+    public string? OutputFilename { get; set; }
+
+    private readonly ConsoleProgressBar _progressBar = new();
+
+    public void Execute()
     {
-        [Option('d', "directories", Min=1, Required = true, Separator = ',', HelpText = "Comma delimited list of directories")]
-        public IEnumerable<string>? Directories { get; set; }
+        //Start asynchronous message pump
+        StandaloneSynchronizationContext.Start(ExecuteAsync);
+    }
 
-        [Option('o', "out", Required = true, HelpText = "output csv file")]
-        public string? OutputFilename { get; set; }
+    public async Task ExecuteAsync()
+    {
+        DuplicateFileFinder dupFileFinder = new DuplicateFileFinder();
+        Debug.Assert(Directories != null, nameof(Directories) + " != null");
 
-        private readonly ConsoleProgressBar _progressBar = new();
+        // scan
+        _progressBar.BlockCount = 20;
+        var progressIndicator = new Progress<DuplicateFileFinderProgressReport>(_progressBar.PrintProgress);
+        foreach (var d in Directories) await dupFileFinder.ScanLocation(d, progressIndicator);
 
-        public void Execute()
+        // output csv file
+        Debug.Assert(OutputFilename != null, nameof(OutputFilename) + " != null");
+        await using StreamWriter writer = new StreamWriter(OutputFilename);
+        try
         {
-            //Start asynchronous message pump
-            StandaloneSynchronizationContext.Start(ExecuteAsync);
+            dupFileFinder.ExportToCsv(writer);
         }
-
-        public async Task ExecuteAsync()
+        catch (Exception e)
         {
-            DuplicateFileFinder dupFileFinder = new DuplicateFileFinder();
-            Debug.Assert(Directories != null, nameof(Directories) + " != null");
-
-            // scan
-            _progressBar.BlockCount = 20;
-            var progressIndicator = new Progress<DuplicateFileFinderProgressReport>(_progressBar.PrintProgress);
-            foreach (var d in Directories) await dupFileFinder.ScanLocation(d, progressIndicator);
-
-            // output csv file
-            Debug.Assert(OutputFilename != null, nameof(OutputFilename) + " != null");
-            await using StreamWriter writer = new StreamWriter(OutputFilename);
-            try
-            {
-                dupFileFinder.ExportToCsv(writer);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Unable to write output file: " + e.Message);
-            }
+            Console.WriteLine("Unable to write output file: " + e.Message);
         }
     }
 }
