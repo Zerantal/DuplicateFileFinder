@@ -46,7 +46,9 @@ public class FileNode : FileSystemNode
         if (testSize == -1 || testSize >= Size)
             await ComputeFullChecksum(cancelToken);
         else
+        {
             await ComputeTestChecksum(cancelToken, testSize);
+        }
     }
 
     private async Task ComputeTestChecksum(CancellationToken cancelToken, int testSize)

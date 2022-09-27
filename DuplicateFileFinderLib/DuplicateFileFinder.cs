@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
@@ -11,13 +12,16 @@ public class DuplicateFileFinder
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
+    //TODO: Can this be made private?
     public readonly RootNode Root = new();
 
     private readonly FileSystemGroups _groups = new();
 
     private readonly Dictionary<long, int> _fileSizes = new();   // file size => count
 
-    private const int ChecksumTestSize = 1000000;   
+    private IList<FolderNode> _scanLocations = new List<FolderNode>();
+
+    public int ChecksumTestSize { get; set; } = 1000000;   
 
     private static async Task BuildFolderStructure(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
     {
@@ -25,14 +29,14 @@ public class DuplicateFileFinder
         Stack<double> progressSlices = new();
         progressSlices.Push(1.0);
 
-#pragma warning disable CS1998
         async Task ScanFolderStructure(FolderNode f)
-#pragma warning restore CS1998
         {
             if (cancelToken.IsCancellationRequested) return;
             f.PopulateFolderInfo();
             if (f.SubFolders.Count != 0)
                 progressSlices.Push(progressSlices.Peek() / f.SubFolders.Count);
+
+            await Task.CompletedTask;
         }
 
         async Task BuildFileStats(FolderNode f)
@@ -48,8 +52,7 @@ public class DuplicateFileFinder
                 progress += slice;
                 progressIndicator?.Report(new DuplicateFileFinderProgressReport(progress));
             }
-
-            await Task.Yield(); // This may not actually keep UI responsive in GUI context due to how their synchronization context prioritizes work
+            await Task.CompletedTask;
         }
             
         await folder.TraverseFolders(ScanFolderStructure, BuildFileStats);
@@ -59,7 +62,6 @@ public class DuplicateFileFinder
     {
         Root.TraverseFolders(null,  f => f.UpdateDuplicateFileStats()).Wait();
     }
-
 
     private static async Task BuildDirTrees(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
     {
@@ -75,7 +77,10 @@ public class DuplicateFileFinder
 
     public async Task ScanLocation(string location, Progress<DuplicateFileFinderProgressReport>? progressIndicator = null, bool recomputeHashes = false, CancellationToken cancelToken = default)
     {
-        var folder = GetFolder(location);
+        var folder = GetFolder(Path.GetFullPath(location));
+        if (_scanLocations.Contains(folder))
+            return;
+        _scanLocations.Add(folder);
 
         // build directory tree
         (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
@@ -180,7 +185,7 @@ public class DuplicateFileFinder
         var fileCount = Root.SubFolders.Sum(l => l.AggregateFileCount);
         foreach (var location in Root.SubFolders)
         {
-            await location.TraverseFolders(async folder =>
+            await location.TraverseFolders(async folder  =>
             {
                 if (cancelToken.IsCancellationRequested) return;
                 foreach (var f in folder.Files)
@@ -224,7 +229,8 @@ public class DuplicateFileFinder
     public void ExportToCsv(TextWriter writer)
     {
         writer.WriteLine("File/Folder,Path,Size,File Count,Extension,MD5");
-        Root.WriteCsvEntries(writer);
+        foreach(var scanLocation in _scanLocations)
+            scanLocation.WriteCsvEntries(writer, true);
     }
 
     // will clear existing data.
@@ -234,7 +240,7 @@ public class DuplicateFileFinder
         const int numColumnsRequired = 6;
 
         var line = reader.ReadLine();
-        if (line == null) throw new InvalidFormatException("Empty File");
+        if (line == null) throw new InvalidFormatException("Empty file");
         var fields = line.Split(',');
         if (fields.Length < numColumnsRequired)
             throw new InvalidFormatException("Insufficient number of headings detected");
@@ -242,16 +248,21 @@ public class DuplicateFileFinder
         Dictionary<string, FileNode> fileDictionary = new();
         Dictionary<string, FolderNode> folderDictionary = new();
 
-        int row = 1;
+        int row = 2;
         while ((line = reader.ReadLine()) != null)
         {
             if (!TryParseCsvRow(line, out var rowInfo))
                 throw new InvalidFormatException("Error parsing data on row " + row);
             Debug.Assert(rowInfo != null, nameof(rowInfo) + " != null");
-            if (rowInfo.IsFile)
+            if (rowInfo.Type == EntryType.File)
                 fileDictionary[rowInfo.Path] = new FileNode(rowInfo);
             else
-                folderDictionary[rowInfo.Path] = new FolderNode(rowInfo);
+            {
+                var f = new FolderNode(rowInfo);
+                if (rowInfo.Type == EntryType.ScanRootFolder)
+                    _scanLocations.Add(f);
+                folderDictionary[rowInfo.Path] = f;
+            }
 
             row++;
         }
@@ -260,29 +271,43 @@ public class DuplicateFileFinder
 
         _groups.AssignGroups(Root).Wait();
         CompileDuplicateFileStats();
-
     }
 
     private void ConstructFolderTree(Dictionary<string, FolderNode> folderDictionary, Dictionary<string, FileNode> fileDictionary)
     {
+        var dummyNodes = new Dictionary<string, FolderNode>(); // for path nodes preceding scan locations
+
+        void AddChildOfParentFolder(string path, FileSystemNode node)
+        {
+            string parentFolderPath = Path.GetFullPath(path + @"\..");
+            if (parentFolderPath == path)
+            {
+                Root.AddFileSystemNode(node);
+                return;
+            }
+
+            if (folderDictionary.TryGetValue(parentFolderPath, out var parentNode) || 
+                dummyNodes.TryGetValue(parentFolderPath, out parentNode))
+            {
+                parentNode.AddFileSystemNode(node);
+            }
+            else 
+            {
+                var newParent = new FolderNode(parentFolderPath);
+                newParent.AddFileSystemNode(node);
+                dummyNodes.Add(parentFolderPath, newParent);
+                AddChildOfParentFolder(parentFolderPath, newParent);
+            }
+        }
+
         foreach (var (folderPath, folderNode) in folderDictionary)
         {
-            string parentPath = Path.GetFullPath(folderPath + @"\..");
-            if (folderDictionary.TryGetValue(parentPath, out var parentNode) && parentPath != folderPath)
-                parentNode.AddFileSystemNode(folderNode);
-            else
-                Root.AddFileSystemNode(folderNode);
+            AddChildOfParentFolder(folderPath, folderNode);
         }
 
         foreach (var (filePath, fileNode) in fileDictionary)
         {
-            string parentFolderPath = Path.GetFullPath(filePath + @"\..");
-            if (folderDictionary.TryGetValue(parentFolderPath, out var parentFolderNode))
-                parentFolderNode.AddFileSystemNode(fileNode);
-            else
-            {
-                Logger.Log(LogLevel.Warn, @"Can't find parent folder entry for file when importing csv: " + filePath);
-            }
+            AddChildOfParentFolder(filePath, fileNode);
         }
 
         Root.TraverseFolders(null, f =>
@@ -302,25 +327,30 @@ public class DuplicateFileFinder
         if (fields.Length != 6)
             return false;
 
-            
-        if (!(fields[0] == "File" || fields[0] == "Folder")) return false;
-        bool isFile = fields[0] == "File";
-            
+
+        EntryType type;
+        if (!Enum.TryParse<EntryType>(fields[0], out type))
+            return false;
+
         if (!long.TryParse(fields[2], out var size)) return false;
 
         var fileCount = 0;
-        if (!isFile && !int.TryParse(fields[3], out fileCount)) return false;
+        if (type != EntryType.File && !int.TryParse(fields[3], out fileCount)) return false;
 
         rowInfo = new CsvRowData
         {
-            IsFile = isFile, Path = fields[1].Replace("\"", ""), Size = size, FileCount = fileCount, Extension = fields[4].Replace("\"", ""),
+            Type = type,
+            Path = fields[1].Replace("\"", ""),
+            Size = size,
+            FileCount = fileCount,
+            Extension = fields[4].Replace("\"", ""),
             Checksum = fields[5]
         };
 
         return true;
     }
 
-    public int LocationCount => Root.SubFolders.Count;
+    public int LocationCount => _scanLocations.Count;
 
     public int DuplicateFileCount => _groups.DuplicateFiles;
 

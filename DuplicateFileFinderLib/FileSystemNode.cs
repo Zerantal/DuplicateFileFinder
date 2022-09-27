@@ -8,7 +8,9 @@ public abstract class FileSystemNode
 
     protected FileSystemNode(string path)
     {
-        Path = path ?? throw new ArgumentNullException(nameof(path));
+        if (path == null) throw new ArgumentNullException(nameof(path));
+
+        Path = System.IO.Path.GetFullPath(path);
     }
 
     public string Checksum { get; protected set; } = string.Empty;
@@ -22,18 +24,22 @@ public abstract class FileSystemNode
     public ReadOnlyCollection<FileNode> Files =>
         new(Children.Where(n => n is FileNode).Cast<FileNode>().ToArray());
 
-    public ReadOnlyCollection<FileSystemNode> GetChildren()
-    {
-        return new ReadOnlyCollection<FileSystemNode>(Children);
-    }
-
     public abstract string Name { get; }
 
     protected abstract void WriteCsvEntry(TextWriter writer);
 
-    public void WriteCsvEntries(TextWriter writer)
+    public void WriteCsvEntries(TextWriter writer, bool isScanRootLocation = false)
     {
-        WriteCsvEntry(writer);
+        if (isScanRootLocation)
+        {
+            StringWriter sw = new StringWriter();
+            WriteCsvEntry(sw);
+            writer.Write(sw.ToString().Replace("Folder", "ScanRootFolder"));
+        }
+        else
+        {
+            WriteCsvEntry(writer);
+        }
 
         foreach (var f in Files)
             f.WriteCsvEntries(writer);

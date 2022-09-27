@@ -4,6 +4,8 @@ public class RootNode : FolderNode
 {
     public RootNode() : base("ROOT")
     {
+        Path = "ROOT";
+        AggregateFolderCount = 0;
     }
 
     protected override void WriteCsvEntry(TextWriter writer)

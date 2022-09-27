@@ -25,7 +25,7 @@ public partial class ProgressDialog : Window
 
         var progressIndicator = new Progress<DuplicateFileFinderProgressReport>(UpdateProgress);
 
-        Task.Run(() => longRunningTask(progressIndicator, _cancellationTokenSource.Token));
+        Task.Run(() => longRunningTask(progressIndicator, _cancellationTokenSource.Token)).ConfigureAwait(false);
 
     }
 
