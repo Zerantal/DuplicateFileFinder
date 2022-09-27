@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
@@ -184,7 +185,7 @@ public class DuplicateFileFinder
         var fileCount = Root.SubFolders.Sum(l => l.AggregateFileCount);
         foreach (var location in Root.SubFolders)
         {
-            await location.TraverseFolders(async folder =>
+            await location.TraverseFolders(async folder  =>
             {
                 if (cancelToken.IsCancellationRequested) return;
                 foreach (var f in folder.Files)
