@@ -1,12 +1,12 @@
 ﻿using System;
 using System.IO;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace DuplicateFileFinderLibTests;
 
-internal class TestData
+internal class TestUtil
 {
-    public static string Path = "TestData\\";
-
+    
     private static bool CsvTextReaderCompare(TextReader expected, TextReader actual)
     {
         // Open the two files.
@@ -17,7 +17,9 @@ internal class TestData
             l1 = expected.ReadLine();
             l2 = actual.ReadLine();
 
-            if (l1 == null || l2 == null) continue;
+            if (l1 == null && l2 == null) continue;
+            if (l1 == null || l2 == null) return false;
+
             var va1 = l1.Split(',');
             var va2 = l2.Split(',');
             if (va1.Length != va2.Length)
@@ -25,16 +27,14 @@ internal class TestData
 
             for (int i = 0; i < va1.Length; i++)
             {
-                if (i == 1)
-                {
-                    // convert path to relative path
-                    int idx = va1[1].LastIndexOf(Path, StringComparison.Ordinal);
-                    if (idx != -1)
-                        va1[1] = va1[1][idx..];
-                    idx = va2[1].LastIndexOf(Path, StringComparison.Ordinal);
-                    if (idx != -1)
-                        va2[1] = va2[1][idx..];
-                }
+                //if (i == 1 && va1[0] != "File/Folder")
+                //{
+                //    // Try to normalise path string
+                //    va1[1] = Path.GetFullPath(va1[1].Trim('\"'));
+                //    va2[1] = va2[1].Trim('\\', '\"');
+
+                //}
+                
                 if (va1[i] != va2[i])
                     return false;
             }
@@ -63,5 +63,7 @@ internal class TestData
         return CsvTextReaderCompare(expected, actual);
             
     }
+
+
 
 }

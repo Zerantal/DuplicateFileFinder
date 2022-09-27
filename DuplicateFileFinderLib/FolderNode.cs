@@ -11,7 +11,7 @@ public class FolderNode : FileSystemNode
 
     public int AggregateFileCount { get; private set; }
 
-    public int AggregateFolderCount { get; private set; }
+    public int AggregateFolderCount { get; protected set; }
 
     public ReadOnlyCollection<FolderNode> SubFoldersContainingDuplicates => new(SubFolders.Where(f => f.ContainsDuplicates).ToList());
 

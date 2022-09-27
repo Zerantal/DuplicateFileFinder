@@ -41,24 +41,21 @@
             </StackPanel>
         </StatusBar>
 
-        <TabControl>
-            <TabItem Header="TestUI1">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="2*"/>
-                    </Grid.ColumnDefinitions>
-                    <views:FolderView x:Name="FolderTreeView"/>
-                    <GridSplitter ShowsPreview="True"
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+            <views:FolderView x:Name="FolderTreeView"/>
+            <GridSplitter ShowsPreview="True"
                                   VerticalAlignment="Stretch"
                                   HorizontalAlignment="Center"
                                   Grid.Column="1"
                                   Width="4"/>
-                    <views:FilesView x:Name="FileListView" DockPanel.Dock="Right" Grid.Column="2"></views:FilesView>
-                </Grid>
-            </TabItem>
-        </TabControl>
+            <views:FilesView x:Name="FileListView" DockPanel.Dock="Right" Grid.Column="2"></views:FilesView>
+        </Grid>
 
     </DockPanel>
 </Window>
