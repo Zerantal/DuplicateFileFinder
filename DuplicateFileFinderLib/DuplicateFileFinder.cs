@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
