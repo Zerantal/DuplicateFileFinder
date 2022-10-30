@@ -1,5 +1,8 @@
-﻿namespace DuplicateFileFinderLib;
+﻿using System.Diagnostics.CodeAnalysis;
 
+namespace DuplicateFileFinderLib;
+
+[ExcludeFromCodeCoverage]
 internal class FolderGroup : GroupBase
 {
     // ReSharper disable once CollectionNeverQueried.Local

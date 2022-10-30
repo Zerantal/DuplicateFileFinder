@@ -1,6 +1,10 @@
 ﻿// ReSharper disable UnusedMember.Global
+
+using System.Diagnostics.CodeAnalysis;
+
 namespace DuplicateFileFinderLib;
 
+[ExcludeFromCodeCoverage]
 public class InvalidFormatException : Exception
 {
     public string File { get; } = string.Empty;

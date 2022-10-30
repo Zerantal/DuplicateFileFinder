@@ -1,5 +1,4 @@
-﻿using System.Data;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
@@ -329,7 +328,7 @@ public class DuplicateFileFinder
 
 
         EntryType type;
-        if (!Enum.TryParse<EntryType>(fields[0], out type))
+        if (!Enum.TryParse(fields[0], out type))
             return false;
 
         if (!long.TryParse(fields[2], out var size)) return false;

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -29,6 +30,7 @@ public class FolderNodeTests
     [TestMethod]
     public void FolderNodeTest_null()
     {
+        [ExcludeFromCodeCoverage]
         void Actual()
         {
             // ReSharper disable once ObjectCreationAsStatement
@@ -47,6 +49,7 @@ public class FolderNodeTests
         Assert.AreEqual(1, actual.AggregateFolderCount);
         Assert.AreEqual(0, actual.Files.Count);
         Assert.AreEqual(0, actual.SubFolders.Count);
+        Assert.AreEqual(TestContext.FullyQualifiedTestClassName, actual.Name);
     }
 
     [TestMethod]
