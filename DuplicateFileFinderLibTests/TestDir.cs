@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata.Ecma335;
@@ -9,6 +10,7 @@ using NLog.Targets;
 
 namespace DuplicateFileFinderLibTests
 {
+    [ExcludeFromCodeCoverage]
     internal class TestDir
     {
         public string DirName { get; }
