@@ -2,8 +2,11 @@
 using System.Data.SqlTypes;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Util;
+
 // ReSharper disable StringLiteralTypo
 
 namespace DuplicateFileFinderLibTests;
@@ -15,9 +18,9 @@ public class DuplicateFileFinderTests
 
     private readonly TestDir _testScanRoot = new TestDir("scanTestRoot");
 
-    private TestDir CreateScanLocationTestDir()
+    private TestDir CreateScanLocationTestDir(string rootDir = "scanTestDir")
     {
-        var testDir = _testScanRoot.CreateTestDir("scanTestDir");
+        var testDir = _testScanRoot.CreateTestDir(rootDir);
         testDir.CreateTestFile("f1.txt", 80, "qwerty")
             .CreateTestFile("f2.txt", 128, "uiop[]")
             .CreateTestDir("d1")
@@ -43,14 +46,15 @@ public class DuplicateFileFinderTests
         return testDir;
     }
 
+
     [TestMethod]
-    public void ScanLocationTest_EmptyDir()
+    public async Task ScanLocationTest_EmptyDir()
     {
         TestDir emptyDir = new TestDir("empty_dir");
 
         DuplicateFileFinder dupFileFinder = new();
 
-        dupFileFinder.ScanLocation(emptyDir.DirName).Wait();
+        await dupFileFinder.ScanLocation(emptyDir.DirName);
 
         Assert.AreEqual(0, dupFileFinder.DuplicateFileCount);
         Assert.AreEqual(1, dupFileFinder.LocationCount);
@@ -58,31 +62,60 @@ public class DuplicateFileFinderTests
     }
 
     [TestMethod]
-    public void ScanLocationTest()
+    public async Task ScanLocationTest()
     {
         var testDir = CreateScanLocationTestDir();
         DuplicateFileFinder dupFileFinder = new()
         {
             ChecksumTestSize = 40
         };
-        dupFileFinder.ScanLocation(testDir.DirName).Wait();
+        await dupFileFinder.ScanLocation(testDir.DirName);
 
         Assert.AreEqual(1, dupFileFinder.DuplicateFileCount);
         Assert.AreEqual(1, dupFileFinder.LocationCount);
         Assert.AreEqual(80, dupFileFinder.SpaceTakenByDuplicates);
 
         var testDir2 = CreateScanLocationTestDir2();
-        dupFileFinder.ScanLocation(testDir2.DirName).Wait();
+        await dupFileFinder.ScanLocation(testDir2.DirName);
 
         Assert.AreEqual(6, dupFileFinder.DuplicateFileCount);
         Assert.AreEqual(2, dupFileFinder.LocationCount);
         Assert.AreEqual(505, dupFileFinder.SpaceTakenByDuplicates);
 
         // scan testDir2 again. Should be no change
-        dupFileFinder.ScanLocation(testDir2.DirName).Wait();
+        await dupFileFinder.ScanLocation(testDir2.DirName);
         Assert.AreEqual(6, dupFileFinder.DuplicateFileCount);
         Assert.AreEqual(2, dupFileFinder.LocationCount);
         Assert.AreEqual(505, dupFileFinder.SpaceTakenByDuplicates);
+
+        TestDir testDir3 = _testScanRoot.CreateTestDir("e_dir").CreateTestFile("d3f1", 134, "poawsfgasdklg");
+        await dupFileFinder.ScanLocation(testDir3.DirName);
+        FolderNode tmpNode = dupFileFinder.Root;
+        while (tmpNode.Name != "scanTestRoot")
+        {
+            Assert.AreEqual(1, tmpNode.SubFoldersContainingDuplicates.Count);
+            tmpNode = tmpNode.SubFoldersContainingDuplicates[0];
+        }
+        Assert.AreEqual(2, tmpNode.SubFoldersContainingDuplicates.Count);
+
+    }
+
+    [TestMethod]
+    public void ScanLocationDuplicateFolderTest()
+    {
+        string dupFolderRoot = "dupFolderTest";
+        var testDir = _testScanRoot.CreateTestDir(dupFolderRoot);
+        CreateScanLocationTestDir(dupFolderRoot + "/dir1");
+        CreateScanLocationTestDir(dupFolderRoot + "/dir2");
+        DuplicateFileFinder dupFileFinder = new()
+        {
+            ChecksumTestSize = 40
+        };
+        dupFileFinder.ScanLocation(testDir.DirName).Wait();
+
+        Assert.AreEqual(6, dupFileFinder.DuplicateFileCount);
+        Assert.AreEqual(1, dupFileFinder.LocationCount);
+        Assert.AreEqual(523, dupFileFinder.SpaceTakenByDuplicates);
     }
 
     [TestMethod]
