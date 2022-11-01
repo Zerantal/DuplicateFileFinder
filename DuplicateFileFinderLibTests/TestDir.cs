@@ -2,11 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Linq;
-using System.Reflection.Metadata.Ecma335;
 using System.Text;
-using System.Threading.Tasks;
-using NLog.Targets;
 
 namespace DuplicateFileFinderLibTests
 {
@@ -15,9 +11,10 @@ namespace DuplicateFileFinderLibTests
     {
         public string DirName { get; }
 
-        private Dictionary<string, string> _testFilePaths;
+        private readonly Dictionary<string, string> _testFilePaths;
 
-        private List<TestDir> _subDirs;
+        // ReSharper disable once CollectionNeverQueried.Local
+        private readonly List<TestDir> _subDirs;
 
         public TestDir(string dirName)
         {
