@@ -15,7 +15,7 @@ public class ProgressDialogViewModel : BindableBase
         {
             if (Math.Abs(value - _progress) < 0.01) return;
             _progress = value;
-            RaisePropertyChanged(nameof(Progress));
+            RaisePropertyChanged();
         }
     }
 
@@ -26,7 +26,7 @@ public class ProgressDialogViewModel : BindableBase
         {
             if (value == _currentTask) return;
             _currentTask = value;
-            RaisePropertyChanged(nameof(CurrentTask));
+            RaisePropertyChanged();
         }
     }
 

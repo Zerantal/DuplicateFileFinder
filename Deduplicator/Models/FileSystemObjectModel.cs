@@ -49,7 +49,7 @@ public class FileSystemObjectModel : BaseObjectModel
         {
             if (value == _isSelected) return;
             _isSelected = value;
-            OnPropertyChanged(nameof(IsSelected));
+            OnPropertyChanged();
         }
     }
 
@@ -86,7 +86,7 @@ public class FileSystemObjectModel : BaseObjectModel
             }
 
             _isExpanded = value;
-            OnPropertyChanged(nameof(IsExpanded));
+            OnPropertyChanged();
         }
     }
 
@@ -152,7 +152,7 @@ public class FileSystemObjectModel : BaseObjectModel
         {
             if (value == _fileSystemInfo) return;
             _fileSystemInfo = value;
-            OnPropertyChanged(nameof(FileSystemInfo));
+            OnPropertyChanged();
         }
     }
 

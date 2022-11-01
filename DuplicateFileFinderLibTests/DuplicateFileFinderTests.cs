@@ -1,11 +1,8 @@
-﻿using System;
-using System.Data.SqlTypes;
-using System.Drawing;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Util;
 
 // ReSharper disable StringLiteralTypo
 
@@ -16,7 +13,7 @@ public class DuplicateFileFinderTests
 {
     public TestContext TestContext { get; set; } = null!;
 
-    private readonly TestDir _testScanRoot = new TestDir("scanTestRoot");
+    private readonly TestDir _testScanRoot = new("scanTestRoot");
 
     private TestDir CreateScanLocationTestDir(string rootDir = "scanTestDir")
     {
@@ -90,7 +87,7 @@ public class DuplicateFileFinderTests
 
         TestDir testDir3 = _testScanRoot.CreateTestDir("e_dir").CreateTestFile("d3f1", 134, "poawsfgasdklg");
         await dupFileFinder.ScanLocation(testDir3.DirName);
-        FolderNode tmpNode = dupFileFinder.Root;
+        FolderNode tmpNode = dupFileFinder.root;
         while (tmpNode.Name != "scanTestRoot")
         {
             Assert.AreEqual(1, tmpNode.SubFoldersContainingDuplicates.Count);
@@ -161,6 +158,7 @@ public class DuplicateFileFinderTests
     }
 
     [TestMethod]
+    [SuppressMessage("ReSharper", "AccessToModifiedClosure")]
     public void ImportFromCsvErrorTest()
     {
         DuplicateFileFinder dupFileFinder = new();
@@ -180,33 +178,33 @@ public class DuplicateFileFinderTests
 
         // Successful import
         var correctData = "File/Folder,Path,Size,File Count,Extension,MD5\r\n" +
-                             $"File,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
+                             "File,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
         sr = new StringReader(correctData);
 
         // Incorrect number of fields on data row
         badData = "File/Folder,Path,Size,File Count,Extension,MD5\r\n" +
-                          $"\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
+                          "\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
         sr = new StringReader(badData);
         ex = Assert.ThrowsException<InvalidFormatException>(() => dupFileFinder.ImportFromCsv(sr));
         Assert.AreEqual("Error parsing data on row 2", ex.Message);
 
         // Invalid item in col 1
         badData = "File/Folder,Path,Size,File Count,Extension,MD5\r\n" +
-                  $"Gile,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
+                  "Gile,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
         sr = new StringReader(badData);
         ex = Assert.ThrowsException<InvalidFormatException>(() => dupFileFinder.ImportFromCsv(sr));
         Assert.AreEqual("Error parsing data on row 2", ex.Message);
 
         // Invalid item in col 3
         badData = "File/Folder,Path,Size,File Count,Extension,MD5\r\n" +
-                  $"File,\"\\scanTestDir\\f1.txt\",8f,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
+                  "File,\"\\scanTestDir\\f1.txt\",8f,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
         sr = new StringReader(badData);
         ex = Assert.ThrowsException<InvalidFormatException>(() => dupFileFinder.ImportFromCsv(sr));
         Assert.AreEqual("Error parsing data on row 2", ex.Message);
 
         // Test that Folder entry must contain a File Count value
         badData = "File/Folder,Path,Size,File Count,Extension,MD5\r\n" +
-                  $"Folder,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
+                  "Folder,\"\\scanTestDir\\f1.txt\",80,,\".txt\",5CCCA7B91B533378DC0B13236F539A7D\n";
         sr = new StringReader(badData);
         ex = Assert.ThrowsException<InvalidFormatException>(() => dupFileFinder.ImportFromCsv(sr));
         Assert.AreEqual("Error parsing data on row 2", ex.Message);

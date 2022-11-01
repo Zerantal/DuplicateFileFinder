@@ -4,7 +4,7 @@ namespace DuplicateFileFinderLib;
 
 public abstract class FileSystemNode
 {
-    protected readonly List<FileSystemNode> Children = new();
+    protected readonly List<FileSystemNode> children = new();
 
     protected FileSystemNode(string path)
     {
@@ -19,10 +19,10 @@ public abstract class FileSystemNode
     public long Size { get; protected set; } // in bytes
 
     public ReadOnlyCollection<FolderNode> SubFolders =>
-        new(Children.Where(n => n is FolderNode).Cast<FolderNode>().ToArray());
+        new(children.Where(n => n is FolderNode).Cast<FolderNode>().ToArray());
 
     public ReadOnlyCollection<FileNode> Files =>
-        new(Children.Where(n => n is FileNode).Cast<FileNode>().ToArray());
+        new(children.Where(n => n is FileNode).Cast<FileNode>().ToArray());
 
     public abstract string Name { get; }
 
@@ -50,6 +50,6 @@ public abstract class FileSystemNode
 
     public virtual void AddFileSystemNode(FileSystemNode node)
     {
-        Children.Add(node);
+        children.Add(node);
     }
 }

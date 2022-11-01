@@ -12,13 +12,13 @@ public class DuplicateFileFinder
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
     //TODO: Can this be made private?
-    public readonly RootNode Root = new();
+    public readonly RootNode root = new();
 
     private readonly FileSystemGroups _groups = new();
 
     private readonly Dictionary<long, int> _fileSizes = new();   // file size => count
 
-    private IList<FolderNode> _scanLocations = new List<FolderNode>();
+    private readonly IList<FolderNode> _scanLocations = new List<FolderNode>();
 
     public int ChecksumTestSize { get; set; } = 1000000;
 
@@ -59,7 +59,7 @@ public class DuplicateFileFinder
 
     private void CompileDuplicateFileStats()
     {
-        Root.TraverseFolders(null,  f => f.UpdateDuplicateFileStats()).Wait();
+        root.TraverseFolders(null,  f => f.UpdateDuplicateFileStats()).Wait();
     }
 
     private static async Task BuildDirTrees(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
@@ -85,7 +85,7 @@ public class DuplicateFileFinder
         (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
             new DuplicateFileFinderProgressReport("Scanning directory structure..."));
         await BuildDirTrees(folder, progressIndicator, cancelToken);
-        await Root.TraverseFolders(up: f =>
+        await root.TraverseFolders(up: f =>
         {
             if (cancelToken.IsCancellationRequested) return Task.CompletedTask;
             f.UpdateFolderStats();
@@ -98,14 +98,14 @@ public class DuplicateFileFinder
             new DuplicateFileFinderProgressReport("Computing test checksums of files/folders..."));
         // compute test hashes and group files
         await ComputeChecksums(progressIndicator, cancelToken, ChecksumTestSize);
-        await _groups.AssignGroups(Root);
+        await _groups.AssignGroups(root);
         CompileDuplicateFileStats();
 
         // compute full hashes of all files whose test hashes are equal, and re-group files
         (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
             new DuplicateFileFinderProgressReport("Computing full checksums of files/folders..."));
         await ComputeChecksums(progressIndicator, cancelToken);
-        await _groups.AssignGroups(Root);
+        await _groups.AssignGroups(root);
         CompileDuplicateFileStats();
 
 
@@ -118,7 +118,7 @@ public class DuplicateFileFinder
         var pathElements = path.Split(new[] {Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar},
             StringSplitOptions.RemoveEmptyEntries);
 
-        FolderNode folder = Root;
+        FolderNode folder = root;
         string tmpPath = "";
         foreach (string p in pathElements)
         {
@@ -181,8 +181,8 @@ public class DuplicateFileFinder
 
         // producer task
         int fileProcessedCounter = 0;
-        var fileCount = Root.SubFolders.Sum(l => l.AggregateFileCount);
-        foreach (var location in Root.SubFolders)
+        var fileCount = root.SubFolders.Sum(l => l.AggregateFileCount);
+        foreach (var location in root.SubFolders)
         {
             await location.TraverseFolders(async folder  =>
             {
@@ -213,7 +213,7 @@ public class DuplicateFileFinder
         await Task.WhenAll(md5ComputeTasks);
 
         // computer folder hashes (only folders where all sub objects have been hashed)
-        foreach (var location in Root.SubFolders)
+        foreach (var location in root.SubFolders)
             await location.TraverseFolders(up: folder =>
             {
                 if (folder.Checksum == "")
@@ -268,7 +268,7 @@ public class DuplicateFileFinder
 
         ConstructFolderTree(folderDictionary, fileDictionary);
 
-        _groups.AssignGroups(Root).Wait();
+        _groups.AssignGroups(root).Wait();
         CompileDuplicateFileStats();
     }
 
@@ -281,7 +281,7 @@ public class DuplicateFileFinder
             string parentFolderPath = Path.GetFullPath(path + @"\..");
             if (parentFolderPath == path)
             {
-                Root.AddFileSystemNode(node);
+                root.AddFileSystemNode(node);
                 return;
             }
 
@@ -309,7 +309,7 @@ public class DuplicateFileFinder
             AddChildOfParentFolder(filePath, fileNode);
         }
 
-        Root.TraverseFolders(null, f =>
+        root.TraverseFolders(null, f =>
         {
             f.UpdateFolderStats();
             return Task.CompletedTask;
@@ -327,8 +327,7 @@ public class DuplicateFileFinder
             return false;
 
 
-        EntryType type;
-        if (!Enum.TryParse(fields[0], out type))
+        if (!Enum.TryParse(fields[0], out EntryType type))
             return false;
 
         if (!long.TryParse(fields[2], out var size)) return false;
