@@ -1,298 +1,362 @@
-﻿
-
-// TODO:
-// decouple dir traversal from MD5 computation and multi-thread MD5 computation using channels?
-
-using System.Diagnostics;
-using System.Reflection.Metadata;
-using System.Runtime.InteropServices.ComTypes;
+﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
+using Util;
 
 // ReSharper disable UnusedMember.Global
 
-namespace DuplicateFileFinderLib
+namespace DuplicateFileFinderLib;
+
+public class DuplicateFileFinder
 {
-    public class DuplicateFileFinder
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
+    //TODO: Can this be made private?
+    public readonly RootNode root = new();
+
+    private readonly FileSystemGroups _groups = new();
+
+    private readonly Dictionary<long, int> _fileSizes = new();   // file size => count
+
+    private readonly IList<FolderNode> _scanLocations = new List<FolderNode>();
+
+    public int ChecksumTestSize { get; set; } = 1000000;   
+
+    private static async Task BuildFolderStructure(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        double progress = 0.0;
+        Stack<double> progressSlices = new();
+        progressSlices.Push(1.0);
 
-        private readonly RootNode _root = new RootNode();
-
-        private readonly FileSystemGroups _groups = new();
-
-        private readonly Dictionary<long, int> _fileSizes = new();   // filesize => count
-
-        public DuplicateFileFinder()
+        async Task ScanFolderStructure(FolderNode f)
         {
+            if (cancelToken.IsCancellationRequested) return;
+            f.PopulateFolderInfo();
+            if (f.SubFolders.Count != 0)
+                progressSlices.Push(progressSlices.Peek() / f.SubFolders.Count);
+
+            await Task.CompletedTask;
         }
 
-        private async Task BuildFolderStructure(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator)
+        async Task BuildFileStats(FolderNode f)
         {
-            double progress = 0.0;
-            Stack<double> progressSlices = new();
-            progressSlices.Push(1.0);
+            if (cancelToken.IsCancellationRequested) return;
 
-#pragma warning disable CS1998
-            async Task ScanFolderStructure(FolderNode f)
-#pragma warning restore CS1998
+            if (f.SubFolders.Count != 0)
+                progressSlices.Pop();
+            else
             {
-                f.PopulateFolderInfo();
-                if (f.SubFolders.Count != 0)
-                    progressSlices.Push(progressSlices.Peek() / f.SubFolders.Count);
+                var slice = progressSlices.Peek();
+
+                progress += slice;
+                progressIndicator?.Report(new DuplicateFileFinderProgressReport(progress));
             }
+            await Task.CompletedTask;
+        }
+            
+        await folder.TraverseFolders(ScanFolderStructure, BuildFileStats);
+    }
 
-            async Task BuildFileStats(FolderNode f)
+    private void CompileDuplicateFileStats()
+    {
+        root.TraverseFolders(null,  f => f.UpdateDuplicateFileStats()).Wait();
+    }
+
+    private static async Task BuildDirTrees(FolderNode folder, IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken)
+    {
+        Stopwatch watch = new Stopwatch();
+        watch.Start();
+
+        await BuildFolderStructure(folder, progressIndicator, cancelToken);
+
+        watch.Stop();
+            
+        Logger.Info($"Scanned location '{folder.Name} in {0} ms", watch.ElapsedMilliseconds);
+    }
+
+    public async Task ScanLocation(string location, Progress<DuplicateFileFinderProgressReport>? progressIndicator = null, bool recomputeHashes = false, CancellationToken cancelToken = default)
+    {
+        var folder = GetFolder(Path.GetFullPath(location));
+        if (_scanLocations.Contains(folder))
+            return;
+        _scanLocations.Add(folder);
+
+        // build directory tree
+        (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
+            new DuplicateFileFinderProgressReport("Scanning directory structure..."));
+        await BuildDirTrees(folder, progressIndicator, cancelToken);
+        await root.TraverseFolders(up: f =>
+        {
+            if (cancelToken.IsCancellationRequested) return Task.CompletedTask;
+            f.UpdateFolderStats();
+            return Task.CompletedTask;
+        }).WaitAsync(cancelToken);
+
+        AddToFileSizesDictionary(folder);
+
+        (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
+            new DuplicateFileFinderProgressReport("Computing test checksums of files/folders..."));
+        // compute test hashes and group files
+        await ComputeChecksums(progressIndicator, cancelToken, ChecksumTestSize);
+        await _groups.AssignGroups(root);
+        CompileDuplicateFileStats();
+
+        // compute full hashes of all files whose test hashes are equal, and re-group files
+        (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(
+            new DuplicateFileFinderProgressReport("Computing full checksums of files/folders..."));
+        await ComputeChecksums(progressIndicator, cancelToken);
+        await _groups.AssignGroups(root);
+        CompileDuplicateFileStats();
+
+
+        (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport());
+    }
+
+    // get folder by path (creating the path if needed)
+    private FolderNode GetFolder(string path)
+    {
+        var pathElements = path.Split(new[] {Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar},
+            StringSplitOptions.RemoveEmptyEntries);
+
+        FolderNode folder = root;
+        string tmpPath = "";
+        foreach (string p in pathElements)
+        {
+            tmpPath = tmpPath + p + Path.DirectorySeparatorChar;
+            if (folder.SubFolders.Any(f => f.Path == tmpPath))
             {
-                f.UpdateFolderStats();
+                folder = folder.SubFolders.Single(f => f.Path == tmpPath);
+            }
+            else
+            {
+                var newFolder = new FolderNode(tmpPath);
+                folder.AddFileSystemNode(newFolder);
+                folder = newFolder;
+            }
+        }
 
-                if (f.SubFolders.Count != 0)
-                    progressSlices.Pop();
+        return folder;
+    }
+
+    // compile dictionary of file size counts
+    private void AddToFileSizesDictionary(FolderNode folder)
+    {
+        folder.TraverseFolders(f =>
+        {
+            foreach (var file in f.Files)
+            {
+                if (_fileSizes.ContainsKey(file.Size))
+                    _fileSizes[file.Size]++;
                 else
-                {
-                    var slice = progressSlices.Peek();
-
-                    progress += slice;
-                    progressIndicator?.Report(new DuplicateFileFinderProgressReport(progress));
-                }
-
-                await Task.Yield(); // This may not actually keep UI responsive in GUI context due to how their synchronization context prioritizes work
-            }
-            
-            await folder.TraverseFolders(ScanFolderStructure, BuildFileStats);
-        }
-
-        private async Task BuildDirTrees(FolderNode folder, Progress<DuplicateFileFinderProgressReport>? progressIndicator)
-        {
-            Stopwatch watch = new Stopwatch();
-            watch.Start();
-
-            await BuildFolderStructure(folder, progressIndicator);
-
-            watch.Stop();
-            
-            Logger.Info("Scanned directory tree(s) in {0} ms", watch.ElapsedMilliseconds);
-        }
-
-        public async Task ScanLocation(string location, Progress<DuplicateFileFinderProgressReport>? progressIndicator = null, bool recomputeHashes = false)
-        {
-            var folder = new FolderNode(location);
-            if (LocationAlreadyAdded(folder))
-                return;
-            _root.AddFileSystemNode(folder);
-
-            // build directory tree
-            (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport("Scanning directory structure..."));
-            await BuildDirTrees(folder, progressIndicator);
-
-            AddToFileSizesDictionary(folder);
-
-            // compute hashes
-            (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport("Computing MD5 hashes of files/folders..."));
-            await ComputeChecksums(progressIndicator);
-
-            // build duplicate file/folder groups
-            (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport("Grouping duplicate files/folders..."));
-            await _groups.AssignGroups(_root);
-
-            (progressIndicator as IProgress<DuplicateFileFinderProgressReport>)?.Report(new DuplicateFileFinderProgressReport());
-        }
-
-        private bool LocationAlreadyAdded(FolderNode folder)
-        {
-            bool result = false;
-
-            foreach (var location in _root.SubFolders)
-            {
-                if (!result)
-                {
-                    location.TraverseFolders((f) =>
-                    {
-                        if (result) return Task.CompletedTask;
-                        if (f.Path == folder.Path)
-                            result = true;
-
-                        return Task.CompletedTask;
-                    }).Wait();
-                }
+                    _fileSizes[file.Size] = 1;
             }
 
-            return result;
-        }
+            return Task.CompletedTask;
+        }).Wait();
+    }
 
-        // compile dictionary of file size counts
-        private void AddToFileSizesDictionary(FolderNode folder)
+    // if file/folder already has a checksum, it doesn't re-calculate
+    private async Task ComputeChecksums(IProgress<DuplicateFileFinderProgressReport>? progressIndicator, CancellationToken cancelToken, int testSize = -1)
+    {
+        Stopwatch timer = new();
+        timer.Start();
+
+        bool calculatingFullChecksum = testSize == -1;
+
+        if (calculatingFullChecksum)
+            Logger.Info("Computing full hashes...");
+        else 
+            Logger.Info($"Computing test hashes (size: {StringUtil.FileSizeToString(testSize)} ");
+
+        var ch = Channel.CreateBounded<FileNode>(1000);
+
+        // consumer tasks
+        Task[] md5ComputeTasks = new Task[Environment.ProcessorCount];
+        for (int i = 0; i < md5ComputeTasks.Length; i++)
         {
-            folder.TraverseFolders((f) =>
+            md5ComputeTasks[i] = Task.Run(async () =>
             {
-                foreach (var file in f.Files)
+                while (await ch.Reader.WaitToReadAsync(cancelToken))
                 {
-                    if (_fileSizes.ContainsKey(file.Size))
-                            _fileSizes[file.Size]++;
-                    else
-                        _fileSizes[file.Size] = 1;
+                    while(ch.Reader.TryRead(out var file))
+                        await file.ComputeChecksum(cancelToken, testSize);
                 }
-
-                return Task.CompletedTask;
-            }).Wait();
+            }, cancelToken);
         }
 
-        // if file/folder already has a checksum, it doesn't re-calculate
-        private async Task ComputeChecksums(IProgress<DuplicateFileFinderProgressReport>? progressIndicator)
+        // producer task
+        int fileProcessedCounter = 0;
+        var fileCount = root.SubFolders.Sum(l => l.AggregateFileCount);
+        foreach (var location in root.SubFolders)
         {
-            Stopwatch timer = new();
-            timer.Start();
-
-            var ch = Channel.CreateBounded<FileNode>(4000);
-
-            // consumer tasks
-            Task[] md5ComputeTasks = new Task[Environment.ProcessorCount];
-            for (int i = 0; i < md5ComputeTasks.Length; i++)
+            await location.TraverseFolders(async folder  =>
             {
-                md5ComputeTasks[i] = Task.Run(async () =>
+                if (cancelToken.IsCancellationRequested) return;
+                foreach (var f in folder.Files)
                 {
-                    while (await ch.Reader.WaitToReadAsync())
+                    if (_fileSizes[f.Size] != 1)
                     {
-                        while(ch.Reader.TryRead(out var file))
-                            await file.ComputeChecksum();
-                    }
-                });
-            }
-
-            // producer task
-            int fileProcessedCounter = 0;
-            var fileCount = _root.SubFolders.Sum((l) => l.AggregateFileCount);
-            foreach (var location in _root.SubFolders)
-            {
-                await location.TraverseFolders(async (folder) =>
-                {
-                    foreach (var f in folder.Files)
-                    {
-                        if (_fileSizes[f.Size] != 1)
+                        if (calculatingFullChecksum && !f.FullHashCalculated && f.Size > ChecksumTestSize)
+                        {
+                            await ch.Writer.WriteAsync(f, cancelToken);
+                        }
+                        else
                         {
                             if (f.Checksum == "")
-                                await ch.Writer.WriteAsync(f);
+                                await ch.Writer.WriteAsync(f, cancelToken);
                         }
-
-                        fileProcessedCounter++;
-                        progressIndicator?.Report(new DuplicateFileFinderProgressReport((double)fileProcessedCounter / fileCount));
                     }
-                });
-            }
 
-            ch.Writer.Complete();
-
-            await Task.WhenAll(md5ComputeTasks);
-
-            // computer folder hashes (only folders where all sub objects have been hashed)
-            foreach (var location in _root.SubFolders)
-                location.TraverseFolders(up: (folder) =>
-                {
-                    if (folder.Checksum == "")
-                        folder.ComputeChecksum();
-                    return Task.CompletedTask;
-                }).Wait();
-
-            timer.Stop();
-            Logger.Info("Hash computation completed in {0} ms", timer.ElapsedMilliseconds);
-        }
-
-        public void ExportToCsv(TextWriter writer)
-        {
-            writer.WriteLine("File/Folder,Path,Size,File Count,Extension,MD5,Group");
-            _root.WriteCsvEntries(writer);
-        }
-
-
-
-        // will clear existing data.
-        // TODO: maybe add to existing data?
-        public void ImportFromCsv(TextReader reader)
-        {
-            const int numColumnsRequired = 7;
-
-            var line = reader.ReadLine();
-            if (line == null) throw new InvalidFormatException("Empty File");
-            var fields = line.Split(',');
-            if (fields.Length < numColumnsRequired)
-                throw new InvalidFormatException("Insufficient number of headings detected");
-
-            Dictionary<string, FileNode> fileDictionary = new();
-            Dictionary<string, FolderNode> folderDictionary = new();
-
-            int row = 1;
-            while ((line = reader.ReadLine()) != null)
-            {
-                if (tryParseCsvRow(line, out var rowInfo))
-                {
-                    Debug.Assert(rowInfo != null, nameof(rowInfo) + " != null");
-                    if (rowInfo.IsFile)
-                        fileDictionary[rowInfo.Path] = new FileNode(rowInfo);
-                    else
-                        folderDictionary[rowInfo.Path] = new FolderNode(rowInfo);
-
-                    row++;
-                    continue;
+                    fileProcessedCounter++;
+                    progressIndicator?.Report(new DuplicateFileFinderProgressReport((double)fileProcessedCounter / fileCount));
                 }
+            });
+        }
 
+        ch.Writer.Complete();
+
+        await Task.WhenAll(md5ComputeTasks);
+
+        // computer folder hashes (only folders where all sub objects have been hashed)
+        foreach (var location in root.SubFolders)
+            await location.TraverseFolders(up: folder =>
+            {
+                if (folder.Checksum == "")
+                    folder.ComputeChecksum();
+                return Task.CompletedTask;
+            }).WaitAsync(cancelToken);
+
+        timer.Stop();
+        Logger.Info("Hash computation completed in {0} ms", timer.ElapsedMilliseconds);
+    }
+
+    public void ExportToCsv(TextWriter writer)
+    {
+        writer.WriteLine("File/Folder,Path,Size,File Count,Extension,MD5");
+        foreach(var scanLocation in _scanLocations)
+            scanLocation.WriteCsvEntries(writer, true);
+    }
+
+    // will clear existing data.
+    // TODO: maybe add to existing data?
+    public void ImportFromCsv(TextReader reader)
+    {
+        const int numColumnsRequired = 6;
+
+        var line = reader.ReadLine();
+        if (line == null) throw new InvalidFormatException("Empty file");
+        var fields = line.Split(',');
+        if (fields.Length < numColumnsRequired)
+            throw new InvalidFormatException("Insufficient number of headings detected");
+
+        Dictionary<string, FileNode> fileDictionary = new();
+        Dictionary<string, FolderNode> folderDictionary = new();
+
+        int row = 2;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (!TryParseCsvRow(line, out var rowInfo))
                 throw new InvalidFormatException("Error parsing data on row " + row);
+            Debug.Assert(rowInfo != null, nameof(rowInfo) + " != null");
+            if (rowInfo.Type == EntryType.File)
+                fileDictionary[rowInfo.Path] = new FileNode(rowInfo);
+            else
+            {
+                var f = new FolderNode(rowInfo);
+                if (rowInfo.Type == EntryType.ScanRootFolder)
+                    _scanLocations.Add(f);
+                folderDictionary[rowInfo.Path] = f;
             }
 
-            ConstructFolderTree(folderDictionary, fileDictionary);
-
+            row++;
         }
 
-        private void ConstructFolderTree(Dictionary<string, FolderNode> folderDictionary, Dictionary<string, FileNode> fileDictionary)
+        ConstructFolderTree(folderDictionary, fileDictionary);
+
+        _groups.AssignGroups(root).Wait();
+        CompileDuplicateFileStats();
+    }
+
+    private void ConstructFolderTree(Dictionary<string, FolderNode> folderDictionary, Dictionary<string, FileNode> fileDictionary)
+    {
+        var dummyNodes = new Dictionary<string, FolderNode>(); // for path nodes preceding scan locations
+
+        void AddChildOfParentFolder(string path, FileSystemNode node)
         {
-            foreach (var (folderPath, folderNode) in folderDictionary)
+            string parentFolderPath = Path.GetFullPath(path + @"\..");
+            if (parentFolderPath == path)
             {
-                string parentPath = Path.GetFullPath(folderPath + @"\..");
-                if (folderDictionary.TryGetValue(parentPath, out var parentNode))
-                    parentNode.AddFileSystemNode(folderNode);
-                else
-                    _root.AddFileSystemNode(folderNode);
+                root.AddFileSystemNode(node);
+                return;
             }
 
-            foreach (var (filePath, fileNode) in fileDictionary)
+            if (folderDictionary.TryGetValue(parentFolderPath, out var parentNode) || 
+                dummyNodes.TryGetValue(parentFolderPath, out parentNode))
             {
-                string parentFolderPath = Path.GetFullPath(filePath + @"\..");
-                if (folderDictionary.TryGetValue(parentFolderPath, out var parentFolderNode))
-                    parentFolderNode.AddFileSystemNode(fileNode);
-                else
-                {
-                    Logger.Log(LogLevel.Warn, @"Can't find parent folder entry for file when importing csv: " + filePath);
-                }
+                parentNode.AddFileSystemNode(node);
             }
-
+            else 
+            {
+                var newParent = new FolderNode(parentFolderPath);
+                newParent.AddFileSystemNode(node);
+                dummyNodes.Add(parentFolderPath, newParent);
+                AddChildOfParentFolder(parentFolderPath, newParent);
+            }
         }
 
-        private bool tryParseCsvRow(string line, out CsvRowData? rowInfo)
+        foreach (var (folderPath, folderNode) in folderDictionary)
         {
-            var fields = line.Split(',');
-            rowInfo = null;
-
-            if (fields.Length != 7)
-                return false;
-
-            
-            if (!(fields[0] == "File" || fields[0] == "Folder")) return false;
-            bool isFile = fields[0] == "File";
-            
-            if (!long.TryParse(fields[2], out var size)) return false;
-
-            var fileCount = 0;
-            if (!isFile && !int.TryParse(fields[3], out fileCount)) return false;
-
-            if (!int.TryParse(fields[6], out var group)) return false;
-
-            rowInfo = new CsvRowData
-            {
-                IsFile = isFile, Path = fields[1].Replace("\"", ""), Size = size, FileCount = fileCount, Extension = fields[4].Replace("\"", ""),
-                Checksum = fields[5], Group = group
-            };
-
-            return true;
+            AddChildOfParentFolder(folderPath, folderNode);
         }
+
+        foreach (var (filePath, fileNode) in fileDictionary)
+        {
+            AddChildOfParentFolder(filePath, fileNode);
+        }
+
+        root.TraverseFolders(null, f =>
+        {
+            f.UpdateFolderStats();
+            return Task.CompletedTask;
+        }).Wait();
 
     }
+
+    private static bool TryParseCsvRow(string line, out CsvRowData? rowInfo)
+    {
+        var fields = new Regex("((?<=\")[^\"]*(?=\"(,|$)+)|(?<=,|^)[^,\"]*(?=,|$))").Matches(line).Select(m => m.Value).ToArray();
+
+        rowInfo = null;
+
+        if (fields.Length != 6)
+            return false;
+
+
+        if (!Enum.TryParse(fields[0], out EntryType type))
+            return false;
+
+        if (!long.TryParse(fields[2], out var size)) return false;
+
+        var fileCount = 0;
+        if (type != EntryType.File && !int.TryParse(fields[3], out fileCount)) return false;
+
+        rowInfo = new CsvRowData
+        {
+            Type = type,
+            Path = fields[1].Replace("\"", ""),
+            Size = size,
+            FileCount = fileCount,
+            Extension = fields[4].Replace("\"", ""),
+            Checksum = fields[5]
+        };
+
+        return true;
+    }
+
+    public int LocationCount => _scanLocations.Count;
+
+    public int DuplicateFileCount => _groups.DuplicateFiles;
+
+    public long SpaceTakenByDuplicates => _groups.AggregateDuplicateFilesSize;
 }

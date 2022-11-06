@@ -1,0 +1,38 @@
+﻿<UserControl x:Class="Deduplicator.Views.FolderView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:i="clr-namespace:Microsoft.Xaml.Behaviors;assembly=Microsoft.Xaml.Behaviors"
+             xmlns:converters="clr-namespace:Deduplicator.Converters"
+             xmlns:viewModels="clr-namespace:Deduplicator.ViewModels"
+             xmlns:models="clr-namespace:Deduplicator.Models"
+             d:DataContext="{d:DesignData }">
+    
+    <UserControl.Resources>
+        <converters:FsImageConverter x:Key="FsImageConverter"/>
+    </UserControl.Resources>
+    <UserControl.DataContext>
+        <viewModels:FolderViewModel/>
+    </UserControl.DataContext>
+    <Grid>
+    <TreeView ScrollViewer.VerticalScrollBarVisibility="Auto"
+              ItemsSource="{Binding RootFolders }"
+              Name="FolderTreeView">
+        <i:Interaction.Triggers>
+            <i:EventTrigger EventName="SelectedItemChanged">
+                <i:InvokeCommandAction Command="{Binding FolderSelectionChanged}" CommandParameter="{Binding ElementName=FolderTreeView, Path=SelectedValue}"></i:InvokeCommandAction>
+            </i:EventTrigger>
+        </i:Interaction.Triggers>
+        <TreeView.Resources>
+               <HierarchicalDataTemplate DataType="{x:Type models:FolderModel }" ItemsSource="{Binding SubFolders}">
+                   <StackPanel Orientation="Horizontal">
+                       
+                       <Image Source="{Binding Converter={StaticResource FsImageConverter}}" Margin="0,0,5,0"></Image>
+                       <TextBlock Text="{Binding Path=Name}"></TextBlock>
+                   </StackPanel>
+               </HierarchicalDataTemplate>
+           </TreeView.Resources>
+       </TreeView>
+    </Grid>
+</UserControl>

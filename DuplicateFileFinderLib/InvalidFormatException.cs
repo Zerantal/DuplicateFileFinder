@@ -1,30 +1,29 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿// ReSharper disable UnusedMember.Global
 
-namespace DuplicateFileFinderLib
+using System.Diagnostics.CodeAnalysis;
+
+namespace DuplicateFileFinderLib;
+
+[ExcludeFromCodeCoverage]
+public class InvalidFormatException : Exception
 {
-    public class InvalidFormatException : Exception
-    {
-        public string File { get; } = string.Empty;
+    public string File { get; } = string.Empty;
 
-        public InvalidFormatException() : base() { }
+    public InvalidFormatException()
+    { }
 
-        public InvalidFormatException(string errMsg) :base (errMsg) { }
+    public InvalidFormatException(string errMsg) :base (errMsg) { }
         
-        public InvalidFormatException(string errMsg, Exception e) : base(errMsg, e) { }
+    public InvalidFormatException(string errMsg, Exception e) : base(errMsg, e) { }
 
-        public InvalidFormatException(string file, string errMsg) : base(errMsg)
-        {
-            File = file;
-        }
-
-        public InvalidFormatException(string file, string errMsg, Exception e) : base(errMsg, e)
-        {
-            File = file;
-        }
-
+    public InvalidFormatException(string file, string errMsg) : base(errMsg)
+    {
+        File = file;
     }
+
+    public InvalidFormatException(string file, string errMsg, Exception e) : base(errMsg, e)
+    {
+        File = file;
+    }
+
 }

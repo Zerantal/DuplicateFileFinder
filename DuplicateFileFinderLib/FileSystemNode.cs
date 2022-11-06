@@ -1,48 +1,55 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using NLog.LayoutRenderers.Wrappers;
+﻿using System.Collections.ObjectModel;
 
-namespace DuplicateFileFinderLib
+namespace DuplicateFileFinderLib;
+
+public abstract class FileSystemNode
 {
-    public abstract class FileSystemNode
+    protected readonly List<FileSystemNode> children = new();
+
+    protected FileSystemNode(string path)
     {
-        public string Checksum { get; protected set; } = string.Empty;
-        public string Path { get; protected set; }
-        public int Group { get; internal set; } = -2;
-        public long Size { get; protected set; } // in bytes
+        if (path == null) throw new ArgumentNullException(nameof(path));
 
-        public ReadOnlyCollection<FolderNode> SubFolders => new(Children.Where(n => n is FolderNode).Cast<FolderNode>().ToArray());
+        Path = System.IO.Path.GetFullPath(path);
+    }
 
-        public ReadOnlyCollection<FileNode> Files =>
-            new(Children.Where(n => n is FileNode).Cast<FileNode>().ToArray());
+    public string Checksum { get; protected set; } = string.Empty;
+    public string Path { get; protected set; }
+    public GroupBase? Group { get; internal set; }
+    public long Size { get; protected set; } // in bytes
 
-        protected readonly List<FileSystemNode> Children = new();
+    public ReadOnlyCollection<FolderNode> SubFolders =>
+        new(children.Where(n => n is FolderNode).Cast<FolderNode>().ToArray());
 
-        protected FileSystemNode(string path)
+    public ReadOnlyCollection<FileNode> Files =>
+        new(children.Where(n => n is FileNode).Cast<FileNode>().ToArray());
+
+    public abstract string Name { get; }
+
+    protected abstract void WriteCsvEntry(TextWriter writer);
+
+    public void WriteCsvEntries(TextWriter writer, bool isScanRootLocation = false)
+    {
+        if (isScanRootLocation)
         {
-            Path = path ?? throw new ArgumentNullException(nameof(path));
+            StringWriter sw = new StringWriter();
+            WriteCsvEntry(sw);
+            writer.Write(sw.ToString().Replace("Folder", "ScanRootFolder"));
         }
-
-        protected abstract void WriteCsvEntry(TextWriter writer);
-
-        public void WriteCsvEntries(TextWriter writer)
+        else
         {
             WriteCsvEntry(writer);
-            
-            foreach (var f in Files)
-                f.WriteCsvEntries(writer);
-
-            foreach (var f in SubFolders)
-                f.WriteCsvEntries(writer);
         }
 
-        public virtual void AddFileSystemNode(FileSystemNode node)
-        {
-            Children.Add(node);
-        }
+        foreach (var f in Files)
+            f.WriteCsvEntries(writer);
+
+        foreach (var f in SubFolders)
+            f.WriteCsvEntries(writer);
+    }
+
+    public virtual void AddFileSystemNode(FileSystemNode node)
+    {
+        children.Add(node);
     }
 }
