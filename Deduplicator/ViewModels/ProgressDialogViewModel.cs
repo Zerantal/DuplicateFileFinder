@@ -1,7 +1,7 @@
 ﻿using System;
-using DuplicateFileFinder.Common;
+using Deduplicator.Common;
 
-namespace DuplicateFileFinder.ViewModels;
+namespace Deduplicator.ViewModels;
 
 public class ProgressDialogViewModel : BindableBase
 {

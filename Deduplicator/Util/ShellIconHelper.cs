@@ -2,12 +2,13 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Runtime.InteropServices;
+
 // ReSharper disable UnusedMember.Global
 // ReSharper disable IdentifierTypo
 // ReSharper disable InconsistentNaming
 // ReSharper disable CommentTypo
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 /// <summary>
 /// Provides static methods to read system icons for both folders and files.

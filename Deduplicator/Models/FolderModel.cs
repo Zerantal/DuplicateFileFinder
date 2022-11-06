@@ -3,11 +3,11 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
-using DuplicateFileFinder.Util;
+using Deduplicator.Util;
 using DuplicateFileFinder.Views;
 using DuplicateFileFinderLib;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class FolderModel
 {

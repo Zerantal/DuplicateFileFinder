@@ -7,7 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
-namespace DuplicateFileFinder.Common;
+namespace Deduplicator.Common;
 
 public class BindableBase : INotifyPropertyChanged, INotifyDataErrorInfo
 {

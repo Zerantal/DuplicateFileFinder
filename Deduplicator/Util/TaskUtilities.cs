@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 public static class TaskUtilities
 {

@@ -3,15 +3,18 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
-using DuplicateFileFinder.Command;
-using DuplicateFileFinder.Messages;
-using DuplicateFileFinder.Views;
+using Deduplicator.Command;
+using Deduplicator.Messages;
+using Deduplicator.Views;
 using Microsoft.Toolkit.Mvvm.ComponentModel;
 using Microsoft.Toolkit.Mvvm.Messaging;
-using Microsoft.Win32;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 using WinForms = System.Windows.Forms;
 
-namespace DuplicateFileFinder.ViewModels;
+namespace Deduplicator.ViewModels;
 
 internal class MainWindowViewModel : ObservableRecipient
 {

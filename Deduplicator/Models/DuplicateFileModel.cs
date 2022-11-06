@@ -1,7 +1,8 @@
 ﻿using System.IO;
+
 // ReSharper disable UnusedMember.Global
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class DuplicateFileModel : BaseObjectModel
 {

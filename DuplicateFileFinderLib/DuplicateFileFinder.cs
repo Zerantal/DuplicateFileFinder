@@ -2,6 +2,7 @@
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using NLog;
+using Util;
 
 // ReSharper disable UnusedMember.Global
 
@@ -71,7 +72,7 @@ public class DuplicateFileFinder
 
         watch.Stop();
             
-        Logger.Info("Scanned directory tree(s) in {0} ms", watch.ElapsedMilliseconds);
+        Logger.Info($"Scanned location '{folder.Name} in {0} ms", watch.ElapsedMilliseconds);
     }
 
     public async Task ScanLocation(string location, Progress<DuplicateFileFinderProgressReport>? progressIndicator = null, bool recomputeHashes = false, CancellationToken cancelToken = default)
@@ -162,6 +163,11 @@ public class DuplicateFileFinder
         timer.Start();
 
         bool calculatingFullChecksum = testSize == -1;
+
+        if (calculatingFullChecksum)
+            Logger.Info("Computing full hashes...");
+        else 
+            Logger.Info($"Computing test hashes (size: {StringUtil.FileSizeToString(testSize)} ");
 
         var ch = Channel.CreateBounded<FileNode>(1000);
 

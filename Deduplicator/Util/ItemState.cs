@@ -1,4 +1,4 @@
-﻿namespace DuplicateFileFinder.Util;
+﻿namespace Deduplicator.Util;
 
 public enum ItemState : short
 {

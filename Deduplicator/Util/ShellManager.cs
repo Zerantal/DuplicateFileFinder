@@ -2,7 +2,7 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 internal class ShellManager
 {

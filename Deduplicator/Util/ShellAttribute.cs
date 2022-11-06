@@ -1,7 +1,8 @@
 ﻿using System;
+
 // ReSharper disable UnusedMember.Global
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 [Flags]
 internal enum ShellAttribute : uint

@@ -5,11 +5,11 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
-using DuplicateFileFinder.Models;
-using DuplicateFileFinder.Util;
+using Deduplicator.Models;
+using Deduplicator.Util;
 using DuplicateFileFinder.Views;
 
-namespace DuplicateFileFinder.Converters;
+namespace Deduplicator.Converters;
 
 internal class FsImageConverter : IValueConverter
 {
