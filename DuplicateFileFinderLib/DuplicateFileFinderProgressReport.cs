@@ -1,37 +1,40 @@
-﻿namespace DuplicateFileFinderLib;
-
-// Notes: scenarios that need testing
-
-public class DuplicateFileFinderProgressReport
+﻿namespace DuplicateFileFinderLib
 {
-    private readonly double _currentProgress;
 
-    // current progress (between 0 and 1) of task
-    public double CurrentProgress
+    // Notes: scenarios that need testing
+    
+
+    public class DuplicateFileFinderProgressReport
     {
-        get => _currentProgress;
-        private init => _currentProgress = Math.Max(0, Math.Min(1, value));
-    }
+        private readonly double _currentProgress;
 
-    public bool CommencingNewTask => !string.IsNullOrEmpty(NewTask);
+        // current progress (between 0 and 1) of task
+        public double CurrentProgress
+        {
+            get => _currentProgress;
+            private init => _currentProgress = Math.Max(0, Math.Min(1, value));
+        }
 
-    public bool Finished { get; }
+        public bool CommencingNewTask => !string.IsNullOrEmpty(NewTask);
 
-    public string NewTask { get; } = string.Empty;
+        public bool Finished { get; }
 
-    public DuplicateFileFinderProgressReport(double progress)
-    {
-        CurrentProgress = progress;
-    }
+        public string NewTask { get; } = string.Empty;
 
-    public DuplicateFileFinderProgressReport(string task)
-    {
-        NewTask = task;
-    }
+        public DuplicateFileFinderProgressReport(double progress)
+        {
+            CurrentProgress = progress;
+        }
 
-    // empty constructor indicates end of progress updates
-    public DuplicateFileFinderProgressReport()
-    {
-        Finished = true;
+        public DuplicateFileFinderProgressReport(string task)
+        {
+            NewTask = task;
+        }
+
+        // empty constructor indicates end of progress updates
+        public DuplicateFileFinderProgressReport()
+        {
+            Finished = true;
+        }
     }
 }

@@ -1,6 +1,7 @@
-﻿namespace DupFileUtil.Commands;
-
-internal interface ICommand
+﻿namespace DupFileUtil.Commands
 {
-    void Execute();
+    internal interface ICommand
+    {
+        void Execute();
+    }
 }

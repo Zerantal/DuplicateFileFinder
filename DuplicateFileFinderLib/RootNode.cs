@@ -1,25 +1,30 @@
-﻿namespace DuplicateFileFinderLib;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
-public class RootNode : FolderNode
+namespace DuplicateFileFinderLib
 {
-    public RootNode() : base("ROOT")
+    public class RootNode : FolderNode
     {
-        Path = "ROOT";
-        AggregateFolderCount = 0;
-    }
-
-    protected override void WriteCsvEntry(TextWriter writer)
-    {
-        //NOOP
-    }
-
-    public override void AddFileSystemNode(FileSystemNode node)
-    {
-        if (node is FolderNode)
-            base.AddFileSystemNode(node);
-        else
+        public RootNode() : base("ROOT")
         {
-            throw new InvalidOperationException("Can only add FolderNode to RootNode");
+        }
+
+        protected override void WriteCsvEntry(TextWriter writer)
+        {
+            //NOOP
+        }
+
+        public override void AddFileSystemNode(FileSystemNode node)
+        {
+            if (node is FolderNode)
+                base.AddFileSystemNode(node);
+            else
+            {
+                throw new InvalidOperationException("Can only add FolderNode to RootNode");
+            }
         }
     }
 }

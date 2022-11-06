@@ -1,23 +1,21 @@
-﻿using System.Diagnostics.CodeAnalysis;
-
-namespace DuplicateFileFinderLib;
-
-[ExcludeFromCodeCoverage]
-internal class FolderGroup : GroupBase
+﻿namespace DuplicateFileFinderLib
 {
-    // ReSharper disable once CollectionNeverQueried.Local
-    private readonly List<FolderNode> _folders = new();
-
-    public FolderGroup(FolderNode folder)
+    internal class FolderGroup
     {
-        AddFolder(folder);
-    }
+        private readonly int _folderGroup;
 
-    public void AddFolder(FolderNode folder)
-    {
-        folder.Group = this;
-        _folders.Add(folder);
-    }
+        // ReSharper disable once CollectionNeverQueried.Local
+        private readonly List<FolderNode> _folders = new();
 
-    public override int DuplicateCount => _folders.Count; 
+        public FolderGroup(int folderGroup)
+        {
+            _folderGroup = folderGroup;
+        }
+
+        public void AddFolder(FolderNode folder)
+        {
+            folder.Group = _folderGroup;
+            _folders.Add(folder);
+        }
+    }
 }

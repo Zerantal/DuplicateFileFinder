@@ -1,26 +1,30 @@
-﻿using System.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
-// ReSharper disable UnusedMember.Global
-
-namespace Deduplicator.Models;
-
-public class DuplicateFileModel : BaseObjectModel
+namespace DuplicateFileFinder.Models
 {
-    private readonly FileInfo _file;
-
-    public DuplicateFileModel(long groupId, FileInfo file)
+    public class DuplicateFileModel : BaseObjectModel
     {
-        FileGroup = groupId;
-        _file = file;
+        private FileInfo _file;
+
+        public DuplicateFileModel(long groupId, FileInfo file)
+        {
+            FileGroup = groupId;
+            _file = file;
+        }
+
+        public string FileName => _file.Name;
+
+        public long FileSize => _file.Length;
+
+        public string CreationDate => _file.CreationTime.ToLongDateString();
+
+        public string Folder => _file.DirectoryName;
+
+        public long FileGroup { get; }
     }
-
-    public string FileName => _file.Name;
-
-    public long FileSize => _file.Length;
-
-    public string CreationDate => _file.CreationTime.ToLongDateString();
-
-    public string Folder => _file.DirectoryName;
-
-    public long FileGroup { get; }
 }

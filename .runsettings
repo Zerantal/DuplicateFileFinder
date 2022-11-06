@@ -1,5 +1,0 @@
-<Functions>
-	<Exclude>
-		<Function>.*MoveNext.*</Function>
-	</Exclude>
-</Functions

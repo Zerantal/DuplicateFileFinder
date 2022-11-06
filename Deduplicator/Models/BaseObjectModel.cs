@@ -1,17 +1,18 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using Deduplicator.Properties;
+using DuplicateFileFinder.Properties;
 
-namespace Deduplicator.Models;
-
-public class BaseObjectModel : INotifyPropertyChanged
+namespace DuplicateFileFinder.Models
 {
-        
-    public event PropertyChangedEventHandler PropertyChanged;
-
-    [NotifyPropertyChangedInvocator]
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+    public class BaseObjectModel : INotifyPropertyChanged
     {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        [NotifyPropertyChangedInvocator]
+        protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
     }
 }
