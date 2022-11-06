@@ -1,11 +1,12 @@
 ﻿using System.IO;
 
-namespace Deduplicator.Models;
-
-internal class DummyFileSystemObjectModel : FileSystemObjectModel
+namespace DuplicateFileFinder.Models
 {
-    public DummyFileSystemObjectModel()
-        : base(new DirectoryInfo("DummyFileSystemObjectInfo"))
+    class DummyFileSystemObjectModel : FileSystemObjectModel
     {
+        public DummyFileSystemObjectModel()
+            : base(new DirectoryInfo("DummyFilySystemObjectInfo"))
+        {
+        }
     }
 }

@@ -1,22 +1,21 @@
-﻿namespace DuplicateFileFinderLib;
-
-public class FileGroup : GroupBase
+﻿namespace DuplicateFileFinderLib
 {
-    // ReSharper disable once CollectionNeverQueried.Local
-    private readonly List<FileNode> _files = new();
-
-    public FileGroup(FileNode file)
+    public class FileGroup
     {
-        AddFile(file);
+        private readonly int _fileGroup;
+
+        // ReSharper disable once CollectionNeverQueried.Local
+        private readonly List<FileNode> _files = new();
+
+        public FileGroup(int fileGroup)
+        {
+            _fileGroup = fileGroup;
+        }
+
+        public void AddFile(FileNode file)
+        {
+            file.Group = _fileGroup;
+            _files.Add(file);
+        }
     }
-
-    public IReadOnlyCollection<FileNode> Files => _files;
-
-    public void AddFile(FileNode file)
-    {
-        file.Group = this;
-        _files.Add(file);
-    }
-
-    public override int DuplicateCount => _files.Count;
 }

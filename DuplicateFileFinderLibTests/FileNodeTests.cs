@@ -2,62 +2,43 @@
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace DuplicateFileFinderLibTests;
-
-[TestClass]
-public class FileNodeTests
+namespace DuplicateFileFinderLibTests
 {
-    private static readonly string TestFileName = "test.data";
-    private TestDir _testDir = null!;
-
-    public TestContext TestContext { get; set; } = null!;
-
-    [TestInitialize]
-    public void CreateTestFile()
+    [TestClass()]
+    public class FileNodeTests
     {
-        _testDir = new TestDir(TestContext.FullyQualifiedTestClassName);
+        [TestMethod()]
+        public void FileNodeTest()
+        {
+            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-        _testDir.CreateTestFile(TestFileName, 244, "FileNodeTest");
-    }
+            Assert.AreEqual(78, file.Size);
+        }
 
-    [TestMethod]
-    public void FileNodeTest()
-    {
-        var file = new FileNode(_testDir.GetFilePath(TestFileName));
+        [TestMethod()]
+        public void ComputeChecksumTest()
+        {
+            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-        Assert.AreEqual(244, file.Size);
-    }
+            file.ComputeChecksum().Wait();
+            Assert.AreEqual("a1a6c61c583a44697837bfe06267fd51".ToUpper(), file.Checksum);
+        }
 
-    [TestMethod]
-    public void ComputeChecksumTest()
-    {
-        var file = new FileNode(_testDir.GetFilePath(TestFileName));
+        [TestMethod()]
+        public void WritesCsvEntryTest()
+        {
+            string expected =
+                "File,\"\\TestData\\TestDir1\\file2.txt\",78,,\".txt\",A1A6C61C583A44697837BFE06267FD51, -1";
 
-        // full checksum
-        file.ComputeChecksum().Wait();
-        Assert.AreEqual("fb5293cad8167cf74069b009bd755654".ToUpper(), file.Checksum);
-        Assert.IsTrue(file.FullHashCalculated);
+            var file = new FileNode(TestData.Path + "TestDir1\\file2.txt");
 
-        // partial checksum
-        file.ComputeChecksum(testSize: 150).Wait();
-        Assert.AreEqual("dadb817c9ab855a4d1e07e5dbaa7645a".ToUpper(), file.Checksum);
-        Assert.IsFalse(file.FullHashCalculated);
-    }
+            file.ComputeChecksum().Wait();
 
-    [TestMethod]
-    public void WritesCsvEntryTest()
-    {
+            StringWriter sw = new StringWriter();
+            file.WriteCsvEntries(sw);
+            sw.Close();
 
-        string expected = $"File,\"{Path.GetFullPath(_testDir.GetFilePath(TestFileName))}\",244,,\".data\"," + "fb5293cad8167cf74069b009bd755654".ToUpper();
-
-        var file = new FileNode(_testDir.GetFilePath(TestFileName));
-
-        file.ComputeChecksum().Wait();
-
-        StringWriter sw = new StringWriter();
-        file.WriteCsvEntries(sw);
-        sw.Close();
-
-        Assert.IsTrue(TestUtil.CsvStringCompare(expected, sw.ToString()));
+            Assert.IsTrue(TestData.CsvStringCompare(expected, sw.ToString()));
+        }
     }
 }
