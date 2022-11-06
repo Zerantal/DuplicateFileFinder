@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 /// <summary>
 /// Class to retrieve and cache shell icons

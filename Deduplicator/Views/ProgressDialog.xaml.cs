@@ -2,10 +2,10 @@
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using DuplicateFileFinder.ViewModels;
+using Deduplicator.ViewModels;
 using DuplicateFileFinderLib;
 
-namespace DuplicateFileFinder.Views;
+namespace Deduplicator.Views;
 
 /// <summary>
 /// Interaction logic for ProgressDialog.xaml

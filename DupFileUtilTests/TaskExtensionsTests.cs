@@ -1,7 +1,7 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Util;
 
-namespace UtilTests.Util
+namespace UtilTests
 {
     [TestClass()]
     public class TaskExtensionsTests

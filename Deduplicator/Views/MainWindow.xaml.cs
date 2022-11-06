@@ -1,4 +1,4 @@
-﻿using DuplicateFileFinder.Util;
+﻿using Deduplicator.Util;
 
 namespace DuplicateFileFinder.Views;
 

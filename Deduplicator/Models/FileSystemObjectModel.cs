@@ -3,9 +3,9 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Windows.Media;
-using DuplicateFileFinder.Util;
+using Deduplicator.Util;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class FileSystemObjectModel : BaseObjectModel
 {

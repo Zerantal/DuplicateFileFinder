@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 public interface IErrorHandler
 {

@@ -2,9 +2,9 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows.Input;
-using DuplicateFileFinder.Util;
+using Deduplicator.Util;
 
-namespace DuplicateFileFinder.Command;
+namespace Deduplicator.Command;
 
 //todo: implement error handling
 // ReSharper disable once UnusedMember.Global

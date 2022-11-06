@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
 public struct ShellFileInfo

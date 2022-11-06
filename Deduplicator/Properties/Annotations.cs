@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
 using System;
+
 // ReSharper disable IdentifierTypo
 // ReSharper disable ArrangeTrailingCommaInMultilineLists
 
@@ -35,7 +36,7 @@ using System;
 // ReSharper disable MemberCanBeProtected.Global
 // ReSharper disable InconsistentNaming
 
-namespace DuplicateFileFinder.Properties;
+namespace Deduplicator.Properties;
 
 /// <summary>
 /// Indicates that the value of the marked element could be <c>null</c> sometimes,

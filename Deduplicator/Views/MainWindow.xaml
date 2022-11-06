@@ -3,13 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:viewModels="clr-namespace:DuplicateFileFinder.ViewModels"
-        xmlns:views="clr-namespace:DuplicateFileFinder.Views"
-        xmlns:converters="clr-namespace:DuplicateFileFinder.Converters"
+        xmlns:views="clr-namespace:Deduplicator.Views"
+        xmlns:converters="clr-namespace:Deduplicator.Converters"
+        xmlns:views1="clr-namespace:Deduplicator.Views"
+        xmlns:viewModels1="clr-namespace:Deduplicator.ViewModels"
         mc:Ignorable="d"
         Title="Duplicate File Finder" Height="650" Width="1500">
     <Window.DataContext>
-        <viewModels:MainWindowViewModel/>
+        <viewModels1:MainWindowViewModel/>
     </Window.DataContext>
 
     <Window.Resources>
@@ -48,7 +49,7 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="2*"/>
             </Grid.ColumnDefinitions>
-            <views:FolderView x:Name="FolderTreeView"/>
+            <views1:FolderView x:Name="FolderTreeView"/>
             <GridSplitter ShowsPreview="True"
                                   VerticalAlignment="Stretch"
                                   HorizontalAlignment="Center"
