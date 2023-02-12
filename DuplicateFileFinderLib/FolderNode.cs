@@ -56,7 +56,7 @@ public class FolderNode : FileSystemNode
 
     public void PopulateFolderInfo()
     {
-        Children.Clear();
+        children.Clear();
         try
         {
             var di = new DirectoryInfo(Path);

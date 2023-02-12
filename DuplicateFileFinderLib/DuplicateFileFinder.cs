@@ -72,7 +72,7 @@ public class DuplicateFileFinder
 
         watch.Stop();
 
-        Logger.Info($"Scanned location '{folder.Name} in {0} ms", watch.ElapsedMilliseconds);
+        Logger.Info($"Scanned location '{folder.Path}' in {0} ms", watch.ElapsedMilliseconds);
     }
 
     public async Task ScanLocation(string location, Progress<DuplicateFileFinderProgressReport>? progressIndicator = null, bool recomputeHashes = false, CancellationToken cancelToken = default)
