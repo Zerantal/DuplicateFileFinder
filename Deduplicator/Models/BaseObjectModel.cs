@@ -1,8 +1,8 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using DuplicateFileFinder.Properties;
+using Deduplicator.Properties;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class BaseObjectModel : INotifyPropertyChanged
 {

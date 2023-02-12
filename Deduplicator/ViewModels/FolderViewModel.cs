@@ -1,12 +1,12 @@
 ﻿using System.Collections.ObjectModel;
 using System.Linq;
-using DuplicateFileFinder.Messages;
-using DuplicateFileFinder.Models;
+using Deduplicator.Messages;
+using Deduplicator.Models;
 using Microsoft.Toolkit.Mvvm.ComponentModel;
 using Microsoft.Toolkit.Mvvm.Input;
 using Microsoft.Toolkit.Mvvm.Messaging;
 
-namespace DuplicateFileFinder.ViewModels;
+namespace Deduplicator.ViewModels;
 
 public class FolderViewModel : ObservableRecipient
 {

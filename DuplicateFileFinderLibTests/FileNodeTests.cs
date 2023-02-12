@@ -1,5 +1,4 @@
 ﻿using System.IO;
-using System.Net.NetworkInformation;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -8,8 +7,9 @@ namespace DuplicateFileFinderLibTests;
 [TestClass]
 public class FileNodeTests
 {
-    private static string _testFileName = "test.data";
+    private static readonly string TestFileName = "test.data";
     private TestDir _testDir = null!;
+
     public TestContext TestContext { get; set; } = null!;
 
     [TestInitialize]
@@ -17,13 +17,13 @@ public class FileNodeTests
     {
         _testDir = new TestDir(TestContext.FullyQualifiedTestClassName);
 
-        _testDir.CreateTestFile(_testFileName, 244, "FileNodeTest");
+        _testDir.CreateTestFile(TestFileName, 244, "FileNodeTest");
     }
 
     [TestMethod]
     public void FileNodeTest()
     {
-        var file = new FileNode(_testDir.GetFilePath(_testFileName));
+        var file = new FileNode(_testDir.GetFilePath(TestFileName));
 
         Assert.AreEqual(244, file.Size);
     }
@@ -31,7 +31,7 @@ public class FileNodeTests
     [TestMethod]
     public void ComputeChecksumTest()
     {
-        var file = new FileNode(_testDir.GetFilePath(_testFileName));
+        var file = new FileNode(_testDir.GetFilePath(TestFileName));
 
         // full checksum
         file.ComputeChecksum().Wait();
@@ -48,9 +48,9 @@ public class FileNodeTests
     public void WritesCsvEntryTest()
     {
 
-        string expected = $"File,\"{Path.GetFullPath(_testDir.GetFilePath(_testFileName))}\",244,,\".data\"," + "fb5293cad8167cf74069b009bd755654".ToUpper();
+        string expected = $"File,\"{Path.GetFullPath(_testDir.GetFilePath(TestFileName))}\",244,,\".data\"," + "fb5293cad8167cf74069b009bd755654".ToUpper();
 
-        var file = new FileNode(_testDir.GetFilePath(_testFileName));
+        var file = new FileNode(_testDir.GetFilePath(TestFileName));
 
         file.ComputeChecksum().Wait();
 

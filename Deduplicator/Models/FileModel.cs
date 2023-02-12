@@ -1,8 +1,8 @@
 ﻿using System.Globalization;
-using DuplicateFileFinder.Common;
+using Deduplicator.Common;
 using DuplicateFileFinderLib;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class FileModel : BindableBase
 {

@@ -1,8 +1,9 @@
 ﻿using System.Threading.Tasks;
 using System.Windows.Input;
+
 // ReSharper disable UnusedMemberInSuper.Global
 
-namespace DuplicateFileFinder.Command;
+namespace Deduplicator.Command;
 
 public interface IAsyncCommand : ICommand
 {

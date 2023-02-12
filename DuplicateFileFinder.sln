@@ -17,9 +17,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DuplicateFileFinderLib", "D
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DuplicateFileFinderLibTests", "DuplicateFileFinderLibTests\DuplicateFileFinderLibTests.csproj", "{63FF4C84-E9C6-4E5A-B24D-469C3274DA3B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UtilTests", "DupFileUtilTests\UtilTests.csproj", "{21F4B63D-A45D-4A65-8D96-28D3DB99F8FC}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UtilTests", "DupFileUtilTests\UtilTests.csproj", "{21F4B63D-A45D-4A65-8D96-28D3DB99F8FC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Util", "Util\Util.csproj", "{F834419C-0201-45CF-A17E-B52F49A1C56D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Util", "Util\Util.csproj", "{F834419C-0201-45CF-A17E-B52F49A1C56D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

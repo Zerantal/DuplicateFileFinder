@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace DuplicateFileFinder.Util;
+namespace Deduplicator.Util;
 
 public static class Interop
 {

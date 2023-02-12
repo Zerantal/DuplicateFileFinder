@@ -3,9 +3,9 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Windows.Media;
-using DuplicateFileFinder.Util;
+using Deduplicator.Util;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 public class FileSystemObjectModel : BaseObjectModel
 {
@@ -49,7 +49,7 @@ public class FileSystemObjectModel : BaseObjectModel
         {
             if (value == _isSelected) return;
             _isSelected = value;
-            OnPropertyChanged(nameof(IsSelected));
+            OnPropertyChanged();
         }
     }
 
@@ -86,7 +86,7 @@ public class FileSystemObjectModel : BaseObjectModel
             }
 
             _isExpanded = value;
-            OnPropertyChanged(nameof(IsExpanded));
+            OnPropertyChanged();
         }
     }
 
@@ -152,7 +152,7 @@ public class FileSystemObjectModel : BaseObjectModel
         {
             if (value == _fileSystemInfo) return;
             _fileSystemInfo = value;
-            OnPropertyChanged(nameof(FileSystemInfo));
+            OnPropertyChanged();
         }
     }
 

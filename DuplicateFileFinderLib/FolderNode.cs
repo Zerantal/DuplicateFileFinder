@@ -56,14 +56,14 @@ public class FolderNode : FileSystemNode
 
     public void PopulateFolderInfo()
     {
-        Children.Clear();
+        children.Clear();
         try
         {
             var di = new DirectoryInfo(Path);
 
-            Children.AddRange(di.GetDirectories().OrderBy(f => f.Name).Select(d => new FolderNode(d.FullName)));
+            children.AddRange(di.GetDirectories().OrderBy(f => f.Name).Select(d => new FolderNode(d.FullName)));
 
-            Children.AddRange(di.GetFiles().OrderBy(f => f.Name).Select(f => new FileNode(f.FullName)));
+            children.AddRange(di.GetFiles().OrderBy(f => f.Name).Select(f => new FileNode(f.FullName)));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
         {
@@ -74,7 +74,7 @@ public class FolderNode : FileSystemNode
     public void UpdateFolderStats()
     {
         AggregateFileCount = Files.Count + SubFolders.Sum(s => s.AggregateFileCount);
-        Size = Children.Sum(n => n.Size);
+        Size = children.Sum(n => n.Size);
         AggregateFolderCount = SubFolders.Count + SubFolders.Sum(s => s.AggregateFolderCount);
     }
 

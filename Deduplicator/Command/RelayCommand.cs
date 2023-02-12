@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Windows.Input;
 
-namespace DuplicateFileFinder.Command;
+namespace Deduplicator.Command;
 
 public class RelayCommand : ICommand
 {

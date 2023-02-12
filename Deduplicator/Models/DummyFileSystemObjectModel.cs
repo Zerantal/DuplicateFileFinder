@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace DuplicateFileFinder.Models;
+namespace Deduplicator.Models;
 
 internal class DummyFileSystemObjectModel : FileSystemObjectModel
 {

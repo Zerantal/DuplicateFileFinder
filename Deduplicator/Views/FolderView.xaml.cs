@@ -1,6 +1,6 @@
 ﻿using UserControl = System.Windows.Controls.UserControl;
 
-namespace DuplicateFileFinder.Views;
+namespace Deduplicator.Views;
 
 /// <summary>
 /// Interaction logic for FolderView.xaml

@@ -3,7 +3,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using DuplicateFileFinderLib;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using NLog.Filters;
 
 namespace DuplicateFileFinderLibTests;
 
@@ -13,6 +12,7 @@ public class FolderNodeTests
 
     public TestContext TestContext { get; set; } = null!;
 
+    [SuppressMessage("ReSharper", "StringLiteralTypo")]
     private TestDir CreateTestDir()
     {
         var testDir = new TestDir(TestContext.FullyQualifiedTestClassName);

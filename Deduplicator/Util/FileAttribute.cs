@@ -1,4 +1,4 @@
-﻿namespace DuplicateFileFinder.Util;
+﻿namespace Deduplicator.Util;
 
 internal enum FileAttribute
 {

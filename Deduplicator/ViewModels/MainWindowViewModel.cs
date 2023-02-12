@@ -3,15 +3,18 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
-using DuplicateFileFinder.Command;
-using DuplicateFileFinder.Messages;
-using DuplicateFileFinder.Views;
+using Deduplicator.Command;
+using Deduplicator.Messages;
+using Deduplicator.Views;
 using Microsoft.Toolkit.Mvvm.ComponentModel;
 using Microsoft.Toolkit.Mvvm.Messaging;
-using Microsoft.Win32;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 using WinForms = System.Windows.Forms;
 
-namespace DuplicateFileFinder.ViewModels;
+namespace Deduplicator.ViewModels;
 
 internal class MainWindowViewModel : ObservableRecipient
 {
@@ -81,7 +84,7 @@ internal class MainWindowViewModel : ObservableRecipient
         {
             sr = new StreamReader(filename);
             DuplicateFileFinder.ImportFromCsv(sr);
-            Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.Root));
+            Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.root));
 
             UpdateStatusProperties();
         }
@@ -98,7 +101,7 @@ internal class MainWindowViewModel : ObservableRecipient
 
     private void UpdateStatusProperties()
     {
-        FilesScanned = DuplicateFileFinder.Root.AggregateFileCount;
+        FilesScanned = DuplicateFileFinder.root.AggregateFileCount;
         DuplicateFiles = DuplicateFileFinder.DuplicateFileCount;
         SpaceTaken = DuplicateFileFinder.SpaceTakenByDuplicates;
     }
@@ -137,7 +140,7 @@ internal class MainWindowViewModel : ObservableRecipient
     private void Clear()
     {
         DuplicateFileFinder = new DuplicateFileFinderLib.DuplicateFileFinder();
-        Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.Root));
+        Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.root));
     }
 
     private static void Exit()
@@ -160,6 +163,6 @@ internal class MainWindowViewModel : ObservableRecipient
         }
 
         // send message to notify FileTreeView
-        Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.Root));
+        Messenger.Send(new DuplicateFileListChangedMessage(DuplicateFileFinder.root));
     }
 }
