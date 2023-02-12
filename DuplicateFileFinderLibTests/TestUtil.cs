@@ -6,7 +6,7 @@ namespace DuplicateFileFinderLibTests;
 [ExcludeFromCodeCoverage]
 internal class TestUtil
 {
-
+    
     private static bool CsvTextReaderCompare(TextReader expected, TextReader actual)
     {
         // Open the two files.
@@ -34,7 +34,7 @@ internal class TestUtil
                 //    va2[1] = va2[1].Trim('\\', '\"');
 
                 //}
-
+                
                 if (va1[i] != va2[i])
                     return false;
             }
@@ -61,7 +61,7 @@ internal class TestUtil
         // Open the two files.
         using StreamReader expected = new(expectedFile), actual = new(actualFile);
         return CsvTextReaderCompare(expected, actual);
-
+            
     }
 
 

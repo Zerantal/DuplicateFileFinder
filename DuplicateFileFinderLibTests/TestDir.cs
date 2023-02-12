@@ -26,7 +26,7 @@ namespace DuplicateFileFinderLibTests
             {
                 if (Directory.Exists(dirName))
                     Directory.Delete(dirName, true);
-
+                
                 Directory.CreateDirectory(dirName);
             }
             catch (Exception e)
