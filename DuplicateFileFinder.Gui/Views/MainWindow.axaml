@@ -1,0 +1,185 @@
+<Window
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:DuplicateFileFinder.Gui.ViewModels"
+    xmlns:dgrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
+    x:Class="DuplicateFileFinder.Gui.Views.MainWindow"
+    x:DataType="vm:MainWindowViewModel"
+    Width="1000"
+    Height="600"
+    WindowState="Normal"
+    Title="Duplicate File Finder"
+    mc:Ignorable="mc"
+    xmlns:models="using:DuplicateFileFinder.Gui.Models">
+
+    <Window.Resources>
+
+        <!-- Cell templates -->
+        <DataTemplate x:Key="CellFileName" x:DataType="models:DuplicateFileModel">
+            <TextBlock Text="{Binding FileName}"
+                       TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap"
+                       ToolTip.Tip="{Binding FileName}" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="CellFileSize" x:DataType="models:DuplicateFileModel">
+            <TextBlock TextAlignment="Right"
+                       HorizontalAlignment="Right"
+                       Text="{Binding FileSize, Converter={StaticResource BytesToHuman}}" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="CellCreationDate" x:DataType="models:DuplicateFileModel">
+            <TextBlock Text="{Binding CreationDate, StringFormat=\{0:yyyy-MM-dd HH:mm\}}"
+                       TextWrapping="NoWrap" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="CellFolder" x:DataType="models:DuplicateFileModel">
+            <TextBlock Text="{Binding Folder}"
+                       TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap"
+                       ToolTip.Tip="{Binding Folder}" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="CellFileGroup" x:DataType="models:DuplicateFileModel">
+            <TextBlock Text="{Binding FileGroup}"
+                       TextAlignment="Right" />
+        </DataTemplate>
+    </Window.Resources>
+
+    <!-- ONE root: DockPanel; last child fills the remaining space -->
+    <DockPanel Margin="8" LastChildFill="True">
+
+        <!-- Menu -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New"
+                          Command="{Binding NewScanCommand}" />
+                <MenuItem Header="_Open..."
+                          Command="{Binding OpenScanCommand}" />
+                <MenuItem Header="_Save..."
+                          Command="{Binding SaveScanCommand}" />
+                <Separator />
+                <MenuItem Header="E_xit" IsEnabled="False" />
+            </MenuItem>
+        </Menu>
+
+        <!-- Simple toolbar row -->
+        <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
+            <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
+            <Button Content="Stop" Command="{Binding StopScanCommand}" />
+            <Separator />
+            <Button Content="New" Command="{Binding NewScanCommand}" />
+            <Button Content="Open" Command="{Binding OpenScanCommand}" />
+            <Button Content="Save" Command="{Binding SaveScanCommand}" />
+        </StackPanel>
+
+        <!-- Status area -->
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
+            <!-- Progress -->
+            <ProgressBar Grid.Row="0" Grid.ColumnSpan="2"
+                         Minimum="0" Maximum="100"
+                         Height="8"
+                         Value="{Binding ScanProgress}" />
+            <!-- Metrics + operation -->
+            <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
+                <TextBlock Text="Files scanned:" />
+                <TextBlock Text="{Binding FilesScanned, StringFormat='{}{0:N0}'}" />
+
+                <TextBlock Text="Duplicates:" Margin="12,0,0,0" />
+                <TextBlock Text="{Binding DuplicatesFound, StringFormat='{}{0:N0}'}" />
+
+                <TextBlock Text="Space wasted:" Margin="12,0,0,0" />
+                <TextBlock Text="{Binding SpaceTaken, Converter={StaticResource BytesToHuman}}" />
+            </StackPanel>
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Operation}" Margin="12,6,0,0" />
+        </Grid>
+
+        <!-- Main content -->
+        <Grid ColumnDefinitions="2*,6*">
+
+            <!-- Left: scan sources -->
+            <Grid Grid.Column="0" RowDefinitions="Auto,Auto" Margin="0,0,8,0">
+                <TextBlock Grid.Row="0" Text="Scan Sources" FontWeight="Bold" Margin="0,0,0,6" />
+                <ListBox Grid.Row="1" ItemsSource="{Binding SearchPaths}" />
+            </Grid>
+
+            <!-- Right: duplicates grid -->
+            <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0" Text="Duplicate Files" FontWeight="Bold" Margin="0,0,0,6" />
+                <dgrid:DataGrid Grid.Row="1"
+                                ItemsSource="{Binding DuplicateFilesView}"
+                                AutoGenerateColumns="False"
+                                CanUserReorderColumns="True"
+                                CanUserResizeColumns="True"
+                                IsReadOnly="True">
+
+                    <dgrid:DataGrid.Styles>
+                        <!-- Cell padding -->
+                        <Style Selector="DataGridCell">
+                            <Setter Property="Padding" Value="8,0,16,0" />
+                        </Style>
+                        <!-- Match header padding to cell padding -->
+                        <Style Selector="DataGridColumnHeader">
+                            <Setter Property="Padding" Value="8,0,16,0" />
+                        </Style>
+                        <!-- Right-align header text for numeric/date columns -->
+                        <Style Selector="DataGridColumnHeader:right">
+                            <Setter Property="HorizontalContentAlignment" Value="Right" />
+                        </Style>
+                    </dgrid:DataGrid.Styles>
+
+                    <dgrid:DataGrid.Columns>
+                        <dgrid:DataGridTemplateColumn Header="File"
+                                                      CellTemplate="{StaticResource CellFileName}"
+                                                      SortMemberPath="FileName"
+                                                      Width="*"
+                                                      MinWidth="240" />
+
+                        <dgrid:DataGridTemplateColumn Header="Size"
+                                                      CellTemplate="{StaticResource CellFileSize}"
+                                                      SortMemberPath="FileSize"
+                                                      Width="120"
+                                                      MinWidth="100">
+                            <dgrid:DataGridTemplateColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="Size" HorizontalAlignment="Right" />
+                                </DataTemplate>
+                            </dgrid:DataGridTemplateColumn.HeaderTemplate>
+                        </dgrid:DataGridTemplateColumn>
+
+
+                        <dgrid:DataGridTemplateColumn CellTemplate="{StaticResource CellCreationDate}"
+                                                      SortMemberPath="CreationDate"
+                                                      Width="170"
+                                                      MinWidth="150">
+                            <dgrid:DataGridTemplateColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="Created" HorizontalAlignment="Center" />
+                                </DataTemplate>
+                            </dgrid:DataGridTemplateColumn.HeaderTemplate>
+                        </dgrid:DataGridTemplateColumn>
+
+                        <dgrid:DataGridTemplateColumn Header="Folder"
+                                                      CellTemplate="{StaticResource CellFolder}"
+                                                      SortMemberPath="Folder"
+                                                      Width="*"
+                                                      MinWidth="220" />
+
+                        <dgrid:DataGridTemplateColumn CellTemplate="{StaticResource CellFileGroup}"
+                                                      SortMemberPath="FileGroup"
+                                                      Width="110"
+                                                      MinWidth="100">
+                            <dgrid:DataGridTemplateColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="Group" HorizontalAlignment="Right" />
+                                </DataTemplate>
+                            </dgrid:DataGridTemplateColumn.HeaderTemplate>
+                        </dgrid:DataGridTemplateColumn>
+                    </dgrid:DataGrid.Columns>
+                </dgrid:DataGrid>
+            </Grid>
+
+        </Grid>
+    </DockPanel>
+</Window>

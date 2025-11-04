@@ -1,0 +1,136 @@
+## Build artifacts
+bin/
+obj/
+out/
+*.dll
+*.exe
+*.app
+*.so
+*.dylib
+*.pdb
+*.mdb
+
+## Avalonia / Publish artifacts
+*.axaml.g.cs
+*.xaml.g.cs
+*.g.i.cs
+*.log
+*.db
+*.cache
+*.tmp
+*.bak
+
+# Avalonia cross-platform publish output
+/dist/
+publish/
+artifacts/
+*.rider/
+*.app/
+*.dmg
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
+## User-specific / IDE settings
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.userprefs
+
+# JetBrains Rider
+.idea/
+.idea_modules/
+*.iml
+.idea/.idea/
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/dictionaries
+.idea/**/shelf/
+
+# VS Code
+.vscode/
+.vscode-test/
+
+# Mono / Xamarin leftovers
+TestResult.xml
+*.pidb
+*.userprefs
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+# Uncomment if you use `paket`
+# paket-files/
+# paket.dependencies
+# paket.lock
+
+# Dotnet tools and caches
+*.dbmdl
+*.bak
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.dstore
+*.docstates
+global.json.user
+*.ide
+*.tlog
+*.csproj.user
+*.sln.docstates
+*.deps.json
+*.runtimeconfig.dev.json
+
+# Logs and diagnostic output
+*.log
+*.svclog
+*.etl
+*.ncrunch*
+*.opendb
+
+# Coverage / test artifacts
+TestResults/
+*.coverage
+*.coveragexml
+*.dotCover
+*.ncrunchsolution
+*.trx
+
+# Local config / secrets
+appsettings.Development.json
+appsettings.Local.json
+*.secrets.json
+*.local.settings.json
+.env
+.env.*
+
+# Temporary / OS-specific files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*~
+*.tmp
+
+# Resharper / JetBrains cache
+_ReSharper*/
+*.DotSettings.user
+resharper-host/
+resharper-host.log
+
+# Editor backups
+*.bak
+*.orig
+
+# Rider / AvaloniaDesigner caches
+.idea/.idea.Avalonia*
+.idea/.idea.ReSharperCaches
+Avalonia.XAML.Intermediate/
+AvaloniaVSCache/
+

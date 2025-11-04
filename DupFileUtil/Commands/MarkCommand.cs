@@ -1,10 +1,8 @@
-﻿namespace DupFileUtil.Commands
-{
-    internal class MarkCommand : ICommand
-    {
-        public void Execute()
-        {
+﻿namespace DupFileUtil.Commands;
 
-        }
+internal class MarkCommand : ICommand
+{
+    public void Execute()
+    {
     }
 }
