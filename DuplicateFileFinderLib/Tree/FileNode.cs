@@ -6,7 +6,7 @@ namespace DuplicateFileFinderLib.Tree;
 
 public class FileNode : FileSystemNode
 {
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
     internal FileNode(string path, long size) : base(path)
     {
@@ -33,19 +33,17 @@ public class FileNode : FileSystemNode
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
         {
-            Logger.Info(ex.Message);
+            Log.Warn(ex, "Failed to compute checksum for: {path}", Path );
         }
     }
 
     public FileNode DeepClone()
     {
         var clone = new FileNode(Path, Size);
-        clone.CopyCommonFieldsTo(this); // copy from this → clone (we’ll fix target)
-        // CopyCommonFieldsTo copies from the instance it’s called on; we need the reverse.
-        // So replace that single line with:
-        // clone.Size = this.Size;
-        // clone.Group = this.Group;
-        // clone.ChecksumBytes = this.ChecksumBytes is { Length: > 0 } b ? (byte[])b.Clone() : null;
+        clone.CopyCommonFieldsTo(this); 
+        
+        clone.Group = this.Group;
+        clone.ChecksumBytes = this.ChecksumBytes is { Length: > 0 } b ? (byte[])b.Clone() : null;
 
         return clone;
     }

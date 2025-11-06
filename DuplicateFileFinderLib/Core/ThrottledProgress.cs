@@ -12,8 +12,6 @@ public sealed class ThrottledProgress(
 
     private DateTime _lastSent = DateTime.MinValue;
     private bool _sentAny;
-
-    public static int ReportCounter = 0;
     
     public void Report(DuplicateFileFinderProgressReport value)
     {
@@ -32,7 +30,6 @@ public sealed class ThrottledProgress(
                 _lastSent = now;
                 _lastPercent = pct;
                 _sentAny = true;
-                ReportCounter++;
             }
         }
     }
