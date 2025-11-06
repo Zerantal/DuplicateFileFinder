@@ -28,16 +28,16 @@ public partial class MainWindowViewModel : ObservableObject
     public DataGridCollectionView DuplicateFilesView { get; }
 
     private ObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
-        
+
     private static readonly string[] Filters = ["csv"];
 
     // Observable properties
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
     [NotifyCanExecuteChangedFor(nameof(StopScanCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenScanCommand))]   
-    [NotifyCanExecuteChangedFor(nameof(SaveScanCommand))]   
-    [NotifyCanExecuteChangedFor(nameof(NewScanCommand))]         
+    [NotifyCanExecuteChangedFor(nameof(OpenScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NewScanCommand))]
     private bool _isScanning;
 
     [ObservableProperty] private bool _readyToScan;
@@ -46,7 +46,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private int _filesScanned;
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private long _spaceTaken;
-    // private double _highPrecisionProgress;
+    [ObservableProperty] private bool _isIndeterminateProgressPhase;
 
     // cancellation source for the current scan (null when idle)
     private CancellationTokenSource? _scanCts;
@@ -67,23 +67,17 @@ public partial class MainWindowViewModel : ObservableObject
 
         // Default sort: FileSize DESC
         if (DuplicateFilesView.CanSort)
-        {
             DuplicateFilesView.SortDescriptions.Add(
                 DataGridSortDescription.FromPath("FileSize", ListSortDirection.Descending));
-        }
 
         SearchPaths.CollectionChanged += (sender, _) =>
         {
-            if (sender is ObservableCollection<string> paths)
-            {
-                ReadyToScan = paths.Count > 0 && !IsScanning;
-            }
+            if (sender is ObservableCollection<string> paths) ReadyToScan = paths.Count > 0 && !IsScanning;
         };
     }
 
     public bool CanStartScan => !IsScanning;
     public bool CanImportExport => !IsScanning;
-
 
     // ---------------- Commands ----------------
 
@@ -109,15 +103,15 @@ public partial class MainWindowViewModel : ObservableObject
             return;
 
         var targetPath = await _filePicker.PickSaveFileAsync(
-            suggestedFileName: "duplicate-scan.csv",
-            filters: [("CSV files", Filters)]);
+            "duplicate-scan.csv",
+            [("CSV files", Filters)]);
 
         if (string.IsNullOrWhiteSpace(targetPath)) return;
 
         try
         {
             await using var fs = File.Create(targetPath);
-            await using var sw = new StreamWriter(fs, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            await using var sw = new StreamWriter(fs, new UTF8Encoding(false));
             _engine.ExportToCsv(sw); // relies on your existing lib API
             Operation = $"Exported scan to {targetPath}";
         }
@@ -131,13 +125,13 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task OpenScan()
     {
         var srcPath = await _filePicker.PickOpenFileAsync(
-            filters: [("CSV files", Filters)]);
+            [("CSV files", Filters)]);
         if (string.IsNullOrWhiteSpace(srcPath)) return;
 
         try
         {
             await using var fs = File.OpenRead(srcPath);
-            using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            using var sr = new StreamReader(fs, Encoding.UTF8, true);
 
             // Clear current state
             SearchPaths.Clear();
@@ -159,19 +153,17 @@ public partial class MainWindowViewModel : ObservableObject
                 FileGroup = r.Group
             }).ToList();
 
-            OnUI(() =>
-            {
-                foreach (var it in items)
-                    DuplicateFiles.Add(it);
-                                        
-                foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
-                    
-                FilesScanned = _engine.TotalFilesScanned;
-                DuplicatesFound = _engine.DuplicateFilesWastedCount;
-                SpaceTaken = _engine.DuplicateSpaceBytes;
 
-                Operation = $"Imported scan from {srcPath}";
-            });
+            foreach (var it in items)
+                DuplicateFiles.Add(it);
+
+            foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
+
+            FilesScanned = _engine.TotalFilesScanned;
+            DuplicatesFound = _engine.DuplicateFilesWastedCount;
+            SpaceTaken = _engine.DuplicateSpaceBytes;
+
+            Operation = $"Imported scan from {srcPath}";
         }
         catch (Exception ex)
         {
@@ -183,8 +175,8 @@ public partial class MainWindowViewModel : ObservableObject
     private void NewScan()
     {
         _engine.ClearAllScans();
-        SearchPaths.Clear();            
-        DuplicateFiles.Clear();            
+        SearchPaths.Clear();
+        DuplicateFiles.Clear();
         FilesScanned = 0;
         DuplicatesFound = 0;
         SpaceTaken = 0;
@@ -192,9 +184,9 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     // ---------------- Private helper methods ----------------
-    private async Task StartScan(String path)
+    private async Task StartScan(string path)
     {
-        bool scanInterrupted = false;
+        var scanInterrupted = false;
 
         if (IsScanning || SearchPaths.Count == 0) return;
 
@@ -212,24 +204,29 @@ public partial class MainWindowViewModel : ObservableObject
         // Progress from the library → UI
         var progress = new Progress<DuplicateFileFinderProgressReport>(report =>
         {
-            OnUI(() =>
-            {
-                if (!_finalized && !string.IsNullOrWhiteSpace(report.StatusMessage))
-                    Operation = report.StatusMessage;
+            if (_finalized) return;
 
-                if (!_finalized && report.PercentComplete is var p)
-                    ScanProgress = (int)Math.Clamp(p * 100.0, 0, 100);
-            });
+            if (!string.IsNullOrWhiteSpace(report.StatusMessage))
+                Operation = report.StatusMessage;
+
+            IsIndeterminateProgressPhase = report.IsIndeterminate;
+
+            if (!report.IsIndeterminate)
+                ScanProgress = (int)Math.Clamp(report.PercentComplete * 100.0, 0, 100);
         });
 
         try
         {
-            await _engine.ScanLocation(path,
-                progressIndicator: progress,
-                token: token);
+            await Task.Run(async () =>
+            {
+                await _engine.ScanLocation(path, progress, token)
+                    .ConfigureAwait(false);
+            }, token).ConfigureAwait(true);
 
             // Gather duplicates as GUI rows
-            var rows = await _engine.GetDuplicateFileRowsAsync();
+            var rows = await Task.Run(async () =>
+                await _engine.GetDuplicateFileRowsAsync().ConfigureAwait(false), token).ConfigureAwait(true);
+
             var items = rows.Select(r => new DuplicateFileModel
             {
                 FileName = r.Path,
@@ -239,59 +236,50 @@ public partial class MainWindowViewModel : ObservableObject
                 FileGroup = r.Group
             }).ToList();
 
-            OnUI(() =>
-            {
-                DuplicateFiles.Clear();
-                foreach (var it in items)
-                    DuplicateFiles.Add(it);
 
-                FilesScanned = _engine.TotalFilesScanned;
-                DuplicatesFound = _engine.DuplicateFilesWastedCount;
-                SpaceTaken = _engine.DuplicateSpaceBytes;
+            DuplicateFiles.Clear();
+            foreach (var it in items)
+                DuplicateFiles.Add(it);
 
-                ReadyToScan = SearchPaths.Count > 0;
+            FilesScanned = _engine.TotalFilesScanned;
+            DuplicatesFound = _engine.DuplicateFilesWastedCount;
+            SpaceTaken = _engine.DuplicateSpaceBytes;
 
-                // refresh SearchPaths in case _engine has promoted prior scanned search paths
-                SearchPaths.Clear();
-                foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
-            });
+            ReadyToScan = SearchPaths.Count > 0;
+
+            // refresh SearchPaths in case _engine has promoted prior scanned search paths
+            SearchPaths.Clear();
+            foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
         }
         catch (OperationCanceledException)
         {
-            OnUI(() =>
-            {
-                Operation = "Scan cancelled.";
-                scanInterrupted = true;
-            });
+            Operation = "Scan cancelled.";
+            scanInterrupted = true;
         }
         finally
         {
             _scanCts?.Dispose();
             _scanCts = null;
 
-            OnUI(() =>
-            {
-                _finalized = true;
-                IsScanning = false;
-                ReadyToScan = SearchPaths.Count > 0;
 
-                ScanProgress = 0;
-                if (!scanInterrupted)
-                    Operation = "Finished scanning";
-            });
+            _finalized = true;
+            IsScanning = false;
+            ReadyToScan = SearchPaths.Count > 0;
+            ScanProgress = 0;
+            IsIndeterminateProgressPhase = false;
+            if (!scanInterrupted) Operation = "Finished scanning";
         }
     }
 
     [RelayCommand]
-    private void StopScan() => _scanCts?.Cancel();
+    private void StopScan()
+    {
+        _scanCts?.Cancel();
+    }
 
     public void AddSourceFolderPath(string path)
     {
         if (!string.IsNullOrWhiteSpace(path) && !SearchPaths.Contains(path))
             SearchPaths.Add(path);
     }
-
-
-    // ---------------- Internal Helper ----------------
-    private static void OnUI(Action action) => Dispatcher.UIThread.Post(action);
 }
