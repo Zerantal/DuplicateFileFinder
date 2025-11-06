@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text;
 using Avalonia.Collections;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Models;
@@ -88,7 +87,8 @@ public partial class MainWindowViewModel : ObservableObject
         var path = await _folderPicker.PickFolderAsync();
         if (string.IsNullOrWhiteSpace(path)) return;
 
-        AddSourceFolderPath(path);
+        if (!SearchPaths.Contains(path))
+            SearchPaths.Add(path);
 
         // 3) Kick off the scan
         await StartScan(path);
@@ -275,11 +275,5 @@ public partial class MainWindowViewModel : ObservableObject
     private void StopScan()
     {
         _scanCts?.Cancel();
-    }
-
-    public void AddSourceFolderPath(string path)
-    {
-        if (!string.IsNullOrWhiteSpace(path) && !SearchPaths.Contains(path))
-            SearchPaths.Add(path);
     }
 }
