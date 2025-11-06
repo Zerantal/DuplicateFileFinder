@@ -1,8 +1,6 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;

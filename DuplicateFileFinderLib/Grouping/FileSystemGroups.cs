@@ -1,12 +1,9 @@
-﻿using System.Diagnostics;
-using DuplicateFileFinderLib.Tree;
-using NLog;
+﻿using DuplicateFileFinderLib.Tree;
 
 namespace DuplicateFileFinderLib.Grouping;
 
 internal class FileSystemGroups
 {
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly Dictionary<string, FileGroup> _fileGroups = [];
     private readonly Dictionary<string, FolderGroup> _folderGroup = [];
 
@@ -24,40 +21,65 @@ internal class FileSystemGroups
         _folderGroup[string.Empty] = new FolderGroup(-2);
     }
 
-    public async Task AssignGroups(FolderNode folder)
+    public async Task AssignGroups(FolderNode folder,
+        Action<long>? onProgress = null,
+        CancellationToken ct = default)
     {
-        Stopwatch watch = new();
-        watch.Start();
-
-#pragma warning disable CS1998
-        await folder.TraverseFolders(async folderNode =>
-#pragma warning restore CS1998
+        // 1) Pre-count total units of work (folders + files) for determinate progress.
+        long total = 0;
+        await folder.TraverseFolders(f =>
         {
-            AssignFolderToGroup(folderNode);
+            ct.ThrowIfCancellationRequested();
+            total += 1; // the folder itself
+            total += f.Files.Count; // all files in this folder
+            return Task.CompletedTask;
+        });
+        total = Math.Max(1, total);
 
-            AssignFilesToGroups(folderNode);
+        // 2) Second pass: assign groups and report progress.
+        long processed = 0;
+        const int TICK = 16384;     // interval at which to send progress updates
+        
+        await folder.TraverseFolders(f =>
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // folder group
+            AssignFolderToGroup(f);
+            processed++;
+            if ((processed & (TICK - 1)) == 0)
+                onProgress?.Invoke(processed);
+
+            // files
+            foreach (var file in f.Files)
+            {
+                ct.ThrowIfCancellationRequested();
+                AssignFileToGroup(file);
+                processed++;
+                if ((processed & (TICK - 1)) == 0)
+                    onProgress?.Invoke(processed);
+            }
+
+            return Task.CompletedTask;
         });
 
-        watch.Stop();
-        Logger.Info("Group assignment completed in {0} ms", watch.ElapsedMilliseconds);
+        onProgress?.Invoke(total);
     }
 
-    private void AssignFilesToGroups(FolderNode folder)
+    private void AssignFileToGroup(FileNode f)
     {
-        // assign files
-        foreach (var f in folder.Files)
-            if (f.ChecksumBytes == null || !_fileGroups.TryGetValue(f.ChecksumHex, out var grp1))
-            {
-                FileGroup grp = new(_groupCounter);
-                _fileGroups[f.ChecksumHex] = grp;
-                grp.AddFile(f);
-                _groupHashes[_groupCounter] = new Tuple<string, bool>(f.ChecksumHex, true);
-                _groupCounter++;
-            }
-            else
-            {
-                grp1.AddFile(f);
-            }
+        if (f.ChecksumBytes == null || !_fileGroups.TryGetValue(f.ChecksumHex, out var grp1))
+        {
+            FileGroup grp = new(_groupCounter);
+            _fileGroups[f.ChecksumHex] = grp;
+            grp.AddFile(f);
+            _groupHashes[_groupCounter] = new Tuple<string, bool>(f.ChecksumHex, true);
+            _groupCounter++;
+        }
+        else
+        {
+            grp1.AddFile(f);
+        }
     }
 
     private void AssignFolderToGroup(FolderNode folder)

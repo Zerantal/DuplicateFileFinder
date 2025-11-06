@@ -1,6 +1,5 @@
 using System.IO;
 using System.Linq;
-using DuplicateFileFinderLib;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Tree;
 using Xunit;

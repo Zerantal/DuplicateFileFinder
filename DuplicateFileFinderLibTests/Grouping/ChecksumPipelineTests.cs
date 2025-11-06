@@ -2,37 +2,12 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib;
-using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Grouping;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Grouping;
-
-file sealed class BlockingChecksumPipeline : IChecksumPipeline
-{
-    private readonly ManualResetEventSlim _ready;
-    private readonly ManualResetEventSlim _release;
-
-    public BlockingChecksumPipeline(ManualResetEventSlim ready, ManualResetEventSlim release)
-    {
-        _ready = ready;
-        _release = release;
-    }
-
-    public async Task ComputeAsync(FolderNode scope, Func<FileNode, bool> shouldHash,
-        Action<double>? onProgress, CancellationToken ct)
-    {
-        // Signal that we entered checksum stage
-        _ready.Set();
-        // Block until test releases (or cancellation triggers)
-        _release.Wait(ct);
-        // If not canceled we’ll just simulate fast completion
-        await Task.Yield();
-    }
-}
 
 public sealed class ChecksumPipelineTests : IDisposable
 {

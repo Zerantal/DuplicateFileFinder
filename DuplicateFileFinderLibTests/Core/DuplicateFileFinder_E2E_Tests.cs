@@ -1,13 +1,11 @@
 // DuplicateFileFinderLibTests/DuplicateFileFinderTests.cs
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
-using DuplicateFileFinderLib.FileSystem;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
@@ -16,32 +14,6 @@ using Xunit;
 // ReSharper disable RedundantArgumentDefaultValue
 
 namespace DuplicateFileFinderLibTests.Core;
-
-file sealed class TestEnumerateCanceler(
-    int yieldBeforeSignal,
-    int totalToYield,
-    ManualResetEventSlim signal,
-    ManualResetEventSlim gate)
-    : IFileEnumerator
-{
-    public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
-    {
-        for (int i = 0; i < totalToYield; i++)
-        {
-            token.ThrowIfCancellationRequested();
-
-            var fakePath = Path.Combine(dir, $"f{i}.bin");
-            yield return new FsEntry(IsDirectory: false, FullPath: fakePath, Length: 123);
-
-            // After yielding the Kth entry, signal the test and then PAUSE here.
-            if (i + 1 == yieldBeforeSignal)
-            {
-                signal.Set();          // tell the test we're at the latch
-                gate.Wait(token);      // block until the test opens the gate (or cancellation throws)
-            }
-        }
-    }
-}
 
 // ReSharper disable once InconsistentNaming
 public sealed class DuplicateFileFinder_E2E_Tests : IDisposable

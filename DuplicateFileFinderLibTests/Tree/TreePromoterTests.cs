@@ -1,6 +1,5 @@
 using System.IO;
 using System.Linq;
-using DuplicateFileFinderLib;
 using DuplicateFileFinderLib.Tree;
 using Xunit;
 // ReSharper disable InconsistentNaming
