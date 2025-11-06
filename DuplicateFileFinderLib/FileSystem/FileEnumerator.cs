@@ -2,6 +2,7 @@
 
 using System.IO.Enumeration;
 using DuplicateFileFinderLib.Util;
+using NLog;
 
 namespace DuplicateFileFinderLib.FileSystem;
 
@@ -14,6 +15,8 @@ public interface IFileEnumerator
 
 public sealed class FileEnumerator : IFileEnumerator
 {
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    
     private static readonly EnumerationOptions EnumOpts = new()
     {
         IgnoreInaccessible = true,
@@ -30,7 +33,10 @@ public sealed class FileEnumerator : IFileEnumerator
     public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
     {
         if (IsVirtualOrEphemeralRoot(dir))
+        {
+            Log.Info("Skipping ephemeral directory: {dir}", dir);
             yield break;
+        }
 
         var buffer = new List<FsEntry>(256);
 
@@ -69,7 +75,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
                     if (fe.IsDirectory) return true; // dirs always included (we decide traversal elsewhere)
 
-                    if (fe.Length > 0) return true;   // fast-path for regular files
+                    if (fe.Length > 0) return true; // fast-path for regular files
 
                     if (OperatingSystem.IsLinux())
                     {
@@ -81,9 +87,11 @@ public sealed class FileEnumerator : IFileEnumerator
                 }
             };
         }
-        catch (DirectoryNotFoundException) { return true; } // treat as empty
-        catch (UnauthorizedAccessException) { return true; } // treat as empty
-        catch (IOException) { return false; } // constructor failing → trigger fallback
+        catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
+        {
+            Log.Warn(ex, "Aborting enumeration of {path}", dir);
+            return true;
+        }
 
         // Consume manually so we can catch MoveNext() errors and bail out cleanly
         using var en = e.GetEnumerator();
@@ -96,11 +104,9 @@ public sealed class FileEnumerator : IFileEnumerator
                 if (!en.MoveNext()) break;
                 current = en.Current;
             }
-            catch (DirectoryNotFoundException) { break; } // this folder vanished → treat as done
-            catch (UnauthorizedAccessException) { break; }
-            catch (IOException)
+            catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
             {
-                // mid-iteration I/O error → signal caller to use fallback
+                Log.Warn(ex, "Aborting fast enumeration of {path}", dir);
                 return false;
             }
 
@@ -116,15 +122,18 @@ public sealed class FileEnumerator : IFileEnumerator
     {
         buffer.Clear();
         
+        Log.Info("Attempting fallback directory enumeration of {path}", dir);
+        
         // Step 1: directories
         string[] dirs;
         try
         {
             dirs = Directory.GetDirectories(dir);
         }
-        catch
+        catch (Exception ex)
         {
-            return; // skip this folder entirely if even that fails
+            Log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
+            return; 
         }
 
         foreach (var d in dirs)
@@ -139,22 +148,25 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             files = Directory.GetFiles(dir);
         }
-        catch
+        catch (Exception ex)
         {
-            return; // same deal — if the OS refuses, just skip this folder
+            Log.Warn(ex, "Unable to retrieve file listing. Skipping file enumeration of {path}", dir);
+            return;
         }
 
         foreach (var f in files)
         {
             token.ThrowIfCancellationRequested();
 
-            long len = 0;
+            long len;
             try
             {
                 len = new FileInfo(f).Length;
             }
-            catch
+            catch (Exception ex)
             {
+                Log.Warn(ex, "Skipping file {path}", f);
+                
                 // Some NTFS special files throw or report -1; skip them
                 continue;
             }

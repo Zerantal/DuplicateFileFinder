@@ -38,6 +38,7 @@ internal class FileSystemGroups
 
         // 2) Second pass: assign groups and report progress.
         long processed = 0;
+        // ReSharper disable once InconsistentNaming
         const int TICK = 16384;     // interval at which to send progress updates
         
         await folder.TraverseFolders(f =>

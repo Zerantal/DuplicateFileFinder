@@ -9,8 +9,6 @@ namespace DuplicateFileFinder.Gui;
 
 public partial class App : Application
 {
-    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -20,8 +18,8 @@ public partial class App : Application
     {
         Dispatcher.UIThread.UnhandledException += (_, e) =>
         {
-            Logger.Error(e.Exception, "Unhandled exception on UI thread");
-            e.Handled = false;
+            LogManager.GetCurrentClassLogger().Error(e.Exception, "UI thread exception");
+            e.Handled = true;
         };
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)

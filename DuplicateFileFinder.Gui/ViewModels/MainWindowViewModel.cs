@@ -7,6 +7,8 @@ using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Logging;
+using NLog;
 
 
 // for Dispatcher.UIThread
@@ -15,6 +17,8 @@ namespace DuplicateFileFinder.Gui.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    
     private readonly IFolderPickerService _folderPicker;
     private readonly IFilePickerService _filePicker;
 
@@ -83,15 +87,16 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStartScan))]
     private async Task ScanLocation()
     {
-        // 1) Ask user for a folder
         var path = await _folderPicker.PickFolderAsync();
         if (string.IsNullOrWhiteSpace(path)) return;
 
         if (!SearchPaths.Contains(path))
             SearchPaths.Add(path);
 
-        // 3) Kick off the scan
-        await StartScan(path);
+        using (ScanLog.BeginScanScope(path))
+        {
+            await StartScan(path);
+        }
     }
 
 
@@ -152,8 +157,7 @@ public partial class MainWindowViewModel : ObservableObject
                 Folder = r.Folder,
                 FileGroup = r.Group
             }).ToList();
-
-
+            
             foreach (var it in items)
                 DuplicateFiles.Add(it);
 
@@ -187,7 +191,9 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task StartScan(string path)
     {
         var scanInterrupted = false;
-
+        
+        Log.Info("Initialising scan of {path}", path);
+        
         if (IsScanning || SearchPaths.Count == 0) return;
 
         _finalized = false;

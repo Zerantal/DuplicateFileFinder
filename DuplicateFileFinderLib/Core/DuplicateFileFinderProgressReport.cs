@@ -2,9 +2,12 @@
 
 public enum ScanPhase
 {
+    Preparing,
     Enumerating,
     Hashing,
     Grouping,
+    Committing,
+    RecomputingAggregates,
     Completed
 }
 

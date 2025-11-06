@@ -3,6 +3,7 @@
 using DuplicateFileFinderLib.FileSystem;
 using DuplicateFileFinderLib.Grouping;
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLib.Util;
 
@@ -24,7 +25,7 @@ public sealed class DuplicateFileFinder
 
     private RootNode _root = new();
 
-    internal DuplicateFileFinder(IFileEnumerator? fs = null,
+    private DuplicateFileFinder(IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null,
         IGroupingService? grouping = null,
         IScanSerializer? serializer = null)
@@ -57,25 +58,51 @@ public sealed class DuplicateFileFinder
         var throttledProgress = progressIndicator is null ? null : new ThrottledProgress(progressIndicator);
 
         // 1) Build workspace (transactional)
-        var (workRoot, scope) = PrepareWorkspace(location);
+        FolderNode scope;
+        RootNode workRoot;
+        using (PhaseScope.Begin(ScanPhase.Preparing))
+        using (TimingLog.Start(nameof(ScanPhase.Preparing)))
+        {
+            (workRoot, scope) = PrepareWorkspace(location);
+        }
 
         // 2) Enumerate (indeterminate progress)
-        var tempSizes = new Dictionary<long, int>();
-        await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, token);
-
+        Dictionary<long, int> tempSizes = new Dictionary<long, int>();
+        using (PhaseScope.Begin(ScanPhase.Enumerating))
+        using (TimingLog.Start(nameof(ScanPhase.Enumerating)))
+        {
+            await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, token);
+        }
+        
         // 3) Hashing (determinate)
-        var totalToHash = CountHashTargets(scope, tempSizes);
-        await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
+        using (PhaseScope.Begin(ScanPhase.Hashing))
+        using (TimingLog.Start(nameof(ScanPhase.Hashing)))
+        {
+            var totalToHash = CountHashTargets(scope, tempSizes);
+            await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
+        }
 
         // 4) Grouping (determinate)
-        await RunGroupingAsync(scope, throttledProgress, token);
+        using (PhaseScope.Begin(ScanPhase.Grouping))
+        using (TimingLog.Start(nameof(ScanPhase.Grouping)))
+        {
+            await RunGroupingAsync(scope, throttledProgress, token);
+        }
 
         // 5) Commit on success (atomic)
-        CommitWorkspace(workRoot, scope, location);
+        using (PhaseScope.Begin(ScanPhase.Committing))
+        using (TimingLog.Start(nameof(ScanPhase.Committing)))
+        {
+            CommitWorkspace(workRoot, scope, location);
+        }
 
         // 6) Recompute aggregates & rebuild size index
-        await _root.RecomputeSubtreeAggregatesAsync();
-        RebuildFileSizesFromRoot();
+        using (PhaseScope.Begin(ScanPhase.RecomputingAggregates))
+        using (TimingLog.Start(nameof(ScanPhase.RecomputingAggregates)))
+        {
+            await _root.RecomputeSubtreeAggregatesAsync();
+            RebuildFileSizesFromRoot();
+        }
 
         Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
     }
@@ -190,6 +217,7 @@ public sealed class DuplicateFileFinder
         return totalToHash;
     }
 
+
     private async Task EnumeratePhaseAsync(
         FolderNode scope,
         Dictionary<long, int> tempSizes,
@@ -197,7 +225,7 @@ public sealed class DuplicateFileFinder
         CancellationToken token)
     {
         long foldersVisited = 0;
-        
+
         await scope.TraverseFolders(
             async folder =>
             {
@@ -209,25 +237,33 @@ public sealed class DuplicateFileFinder
                     indeterminate: true,
                     processed: foldersVisited);
                 await Task.CompletedTask;
-                
-                // Populate only if empty to avoid re-enumerating promoted subtrees
-                if (folder.SubFolders.Count == 0 && folder.Files.Count == 0)
-                {
-                    // Use your existing fast enumerator (_fs) and filtering logic
-                    foreach (var e in _fs.EnumerateChildren(folder.Path, token))
+
+                // 1) Seed tempSizes from any existing (cloned/promoted) files
+                foreach (var existingFile in folder.Files)
+                    tempSizes[existingFile.Size] = tempSizes.TryGetValue(existingFile.Size, out var n) ? n + 1 : 1;
+
+                // 2) Merge live FS enumeration with existing children (no re-adds)
+                var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var f in folder.Files) existingFiles.Add(f.Path);
+                foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
+
+                foreach (var e in _fs.EnumerateChildren(folder.Path, token))
+                    if (e.IsDirectory)
                     {
-                        if (e.IsDirectory)
-                        {
+                        if (existingDirs.Add(e.FullPath))
                             folder.AddFileSystemNode(new FolderNode(e.FullPath));
-                        }
-                        else
+                    }
+                    else
+                    {
+                        if (existingFiles.Add(e.FullPath))
                         {
                             var fn = new FileNode(e.FullPath, e.Length);
                             folder.AddFileSystemNode(fn);
                             tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
                         }
                     }
-                }
             },
             f =>
             {
@@ -333,6 +369,7 @@ public sealed class DuplicateFileFinder
 
     // ------------ Queries ----------------
 
+    // TODO: review this method. It's doing things it needn't do
     public async Task<IReadOnlyList<DuplicateFileRow>> GetDuplicateFileRowsAsync()
     {
         var results = new List<DuplicateFileRow>();

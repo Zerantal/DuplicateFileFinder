@@ -7,8 +7,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
+// ReSharper disable InconsistentNaming
 
 // ReSharper disable StringLiteralTypo
 // ReSharper disable RedundantArgumentDefaultValue
@@ -115,6 +117,97 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         // No files added
         Assert.Equal(0, finder.TotalFilesScanned);
     }
+
+    [Fact]
+    public async Task Scan_AncestorAfterDescendant_ScansSiblingSubtrees_AndPromotes_Correctly()
+    {
+        // Layout:
+        //   A/
+        //     B/
+        //       f1.txt  ("SAME")
+        //       f2.txt  ("SAME")     -> duplicates
+        //     C/
+        //       c.txt   ("CFILE")    -> sibling subtree under ancestor
+        //     u.txt     ("UNIQUE")   -> file directly under ancestor
+
+        var A = _ioUtil.CreateDir("A");
+        var B = _ioUtil.CreateDir(Path.Combine("A", "B"));
+        var C = _ioUtil.CreateDir(Path.Combine("A", "C"));
+
+        var dup1 = _ioUtil.CreateFile(Path.Combine("A", "B", "f1.txt"), "SAME"u8.ToArray());
+        var dup2 = _ioUtil.CreateFile(Path.Combine("A", "B", "f2.txt"), "SAME"u8.ToArray());
+        var cFile = _ioUtil.CreateFile(Path.Combine("A", "C", "c.txt"), "CFILE"u8.ToArray());
+        var uniqA = _ioUtil.CreateFile(Path.Combine("A", "u.txt"), "UNIQUE"u8.ToArray());
+
+        var dff = new DuplicateFileFinder();
+        var progress = new Progress<DuplicateFileFinderProgressReport>();
+
+        // 1) Scan the descendant first (B) — only B's files should be known
+        await dff.ScanLocation(B, progress, CancellationToken.None);
+
+        var rootsAfterDescendant = dff.SearchPaths;
+        Assert.Single(rootsAfterDescendant);
+        Assert.Equal(PathUtils.NormalizePath(B), rootsAfterDescendant[0]);
+
+        var totalBefore = dff.TotalFilesScanned;
+        var wastedBytesBefore = dff.DuplicateSpaceBytes;
+        var wastedFilesBefore = dff.DuplicateFilesWastedCount;
+
+        // Only the two files in B should be counted now
+        Assert.Equal(2, totalBefore);
+        Assert.Equal(1, wastedFilesBefore); // one duplicate beyond representative
+        Assert.Equal("SAME".Length, wastedBytesBefore); // 4
+
+        // 2) Now scan the ancestor (A)
+        //    Expect: promotion to A as sole root, B stays under A, and the sibling subtree C + file u.txt are included.
+        await dff.ScanLocation(A, progress, CancellationToken.None);
+
+        var rootsAfterAncestor = dff.SearchPaths;
+        Assert.Single(rootsAfterAncestor);
+        Assert.Equal(PathUtils.NormalizePath(A), rootsAfterAncestor[0]);
+
+        // Export and inspect rows
+        await using var sw = new StringWriter();
+        dff.ExportToCsv(sw);
+        var rows = CsvUtil.ReadCsvRows(sw.ToString());
+
+        // Folder rows should include A, B, and C
+        Assert.Contains(rows, r => r.Kind == KindEnum.Folder && r.Path == A);
+        Assert.Contains(rows, r => r.Kind == KindEnum.Folder && r.Path == B);
+        Assert.Contains(rows, r => r.Kind == KindEnum.Folder && r.Path == C);
+
+        // All files must be present exactly once
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == dup1);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == dup2);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == cFile);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == uniqA);
+
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == dup1));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == dup2));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == cFile));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == uniqA));
+
+        // Totals should now include the sibling subtree file + ancestor file, with no double counting:
+        // previously 2 (B only) -> now 4 (B dup1+dup2 + C cFile + A u.txt)
+        Assert.Equal(4, dff.TotalFilesScanned);
+
+        // Duplicate metrics for the SAME pair should remain stable across promotion and sibling scan
+        Assert.Equal(wastedFilesBefore, dff.DuplicateFilesWastedCount);
+        Assert.Equal(wastedBytesBefore, dff.DuplicateSpaceBytes);
+
+        // The two SAME files remain grouped together; the others are not in that group
+        var g1 = rows.First(r => r.Kind == KindEnum.File && r.Path == dup1).Group;
+        var g2 = rows.First(r => r.Kind == KindEnum.File && r.Path == dup2).Group;
+        Assert.True(g1 >= 0);
+        Assert.Equal(g1, g2);
+
+        var gC = rows.First(r => r.Kind == KindEnum.File && r.Path == cFile).Group;
+        var gU = rows.First(r => r.Kind == KindEnum.File && r.Path == uniqA).Group;
+        Assert.NotEqual(g1, gC);
+        Assert.NotEqual(g1, gU);
+    }
+
+
     
     [Fact]
     public async Task Metrics_TotalFilesAndWastedBytes_AreCorrect()
@@ -205,7 +298,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         await finder.ScanLocation(a, progress, CancellationToken.None);
         var roots1 = finder.SearchPaths;
         Assert.Single(roots1);
-        Assert.Equal(DuplicateFileFinderLib.Util.PathUtils.NormalizePath(a), roots1[0]);
+        Assert.Equal(PathUtils.NormalizePath(a), roots1[0]);
 
         // Scan descendant — should not add another root
         await finder.ScanLocation(b, progress, CancellationToken.None);
@@ -213,6 +306,8 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         Assert.Single(roots2);
         Assert.Equal(roots1[0], roots2[0]);
     }
+    
+    
 
     [Fact]
     public async Task IndependentRootsRemainSeparate()
@@ -230,9 +325,9 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         var roots = finder.SearchPaths;
         Assert.Equal(2, roots.Count);
-        Assert.Contains(DuplicateFileFinderLib.Util.PathUtils.NormalizePath(Path.Combine(_tempRoot, "B", "leaf")),
+        Assert.Contains(PathUtils.NormalizePath(Path.Combine(_tempRoot, "B", "leaf")),
             roots);
-        Assert.Contains(DuplicateFileFinderLib.Util.PathUtils.NormalizePath(Path.Combine(_tempRoot, "C")), roots);
+        Assert.Contains(PathUtils.NormalizePath(Path.Combine(_tempRoot, "C")), roots);
     }
     
     [Fact]
