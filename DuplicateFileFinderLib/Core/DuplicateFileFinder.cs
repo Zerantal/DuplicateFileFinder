@@ -38,7 +38,7 @@ public sealed class DuplicateFileFinder
     public DuplicateFileFinder() : this(null)
     {
     }
-    
+
     public IReadOnlyList<string> SearchPaths
         => _root.SubFolders.Select(f => PathUtils.NormalizePath(f.Path)).ToArray();
 
@@ -54,192 +54,243 @@ public sealed class DuplicateFileFinder
     {
         location = PathUtils.NormalizePath(location);
 
-    // Figure out topology case using current, unmodified _root
-        var existingAncestor = _root.SubFolders.FirstOrDefault(r =>
+        var throttledProgress = progressIndicator is null ? null : new ThrottledProgress(progressIndicator);
+
+        // 1) Build workspace (transactional)
+        var (workRoot, scope) = PrepareWorkspace(location);
+
+        // 2) Enumerate (indeterminate progress)
+        var tempSizes = new Dictionary<long, int>();
+        await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, token);
+
+        // 3) Hashing (determinate)
+        var totalToHash = CountHashTargets(scope, tempSizes);
+        await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
+
+        // 4) Grouping (determinate)
+        await RunGroupingAsync(scope, throttledProgress, token);
+
+        // 5) Commit on success (atomic)
+        CommitWorkspace(workRoot, scope, location);
+
+        // 6) Recompute aggregates & rebuild size index
+        await _root.RecomputeSubtreeAggregatesAsync();
+        RebuildFileSizesFromRoot();
+
+        Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
+    }
+
+    private void RebuildFileSizesFromRoot()
+    {
+        _fileSizes.Clear();
+        foreach (var top in _root.SubFolders)
+            top.TraverseFolders(f =>
+            {
+                foreach (var file in f.Files)
+                    _fileSizes[file.Size] = _fileSizes.TryGetValue(file.Size, out var n) ? n + 1 : 1;
+                return Task.CompletedTask;
+            }).Wait();
+    }
+
+    private void CommitWorkspace(RootNode workRoot, FolderNode scope, string location)
+    {
+        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
+        var sameOrAncestor = _root.SubFolders.FirstOrDefault(r =>
             PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
 
-    var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
-
-    // Prepare transactional working state (never touching _root yet)
-    RootNode workRoot;
-    FolderNode workScope;
-
-        if (existingAncestor is not null)
+        if (sameOrAncestor is not null)
         {
-        // Case 1: clone only the affected subtree, scan into the clone
-        workRoot = new RootNode();
-        // keep other roots untouched in workRoot; they aren’t needed for this scope
-        workScope = existingAncestor.DeepCloneSubtree();
-        workRoot.AddFileSystemNode(workScope);
-        }
-    else if (hasDescendants)
-    {
-        // Case 2: promotion scenario – build a promoted root in a workspace
-        // Start from a shallow copy of roots, then rehome via promoter
-        workRoot = new RootNode();
-        foreach (var r in _root.SubFolders)
-            workRoot.AddFileSystemNode(r.DeepCloneSubtree()); // safe to clone; commit happens later
-
-        workRoot = Tree.TreePromoter.PromoteAncestor(workRoot, location);
-        workScope = workRoot.SubFolders.First(r => PathUtils.IsSamePath(r.Path, location));
-    }
-    else
-        {
-        // Case 3: independent root – create a fresh scope in the workspace
-        workRoot = new RootNode();
-        workScope = new FolderNode(location);
-        workRoot.AddFileSystemNode(workScope);
-        }
-
-    // Build a temporary size map for hashing decisions
-    var tempSizes = new Dictionary<long, int>();
-
-    // Local enumerator that doesn’t touch _root
-    void PopulateTemp(FolderNode folder, CancellationToken ct)
-    {
-        if (folder.SubFolders.Count > 0 || folder.Files.Count > 0) return;
-
-        var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var existingDirs  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var e in _fs.EnumerateChildren(folder.Path, ct))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (e.IsDirectory)
-            {
-                if (existingDirs.Add(e.FullPath))
-                    folder.AddFileSystemNode(new FolderNode(e.FullPath));
-            }
-            else
-            {
-                if (existingFiles.Add(e.FullPath))
-                {
-                    var fn = new FileNode(e.FullPath, e.Length);
-                    folder.AddFileSystemNode(fn);
-                    tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
-                }
-            }
-        }
-    }
-
-    // The transactional scan pipeline
-    try
-    {
-        // enumerate into workScope only
-        await workScope.TraverseFolders(
-            down: async f =>
-            {
-                token.ThrowIfCancellationRequested();
-                await Task.Run(() => PopulateTemp(f, token), token);
-                progressIndicator?.Report(new DuplicateFileFinderProgressReport
-                {
-                    StatusMessage = $"Scanning {f.Path} ..."
-                });
-            },
-            up: f =>
-            {
-                token.ThrowIfCancellationRequested();
-                f.UpdateFolderStats();
-                return Task.CompletedTask;
-            });
-
-        // checksums & grouping on workspace only
-        progressIndicator?.Report(new DuplicateFileFinderProgressReport { StatusMessage = "Computing checksums..." });
-
-        await _checksums.ComputeAsync(
-            workScope,
-            shouldHash: f => tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null,
-            onProgress: p => progressIndicator?.Report(new DuplicateFileFinderProgressReport { PercentComplete = p }),
-            ct: token);
-
-        await _grouping.AssignAsync(workScope, token);
-
-        // --- Commit: merge the successful workspace into _root ---
-        if (existingAncestor is not null)
-        {
-            // Replace that subtree with the freshly scanned clone
-            _root.ReplaceChildInRoot(workScope);
+            // Replace that subtree with scanned clone
+            var existing = _root.SubFolders.First(f => PathUtils.IsSamePath(f.Path, scope.Path));
+            _root.RemoveChild(existing);
+            _root.AddFileSystemNode(scope);
         }
         else if (hasDescendants)
         {
-            // Entire promoted layout is the new truth: swap all promoted roots
+            // Whole promoted layout becomes new truth
             _root = workRoot;
         }
         else
         {
-            // Independent new root: add it
-            _root.ReplaceChildInRoot(workScope);
-        }
-
-        // Rebuild aggregates and size map from committed tree
-        await _root.RecomputeSubtreeAggregatesAsync();
-
-        progressIndicator?.Report(new DuplicateFileFinderProgressReport(isRunning: false)
-        {
-            StatusMessage = "Grouping complete",
-            PercentComplete = 1.0
-        });
-    }
-    catch
-    {
-        // Discard workspace on any failure: do NOT touch _root
-        // Re-throw to preserve behavior
-        throw;
-    }
-    }
-
-    private void PopulateFolderChildrenFromDiskSafe(FolderNode folder, CancellationToken token)
-    {
-        if (folder.SubFolders.Count > 0 || folder.Files.Count > 0)
-            return;
-
-        var existingFiles = new HashSet<string>(folder.Files.Select(f => f.Path), StringComparer.OrdinalIgnoreCase);
-        var existingDirs = new HashSet<string>(folder.SubFolders.Select(d => d.Path), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var e in _fs.EnumerateChildren(folder.Path, token))
-        {
-            token.ThrowIfCancellationRequested();
-
-            if (e.IsDirectory)
-            {
-                if (existingDirs.Add(e.FullPath))
-                    folder.AddFileSystemNode(new FolderNode(e.FullPath));
-            }
-            else
-            {
-                if (existingFiles.Add(e.FullPath))
-                {
-                    var fn = new FileNode(e.FullPath, e.Length);
-                    folder.AddFileSystemNode(fn);
-
-                    // build size index on the fly
-                    _fileSizes[fn.Size] = _fileSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
-                }
-            }
+            // Independent new root
+            _root.AddFileSystemNode(scope);
         }
     }
 
-    private async Task AfterEnumerationAsync(
+    private async Task RunGroupingAsync(
         FolderNode scope,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken token)
     {
-        progress?.Report(new DuplicateFileFinderProgressReport { StatusMessage = "Computing checksums..." });
+        // Pre-count work units for a determinate bar (folders + files)
+        long total = 0;
+        await scope.TraverseFolders(f =>
+        {
+            token.ThrowIfCancellationRequested();
+            total += 1; // folder
+            total += f.Files.Count; // files
+            return Task.CompletedTask;
+        });
 
+        // Initial report (0% or 100% if empty)
+        Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
+            processed: 0,
+            percent: total == 0 ? 1.0 : 0.0,
+            total: total);
+        
+        await _grouping.AssignGroupsAsync(
+            scope,
+            processed =>
+            {
+                var done = Math.Min(processed, total);
+                var pct = total == 0 ? 1.0 : Math.Min(1.0, (double)done / total);
+
+                Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
+                    processed: done,
+                    percent: pct,
+                    total: total);
+            },
+            token);
+    }
+
+
+    private async Task RunHashingAsync(
+        FolderNode scope,
+        Dictionary<long, int> tempSizes,
+        int totalToHash,
+        IProgress<DuplicateFileFinderProgressReport>? progress,
+        CancellationToken token)
+    {
+        Report(progress, ScanPhase.Hashing, "Computing checksums...");
+        
         await _checksums.ComputeAsync(
             scope,
-            f => _fileSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null,
-            p => progress?.Report(new DuplicateFileFinderProgressReport { PercentComplete = p }),
+            f => tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null,
+            processed =>
+            {
+                Report(progress, ScanPhase.Hashing, "Hashing files...",
+                    totalToHash == 0 ? 1.0 : (double)processed / totalToHash,
+                    processed: processed,
+                    total: totalToHash);
+            },
             token);
+    }
 
-        await _grouping.AssignAsync(scope, token);
 
-        progress?.Report(new DuplicateFileFinderProgressReport(false)
+    private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
+    {
+        var totalToHash = 0;
+        scope.TraverseFolders(f =>
         {
-            StatusMessage = "Grouping complete",
-            PercentComplete = 1.0
+            foreach (var file in f.Files)
+                if (tempSizes.TryGetValue(file.Size, out var cnt) && cnt > 1 && file.ChecksumBytes == null)
+                    totalToHash++;
+            return Task.CompletedTask;
+        }).Wait();
+        return totalToHash;
+    }
+
+    private async Task EnumeratePhaseAsync(
+        FolderNode scope,
+        Dictionary<long, int> tempSizes,
+        IProgress<DuplicateFileFinderProgressReport>? progress,
+        CancellationToken token)
+    {
+        long foldersVisited = 0;
+        
+        await scope.TraverseFolders(
+            async folder =>
+            {
+                token.ThrowIfCancellationRequested();
+
+                foldersVisited++;
+                Report(progress, ScanPhase.Enumerating,
+                    $"Scanning {folder.Path}",
+                    indeterminate: true,
+                    processed: foldersVisited);
+                await Task.CompletedTask;
+                
+                // Populate only if empty to avoid re-enumerating promoted subtrees
+                if (folder.SubFolders.Count == 0 && folder.Files.Count == 0)
+                {
+                    // Use your existing fast enumerator (_fs) and filtering logic
+                    foreach (var e in _fs.EnumerateChildren(folder.Path, token))
+                    {
+                        if (e.IsDirectory)
+                        {
+                            folder.AddFileSystemNode(new FolderNode(e.FullPath));
+                        }
+                        else
+                        {
+                            var fn = new FileNode(e.FullPath, e.Length);
+                            folder.AddFileSystemNode(fn);
+                            tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
+                        }
+                    }
+                }
+            },
+            f =>
+            {
+                f.UpdateFolderStats();
+                return Task.CompletedTask;
+            });
+    }
+
+    private static void Report(
+        IProgress<DuplicateFileFinderProgressReport>? progress,
+        ScanPhase phase,
+        string message,
+        double percent = 0.0,
+        bool indeterminate = false,
+        long processed = 0,
+        long total = 0,
+        bool running = true)
+    {
+        progress?.Report(new DuplicateFileFinderProgressReport
+        {
+            Phase = phase,
+            StatusMessage = message,
+            PercentComplete = percent,
+            IsIndeterminate = indeterminate,
+            Processed = processed,
+            Total = total,
+            IsRunning = running
         });
+    }
+
+    private (RootNode workRoot, FolderNode scope) PrepareWorkspace(string location)
+    {
+        var existingAncestor = _root.SubFolders.FirstOrDefault(r =>
+            PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
+
+        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
+
+        if (existingAncestor is not null)
+        {
+            // Clone only the affected subtree
+            var workRoot = new RootNode();
+            var scope = existingAncestor.DeepCloneSubtree();
+            workRoot.AddFileSystemNode(scope);
+            return (workRoot, scope);
+        }
+
+        if (hasDescendants)
+        {
+            // Clone roots, then promote inside workspace
+            var workRoot = new RootNode();
+            foreach (var r in _root.SubFolders)
+                workRoot.AddFileSystemNode(r.DeepCloneSubtree());
+
+            workRoot = TreePromoter.PromoteAncestor(workRoot, location);
+            var scope = workRoot.SubFolders.First(r => PathUtils.IsSamePath(r.Path, location));
+            return (workRoot, scope);
+        }
+
+        // Independent new root
+        var wr = new RootNode();
+        var sc = new FolderNode(location);
+        wr.AddFileSystemNode(sc);
+        return (wr, sc);
     }
 
     // ------------ CSV I/O ---------------

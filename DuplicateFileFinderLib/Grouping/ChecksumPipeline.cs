@@ -10,7 +10,7 @@ public interface IChecksumPipeline
 {
     Task ComputeAsync(FolderNode scope,
         Func<FileNode, bool> shouldHash,
-        Action<double>? onProgress,
+        Action<int>? onProgress,
         CancellationToken ct);
 }
 
@@ -18,13 +18,14 @@ public sealed class ChecksumPipeline : IChecksumPipeline
 {
     public async Task ComputeAsync(FolderNode scope,
         Func<FileNode, bool> shouldHash,
-        Action<double>? onProgress,
+        Action<int>? onProgress,
         CancellationToken ct)
     {
         var timer = Stopwatch.StartNew();
         var ch = Channel.CreateBounded<FileNode>(4000);
 
         // consumers
+        var processed = 0;
         var workers = new Task[Math.Max(1, Environment.ProcessorCount)];
         for (var i = 0; i < workers.Length; i++)
             workers[i] = Task.Run(async () =>
@@ -34,13 +35,13 @@ public sealed class ChecksumPipeline : IChecksumPipeline
                 {
                     ct.ThrowIfCancellationRequested();
                     await file.ComputeChecksum(ct);
+                    
+                    Interlocked.Increment(ref processed);
+                    onProgress?.Invoke(processed);
                 }
             }, ct);
 
         // producer + progress
-        var processed = 0;
-        var total = scope.AggregateFileCount;
-
         await scope.TraverseFolders(async folder =>
         {
             foreach (var f in folder.Files)
@@ -49,9 +50,6 @@ public sealed class ChecksumPipeline : IChecksumPipeline
 
                 if (shouldHash(f))
                     await ch.Writer.WriteAsync(f, ct);
-
-                processed++;
-                onProgress?.Invoke(total > 0 ? (double)processed / total : 1.0);
             }
         });
 

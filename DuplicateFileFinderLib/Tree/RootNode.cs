@@ -1,7 +1,4 @@
-﻿using System.Reflection.Metadata;
-using DuplicateFileFinderLib.Tree;
-using DuplicateFileFinderLib.Util;
-using NLog.LayoutRenderers;
+﻿using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Tree;
 

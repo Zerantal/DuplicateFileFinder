@@ -3,7 +3,6 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Tree;
 using Xunit;
