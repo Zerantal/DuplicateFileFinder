@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
+using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
 using NLog;
@@ -30,7 +31,7 @@ public partial class MainWindowViewModel : ObservableObject
     // The table of duplicate file records shown in the grid
     public DataGridCollectionView DuplicateFilesView { get; }
 
-    private ObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
+    private BulkObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
 
     private static readonly string[] Filters = ["csv"];
 
@@ -140,7 +141,6 @@ public partial class MainWindowViewModel : ObservableObject
 
             // Clear current state
             SearchPaths.Clear();
-            DuplicateFiles.Clear();
             FilesScanned = 0;
             DuplicatesFound = 0;
             SpaceTaken = 0;
@@ -158,8 +158,7 @@ public partial class MainWindowViewModel : ObservableObject
                 FileGroup = r.Group
             }).ToList();
             
-            foreach (var it in items)
-                DuplicateFiles.Add(it);
+            DuplicateFiles.AddRange(items, true);
 
             foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
 
@@ -243,9 +242,7 @@ public partial class MainWindowViewModel : ObservableObject
             }).ToList();
 
 
-            DuplicateFiles.Clear();
-            foreach (var it in items)
-                DuplicateFiles.Add(it);
+            DuplicateFiles.AddRange(items, true);
 
             FilesScanned = _engine.TotalFilesScanned;
             DuplicatesFound = _engine.DuplicateFilesWastedCount;
