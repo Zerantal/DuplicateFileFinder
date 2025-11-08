@@ -9,6 +9,7 @@ using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Util;
 using NLog;
 
 

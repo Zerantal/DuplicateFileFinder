@@ -1,19 +1,12 @@
-// DuplicateFileFinderLib/FileSystem/FileEnumerator.cs
+// DuplicateFileFinderLib/FileSystem/FileSystemEntryEnumerator.cs
 
 using System.IO.Enumeration;
 using DuplicateFileFinderLib.Util;
 using NLog;
 
-namespace DuplicateFileFinderLib.FileSystem;
+namespace DuplicateFileFinderLib.Scan;
 
-public readonly record struct FsEntry(bool IsDirectory, string FullPath, long Length, DateTimeOffset CreationTimeUtc );
-
-public interface IFileEnumerator
-{
-    IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token);
-}
-
-public sealed class FileEnumerator : IFileEnumerator
+public sealed class FileSystemEntryEnumerator : IEntryEnumerator
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
     
@@ -30,7 +23,7 @@ public sealed class FileEnumerator : IFileEnumerator
             FileAttributes.NoScrubData
     };
 
-    public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
+    public IEnumerable<ScanEntry> EnumerateChildren(string dir, CancellationToken token)
     {
         if (IsVirtualOrEphemeralRoot(dir))
         {
@@ -38,7 +31,7 @@ public sealed class FileEnumerator : IFileEnumerator
             yield break;
         }
 
-        var buffer = new List<FsEntry>(256);
+        var buffer = new List<ScanEntry>(256);
 
         // Try fast path; if it fails mid-iteration, fall back to safe strategy
         if (!TryFillBufferFast(dir, buffer, token))
@@ -54,14 +47,14 @@ public sealed class FileEnumerator : IFileEnumerator
 
     // ---------- FAST PATH (FileSystemEnumerable) ----------
 
-    private static bool TryFillBufferFast(string dir, List<FsEntry> buffer, CancellationToken token)
+    private static bool TryFillBufferFast(string dir, List<ScanEntry> buffer, CancellationToken token)
     {
-        FileSystemEnumerable<FsEntry> e;
+        FileSystemEnumerable<ScanEntry> e;
         try
         {
-            e = new FileSystemEnumerable<FsEntry>(
+            e = new FileSystemEnumerable<ScanEntry>(
                 dir,
-                (ref FileSystemEntry fe) => new FsEntry(fe.IsDirectory, fe.ToFullPath(), fe.Length, fe.CreationTimeUtc),
+                (ref FileSystemEntry fe) => new ScanEntry(fe.IsDirectory, fe.ToFullPath(), fe.Length, fe.CreationTimeUtc),
                 EnumOpts)
             {
                 ShouldIncludePredicate = (ref FileSystemEntry fe) =>
@@ -98,7 +91,7 @@ public sealed class FileEnumerator : IFileEnumerator
         while (true)
         {
             token.ThrowIfCancellationRequested();
-            FsEntry current;
+            ScanEntry current;
             try
             {
                 if (!en.MoveNext()) break;
@@ -118,7 +111,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
     // ---------- FALLBACK (robust but slower) ----------
 
-    private void TryFillBufferFallback(string dir, List<FsEntry> buffer, CancellationToken token)
+    private void TryFillBufferFallback(string dir, List<ScanEntry> buffer, CancellationToken token)
     {
         buffer.Clear();
         
@@ -139,7 +132,7 @@ public sealed class FileEnumerator : IFileEnumerator
         foreach (var d in dirs)
         {
             token.ThrowIfCancellationRequested();
-            buffer.Add(new FsEntry(true, d, 0, Directory.GetCreationTimeUtc(d) ));
+            buffer.Add(new ScanEntry(true, d, 0, Directory.GetCreationTimeUtc(d) ));
         }
 
         // Step 2: files
@@ -176,7 +169,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, len, creationTimeUtc));
+                buffer.Add(new ScanEntry(false, f, len, creationTimeUtc));
         }
     }
 

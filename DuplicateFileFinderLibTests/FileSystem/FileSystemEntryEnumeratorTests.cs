@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
-using DuplicateFileFinderLib.FileSystem;
+using DuplicateFileFinderLib.Scan;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.FileSystem;
 
 
-public sealed class FileEnumeratorTests : IDisposable
+public sealed class FileSystemEntryEnumeratorTests : IDisposable
 {
     private readonly TempFsFixture _fs = new();
     
@@ -25,8 +25,8 @@ public sealed class FileEnumeratorTests : IDisposable
         Directory.CreateDirectory(PathUtil.P(_fs.Root, "A"));
         var f = _fs.File("x.bin", new byte[3]);
 
-        var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
+        var sut = new FileSystemEntryEnumerator();
+        var list = new List<ScanEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
 
         Assert.Contains(list, e => e.IsDirectory && e.FullPath == PathUtil.P(_fs.Root, "A"));
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == f && e.Length == 3);
@@ -39,8 +39,8 @@ public sealed class FileEnumeratorTests : IDisposable
         Directory.CreateDirectory(gone);
         Directory.Delete(gone);
 
-        var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(gone, CancellationToken.None)); // no throw
+        var sut = new FileSystemEntryEnumerator();
+        var list = new List<ScanEntry>(sut.EnumerateChildren(gone, CancellationToken.None)); // no throw
         Assert.Empty(list);
     }
 
@@ -49,8 +49,8 @@ public sealed class FileEnumeratorTests : IDisposable
     {
         if (!OperatingSystem.IsLinux()) return;
 
-        var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren("/proc", CancellationToken.None));
+        var sut = new FileSystemEntryEnumerator();
+        var list = new List<ScanEntry>(sut.EnumerateChildren("/proc", CancellationToken.None));
         // No exception and usually empty due to fast short-circuit
         Assert.NotNull(list);
     }
@@ -63,8 +63,8 @@ public sealed class FileEnumeratorTests : IDisposable
         
         var emptyFileName = _fs.File("empty.bin", []);
     
-        var sut = new FileEnumerator();
-        var list =  new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
+        var sut = new FileSystemEntryEnumerator();
+        var list =  new List<ScanEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
         
         // zero-length regular file should be present
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == emptyFileName);
@@ -109,8 +109,8 @@ public sealed class FileEnumeratorTests : IDisposable
             symlinkCreated = false;
         }
 
-        var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
+        var sut = new FileSystemEntryEnumerator();
+        var list = new List<ScanEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
 
         if (symlinkCreated)
         {
@@ -133,8 +133,8 @@ public sealed class FileEnumeratorTests : IDisposable
         var fifo = Path.Combine(dir, "p.fifo");
 
         bool made = TryMkFifo(fifo);
-        var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(dir, CancellationToken.None));
+        var sut = new FileSystemEntryEnumerator();
+        var list = new List<ScanEntry>(sut.EnumerateChildren(dir, CancellationToken.None));
 
         if (made)
             Assert.DoesNotContain(list, e => !e.IsDirectory && e.FullPath == fifo);

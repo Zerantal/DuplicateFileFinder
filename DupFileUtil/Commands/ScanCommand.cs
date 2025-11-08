@@ -2,6 +2,7 @@
 using CommandLine;
 using DupFileUtil.Util;
 using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Util;
 
 namespace DupFileUtil.Commands;
 

@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
-using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Util;
 
 namespace DupFileUtil.Util;
 
