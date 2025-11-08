@@ -20,19 +20,11 @@ namespace DuplicateFileFinderLibTests.Core;
 // ReSharper disable once InconsistentNaming
 public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 {
-    private readonly string _tempRoot;
-
-    private readonly IoUtil _ioUtil;
-
-    public DuplicateFileFinder_E2E_Tests()
-    {
-        _tempRoot = Path.Combine(Path.GetTempPath(), "DFFTests_" + Guid.NewGuid().ToString("N"));        
-        _ioUtil = new IoUtil(_tempRoot);
-    }
+    private readonly TempFsFixture _fs = new();
 
     public void Dispose()
     {
-        _ioUtil.Dispose();        
+        _fs.Dispose();
     }
     
     [Fact]
@@ -43,22 +35,20 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         //   a/file1.txt        ("HELLO")
         //   b/file1copy.txt    ("HELLO")    -> duplicate of file1.txt
         //   c/unique.bin       ("WORLD!")   -> unique (CS not calculated due size uniqueness
-        _ioUtil.CreateDir("a");
-        _ioUtil.CreateDir("b");
-        _ioUtil.CreateDir("c");
-
+        _fs.Dir("a");
+        _fs.Dir("b");
+        _fs.Dir("c");
         var helloBytes = "HELLO"u8.ToArray();
         var worldBytes = "WORLD!"u8.ToArray();
-
-        var f1 = _ioUtil.CreateFile("a/file1.txt", helloBytes);
-        var f1Copy = _ioUtil.CreateFile("b/file1copy.txt", helloBytes);
-        var uniq = _ioUtil.CreateFile("c/unique.bin", worldBytes);
+        var f1 = _fs.File("a/file1.txt", helloBytes );
+        var f1Copy = _fs.File("b/file1copy.txt", helloBytes );
+        var uniq = _fs.File("c/unique.bin", worldBytes );
 
         var finder = new DuplicateFileFinder();
 
         // act        
         var progress = new Progress<DuplicateFileFinderProgressReport>();
-        await finder.ScanLocation(_tempRoot, progressIndicator: progress,
+        await finder.ScanLocation(_fs.Root, progressIndicator: progress,
             token: CancellationToken.None);
 
         // dump CSV for inspection
@@ -66,7 +56,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         finder.ExportToCsv(sw);
         var csv = sw.ToString();
         
-        var rows = CsvUtil.ReadCsvRows(csv);
+        var rows = CsvTestUtil.Parse(csv);
 
         // assert
         // 1. We expect to see our three files in the CSV
@@ -95,15 +85,14 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         // 4. The unique file won't have had a checksum computed        
         Assert.True(string.IsNullOrWhiteSpace(rows.First(r => r.Path == uniq && r.Kind == KindEnum.File).Checksum));
-
     }
 
     [Fact]
     public async Task ScanLocation_PreCanceledToken_ThrowsAndDoesNotAddFiles()
     {
         // Arrange: small tree
-        var root = _ioUtil.CreateDir("deep");
-        _ioUtil.CreateFile(Path.Combine("deep", "f.bin"), "X"u8.ToArray());
+        var root = _fs.Dir("deep");
+        _fs.File("deep/f.bin", "X"u8.ToArray());
     
         var finder = new DuplicateFileFinder();
         using var cts = new CancellationTokenSource();
@@ -130,14 +119,13 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         //       c.txt   ("CFILE")    -> sibling subtree under ancestor
         //     u.txt     ("UNIQUE")   -> file directly under ancestor
 
-        var A = _ioUtil.CreateDir("A");
-        var B = _ioUtil.CreateDir(Path.Combine("A", "B"));
-        var C = _ioUtil.CreateDir(Path.Combine("A", "C"));
-
-        var dup1 = _ioUtil.CreateFile(Path.Combine("A", "B", "f1.txt"), "SAME"u8.ToArray());
-        var dup2 = _ioUtil.CreateFile(Path.Combine("A", "B", "f2.txt"), "SAME"u8.ToArray());
-        var cFile = _ioUtil.CreateFile(Path.Combine("A", "C", "c.txt"), "CFILE"u8.ToArray());
-        var uniqA = _ioUtil.CreateFile(Path.Combine("A", "u.txt"), "UNIQUE"u8.ToArray());
+        var A = _fs.Dir("A");
+        var B = _fs.Dir("A/B");
+        var C = _fs.Dir("A/C");
+        var f1 = _fs.File(Path.Combine("A", "B", "f1.txt"), "SAME"u8.ToArray());
+        var f2 = _fs.File(Path.Combine("A", "B", "f2.txt"), "SAME"u8.ToArray());
+        var c = _fs.File(Path.Combine("A", "C", "c.txt"), "CFILE"u8.ToArray());
+        var u = _fs.File(Path.Combine("A", "u.txt"), "UNIQUE"u8.ToArray());
 
         var dff = new DuplicateFileFinder();
         var progress = new Progress<DuplicateFileFinderProgressReport>();
@@ -169,7 +157,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         // Export and inspect rows
         await using var sw = new StringWriter();
         dff.ExportToCsv(sw);
-        var rows = CsvUtil.ReadCsvRows(sw.ToString());
+        var rows = CsvTestUtil.Parse(sw.ToString());
 
         // Folder rows should include A, B, and C
         Assert.Contains(rows, r => r.Kind == KindEnum.Folder && r.Path == A);
@@ -177,15 +165,15 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         Assert.Contains(rows, r => r.Kind == KindEnum.Folder && r.Path == C);
 
         // All files must be present exactly once
-        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == dup1);
-        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == dup2);
-        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == cFile);
-        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == uniqA);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == f1);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == f2);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == c);
+        Assert.Contains(rows, r => r.Kind == KindEnum.File && r.Path == u);
 
-        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == dup1));
-        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == dup2));
-        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == cFile));
-        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == uniqA));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == f1));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == f2));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == c));
+        Assert.Equal(1, rows.Count(r => r.Kind == KindEnum.File && r.Path == u));
 
         // Totals should now include the sibling subtree file + ancestor file, with no double counting:
         // previously 2 (B only) -> now 4 (B dup1+dup2 + C cFile + A u.txt)
@@ -196,13 +184,13 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         Assert.Equal(wastedBytesBefore, dff.DuplicateSpaceBytes);
 
         // The two SAME files remain grouped together; the others are not in that group
-        var g1 = rows.First(r => r.Kind == KindEnum.File && r.Path == dup1).Group;
-        var g2 = rows.First(r => r.Kind == KindEnum.File && r.Path == dup2).Group;
+        var g1 = rows.First(r => r.Kind == KindEnum.File && r.Path == f1).Group;
+        var g2 = rows.First(r => r.Kind == KindEnum.File && r.Path == f2).Group;
         Assert.True(g1 >= 0);
         Assert.Equal(g1, g2);
 
-        var gC = rows.First(r => r.Kind == KindEnum.File && r.Path == cFile).Group;
-        var gU = rows.First(r => r.Kind == KindEnum.File && r.Path == uniqA).Group;
+        var gC = rows.First(r => r.Kind == KindEnum.File && r.Path == c).Group;
+        var gU = rows.First(r => r.Kind == KindEnum.File && r.Path == u).Group;
         Assert.NotEqual(g1, gC);
         Assert.NotEqual(g1, gU);
     }
@@ -212,11 +200,11 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task Metrics_TotalFilesAndWastedBytes_AreCorrect()
     {
-        var dir = _ioUtil.CreateDir("metrics");
+        var dir = _fs.Dir("metrics");
         // Two identical files (size 4), one unique file (size 3)
-        _ = _ioUtil.CreateFile("metrics/a.bin", "DATA"u8.ToArray());
-        _ = _ioUtil.CreateFile("metrics/b.bin", "DATA"u8.ToArray());
-        _ = _ioUtil.CreateFile("metrics/u.bin", "xyz"u8.ToArray());
+        _ = _fs.File("metrics/a.bin", "DATA"u8.ToArray());
+        _ = _fs.File("metrics/b.bin", "DATA"u8.ToArray());
+        _ = _fs.File("metrics/u.bin", "xyz"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
         await finder.ScanLocation(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
@@ -232,10 +220,10 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task GetDuplicateFileRows_ReturnsExpectedRows()
     {
-        var root = _ioUtil.CreateDir("rows");
-        var d1 = _ioUtil.CreateFile("rows/d1.txt", "SAME"u8.ToArray());
-        var d2 = _ioUtil.CreateFile("rows/d2.txt", "SAME"u8.ToArray());
-        _ioUtil.CreateFile("rows/u1.txt", "DIFF"u8.ToArray());
+        var root = _fs.Dir("rows");
+        var d1 = _fs.File("rows/d1.txt", "SAME"u8.ToArray());
+        var d2 = _fs.File("rows/d2.txt", "SAME"u8.ToArray());
+        _fs.File("rows/u1.txt", "DIFF"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
         await finder.ScanLocation(root, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
@@ -252,11 +240,11 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task ScanLocation_Cancels_DuringChecksumStage()
     {
-        var root = _ioUtil.CreateDir("hashcancel");
+        var root = _fs.Dir("hashcancel");
 
         // Create many duplicate-sized files so producer queues a lot
         for (int i = 0; i < 200; i++)
-            _ioUtil.CreateFile(Path.Combine("hashcancel", $"f{i}.bin"), new byte[4096]); // all same size
+            _fs.File(Path.Combine("hashcancel", $"f{i}.bin"), new byte[4096]); // all same size
 
         var finder = new DuplicateFileFinder();
         using var cts = new CancellationTokenSource();
@@ -288,9 +276,9 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task ExistingAncestorFirst_ScanningDescendantDoesNotAddNewRoot()
     {
-        var a = _ioUtil.CreateDir("X");
-        var b = _ioUtil.CreateDir(Path.Combine("X", "Y"));
-        _ioUtil.CreateFile(Path.Combine("X", "Y", "f.bin"), "Q"u8.ToArray());
+        var a = _fs.Dir("X");
+        var b = _fs.Dir(Path.Combine("X", "Y"));
+        _fs.File(Path.Combine("X", "Y", "f.bin"), "Q"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
         var progress = new Progress<DuplicateFileFinderProgressReport>();
@@ -312,31 +300,31 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task IndependentRootsRemainSeparate()
     {
-        _ioUtil.CreateDir(Path.Combine("B", "leaf"));
-        _ioUtil.CreateDir("C");
-        _ioUtil.CreateFile(Path.Combine("B", "leaf", "b.txt"), "B"u8.ToArray());
-        _ioUtil.CreateFile(Path.Combine("C", "c.txt"), "C"u8.ToArray());
+        var leafDir = _fs.Dir(Path.Combine("B", "leaf"));
+        var cDir = _fs.Dir("C");
+        _fs.File(Path.Combine("B", "leaf", "b.txt"), "B"u8.ToArray());
+        _fs.File(Path.Combine("C", "c.txt"), "C"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocation(Path.Combine(_tempRoot, "B", "leaf"), progress, CancellationToken.None);
-        await finder.ScanLocation(Path.Combine(_tempRoot, "C"), progress, CancellationToken.None);
+        await finder.ScanLocation(leafDir, progress, CancellationToken.None);
+        await finder.ScanLocation(cDir, progress, CancellationToken.None);
 
         var roots = finder.SearchPaths;
         Assert.Equal(2, roots.Count);
-        Assert.Contains(PathUtils.NormalizePath(Path.Combine(_tempRoot, "B", "leaf")),
+        Assert.Contains(PathUtils.NormalizePath(leafDir),
             roots);
-        Assert.Contains(PathUtils.NormalizePath(Path.Combine(_tempRoot, "C")), roots);
+        Assert.Contains(PathUtils.NormalizePath(cDir), roots);
     }
     
     [Fact]
     public async Task Promotion_DoesNotDoubleCountOrRehash()
     {
-        var a = _ioUtil.CreateDir("P");
-        var b = _ioUtil.CreateDir(Path.Combine("P", "Q"));
-        _ioUtil.CreateFile(Path.Combine("P", "Q", "d1.txt"), "SAME"u8.ToArray());
-        _ioUtil.CreateFile(Path.Combine("P", "Q", "d2.txt"), "SAME"u8.ToArray());
+        var a = _fs.Dir("P");
+        var b = _fs.Dir(Path.Combine("P", "Q"));
+        _fs.File(Path.Combine("P", "Q", "d1.txt"), "SAME"u8.ToArray());
+        _fs.File(Path.Combine("P", "Q", "d2.txt"), "SAME"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
         var progress = new Progress<DuplicateFileFinderProgressReport>();
@@ -356,8 +344,8 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     [Fact]
     public async Task ScanLocation_Failure_DoesNotMutateExistingState()
     {
-        var dir = _ioUtil.CreateDir("ok");
-        _ioUtil.CreateFile("ok/a.txt", "A"u8.ToArray());
+        var dir = _fs.Dir("ok");
+        _fs.File("ok/a.txt", "A"u8.ToArray());
 
         var finder = new DuplicateFileFinder();
 
@@ -367,7 +355,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var snapshot = csvBefore.ToString();
 
         // Now scan a path that will throw early (missing root)
-        var missing = Path.Combine(_tempRoot, "does_not_exist");
+        var missing = Path.Combine(_fs.Root, "does_not_exist");
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
             using var cts = new CancellationTokenSource();
@@ -378,5 +366,35 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         // State must be unchanged
         var csvAfter = new StringWriter(); finder.ExportToCsv(csvAfter);
         Assert.Equal(snapshot, csvAfter.ToString());
+    }
+    
+    [Fact]
+    public async Task ScanLocation_ExportIncludesCreationTime()
+    {
+        using var fs = new TempFsFixture();
+        var created = new DateTimeOffset(2023, 10, 21, 12, 34, 56, TimeSpan.Zero);
+
+        var root = fs.Dir("root");
+        var f1 = fs.File("root/a.txt", "HELLO"u8, created);
+        var f2 = fs.File("root/b.txt", "HELLO"u8, created.AddMinutes(1));
+
+        var dff = new DuplicateFileFinder();
+        await dff.ScanLocation(root, progressIndicator: null, token: default);
+
+        using var sw = new StringWriter();
+        dff.ExportToCsv(sw);
+        var rows = CsvTestUtil.Parse(sw.ToString());
+
+        Assert.Equal(CsvSpec.Header.Length, CsvSpec.Header.Length); // header known
+        AssertRows.ContainsFolder(rows, root);
+        AssertRows.ContainsFile(rows, f1);
+        AssertRows.ContainsFile(rows, f2);
+
+        // Creation times are recorded as UTC in CSV
+        AssertRows.CreationTimeIs(rows, f1, created);
+        AssertRows.CreationTimeIs(rows, f2, created.AddMinutes(1));
+
+        // The two identical files still group together
+        AssertRows.InSameGroup(rows, f1, f2);
     }
 }

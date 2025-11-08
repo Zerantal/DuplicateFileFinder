@@ -1,8 +1,6 @@
-﻿using DuplicateFileFinderLib.Util;
+﻿namespace DuplicateFileFinderLib.Tree;
 
-namespace DuplicateFileFinderLib.Tree;
-
-public class RootNode() : FolderNode("ROOT")
+public class RootNode() : FolderNode("ROOT", DateTimeOffset.Now)
 {
     protected override void WriteCsvEntry(TextWriter writer)
     {
@@ -23,14 +21,5 @@ public class RootNode() : FolderNode("ROOT")
             base.AddFileSystemNode(node);
         else
             throw new InvalidOperationException("Can only add FolderNode to RootNode");
-    }
-    
-    public void ReplaceChildInRoot(FolderNode replacement)
-    {
-        var existing = children.FirstOrDefault(f => PathUtils.IsSamePath(f.Path, replacement.Path));
-        if (existing is not null)
-            RemoveChild(existing);
-        
-        AddFileSystemNode(replacement);
     }
 }

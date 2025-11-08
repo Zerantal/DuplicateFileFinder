@@ -19,6 +19,10 @@
         <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj"/>
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Grouping\" />
+    </ItemGroup>
+
     <PropertyGroup>
         <DefineConstants>JETBRAINS_ANNOTATIONS</DefineConstants>
     </PropertyGroup>

@@ -34,13 +34,6 @@
                        TextWrapping="NoWrap" />
         </DataTemplate>
 
-        <DataTemplate x:Key="CellFolder" x:DataType="models:DuplicateFileModel">
-            <TextBlock Text="{Binding Folder}"
-                       TextTrimming="CharacterEllipsis"
-                       TextWrapping="NoWrap"
-                       ToolTip.Tip="{Binding Folder}" />
-        </DataTemplate>
-
         <DataTemplate x:Key="CellFileGroup" x:DataType="models:DuplicateFileModel">
             <TextBlock Text="{Binding FileGroup}"
                        TextAlignment="Right" />
@@ -60,7 +53,7 @@
                 <MenuItem Header="_Save..."
                           Command="{Binding SaveScanCommand}" />
                 <Separator />
-                <MenuItem Header="E_xit" IsEnabled="False" />
+                <!-- <MenuItem Header="E_xit" IsEnabled="True" /> -->
             </MenuItem>
         </Menu>
 
@@ -170,12 +163,6 @@
                                 </DataTemplate>
                             </dgrid:DataGridTemplateColumn.HeaderTemplate>
                         </dgrid:DataGridTemplateColumn>
-
-                        <dgrid:DataGridTemplateColumn Header="Folder"
-                                                      CellTemplate="{StaticResource CellFolder}"
-                                                      SortMemberPath="Folder"
-                                                      Width="*"
-                                                      MinWidth="220" />
 
                         <dgrid:DataGridTemplateColumn CellTemplate="{StaticResource CellFileGroup}"
                                                       SortMemberPath="FileGroup"

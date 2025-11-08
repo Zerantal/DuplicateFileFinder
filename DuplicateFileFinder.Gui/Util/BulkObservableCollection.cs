@@ -13,7 +13,6 @@ namespace DuplicateFileFinder.Gui.Util;
 public class BulkObservableCollection<T> : ObservableCollection<T>
 {
     private bool _suppressNotification;
-    private bool _hasDeferredNotification;
 
     public void BeginUpdate()
     {
@@ -24,12 +23,9 @@ public class BulkObservableCollection<T> : ObservableCollection<T>
     {
         if (!_suppressNotification) return;
         _suppressNotification = false;
-
-        if (_hasDeferredNotification)
-        {
-            _hasDeferredNotification = false;
-            RaiseReset();
-        }
+        
+        RaiseReset();
+        
     }
 
     /// <summary>
@@ -53,10 +49,8 @@ public class BulkObservableCollection<T> : ObservableCollection<T>
     protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)
     {
         if (_suppressNotification)
-        {
-            _hasDeferredNotification = true;
             return;
-        }
+        
         base.OnCollectionChanged(e);
     }
 

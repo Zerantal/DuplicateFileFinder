@@ -4,8 +4,10 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Tree;using DuplicateFileFinderLibTests.TestUtils;
+using DuplicateFileFinderLib.Tree;
+using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
+// ReSharper disable InconsistentNaming
 
 // ReSharper disable StringLiteralTypo
 // ReSharper disable CommentTypo
@@ -14,9 +16,7 @@ namespace DuplicateFileFinderLibTests.Tree;
 
 public sealed class FolderNodeTests : IDisposable
 {
-    // We'll create a temp directory per test class instance to hold any files
-    // needed for FileNode construction. Clean it up in Dispose().
-    private readonly string _tempRoot;
+    private readonly TempFsFixture _fs = new();
 
     private static readonly string[] Expected =
     [
@@ -28,33 +28,9 @@ public sealed class FolderNodeTests : IDisposable
         "up:/root"
     ];
 
-    public FolderNodeTests()
-    {
-        _tempRoot = Path.Combine(Path.GetTempPath(), "FolderNodeTests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_tempRoot);
-    }
-
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_tempRoot))
-            {
-                Directory.Delete(_tempRoot, recursive: true);
-            }
-        }
-        catch
-        {
-            // best effort cleanup; tests shouldn't fail because cleanup failed
-        }
-    }
-
-    private string CreateTempFile(string name, byte[] content)
-    {
-        var fullPath = Path.Combine(_tempRoot, name);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        File.WriteAllBytes(fullPath, content);
-        return fullPath;
+        _fs.Dispose();
     }
 
     private static string Md5UpperHex(string s)
@@ -101,32 +77,22 @@ public sealed class FolderNodeTests : IDisposable
         //     f2.bin (200 bytes)
         //   sub2/
         //     f3.bin (500 bytes)
-
-        // arrange
-        var fTopPath = CreateTempFile("top.bin", new byte[50]);
-        var f1Path = CreateTempFile(Path.Combine("sub1", "f1.bin"), new byte[100]);
-        var f2Path = CreateTempFile(Path.Combine("sub1", "f2.bin"), new byte[200]);
-        var f3Path = CreateTempFile(Path.Combine("sub2", "f3.bin"), new byte[500]);
-
-        var root = new FolderNode(_tempRoot);
-        var sub1 = new FolderNode(Path.Combine(_tempRoot, "sub1"));
-        var sub2 = new FolderNode(Path.Combine(_tempRoot, "sub2"));
-
+    
+        // arrange + build tree
+        var fTop = new FileNodeBuilder().Path("/root/top.bin").Size(50).Build();
+        var f1 = new FileNodeBuilder().Path("/root/sub1/f1.bin").Size(100).Build();
+        var f2 = new FileNodeBuilder().Path("/root/sub1/f2.bin").Size(200).Build();
+        var f3 = new FileNodeBuilder().Path("/root/sub2/f3.bin").Size(500).Build();
+        var sub1 = new FolderNodeBuilder("/root/sub1").File(f1).File(f2).Build();
+        var sub2 = new FolderNodeBuilder("/root/sub2").File(f3).Build();
+        var root = new FolderNodeBuilder("/root").File(fTop).Folder(sub1).Folder(sub2).Build();
+    
         // build tree
-        sub1.AddFileSystemNode(new FileNode(f1Path, 100));
-        sub1.AddFileSystemNode(new FileNode(f2Path, 200));
-
-        sub2.AddFileSystemNode(new FileNode(f3Path, 500));
-
-        root.AddFileSystemNode(new FileNode(fTopPath, 50));
-        root.AddFileSystemNode(sub1);
-        root.AddFileSystemNode(sub2);
-
         // act
         sub1.UpdateFolderStats();
         sub2.UpdateFolderStats();
         root.UpdateFolderStats();
-
+    
         // assert AggregateFileCount:
         // sub1: 2 files
         Assert.Equal(2, sub1.AggregateFileCount);
@@ -134,15 +100,15 @@ public sealed class FolderNodeTests : IDisposable
         Assert.Equal(1, sub2.AggregateFileCount);
         // root: 1 top file + sub1(2) + sub2(1) = 4
         Assert.Equal(4, root.AggregateFileCount);
-
+    
         // assert Size (sum of direct children sizes only):
         // sub1 direct children: 100 + 200 = 300
-        Assert.Equal(300, sub1.Size);
+        Assert.Equal(f1.Size + f2.Size, sub1.Size);
         // sub2 direct children: 500
-        Assert.Equal(500, sub2.Size);
+        Assert.Equal(f3.Size, sub2.Size);
         // root direct children: 50 (top.bin) + sub1.Size(300) + sub2.Size(500) = 850
-        Assert.Equal(850, root.Size);
-
+        Assert.Equal(fTop.Size + sub1.Size, sub2.Size, root.Size);
+    
         // assert AggregateFolderCount:
         // sub1 has no subfolders -> 1 (including self)
         Assert.Equal(1, sub1.AggregateFolderCount);
@@ -163,20 +129,13 @@ public sealed class FolderNodeTests : IDisposable
         //   sub/
         //     c.log (5 bytes)
 
-        var aPath = CreateTempFile("a.txt", new byte[10]);
-        var bPath = CreateTempFile("b.bin", new byte[20]);
-        var subDir = Path.Combine(_tempRoot, "sub");
-        Directory.CreateDirectory(subDir);
-        var cPath = CreateTempFile(Path.Combine("sub", "c.log"), new byte[5]);
-
-        var root = new FolderNode(_tempRoot);
-        var sub = new FolderNode(subDir);
-
-        sub.AddFileSystemNode(new FileNode(cPath, 5));
-
-        root.AddFileSystemNode(new FileNode(aPath, 10));
-        root.AddFileSystemNode(new FileNode(bPath, 20));
-        root.AddFileSystemNode(sub);
+        var c = new FileNodeBuilder().Path("/root/sub/c.log").Size(5).Build();
+        var sub = new FolderNodeBuilder("/root/sub", DateTimeOffset.Now - TimeSpan.FromDays(1))
+            .File(c).Build();
+        var a = new FileNodeBuilder().Path("/root/a.txt").Size(20).Build();
+        var b = new FileNodeBuilder().Path("/root/b.bin").Size(10).Build();
+        var root = new FolderNodeBuilder("/root", DateTimeOffset.Now - TimeSpan.FromDays(2))
+            .File(a).File(b).Folder(sub).Build();
 
         // To get sensible AggregateFileCount/Size values in CSV:
         sub.UpdateFolderStats();
@@ -195,17 +154,18 @@ public sealed class FolderNodeTests : IDisposable
         Assert.StartsWith("Folder,\"" + root.Path + "\",", csv[0]);
 
         // We should see a line for a.txt:
-        // File,"{Path}",{Size},,"{Extension}",{Checksum}, {Group}
-        Assert.Contains(csv, l => l.StartsWith("File,\"" + aPath + "\",10,,"));
+        // File,"{Path}",{CreationTime},{Size},,{Checksum},{Group}
+        var expected = string.Join(',', "File", $"\"{a.Path}\"", a.CreationTime, a.Size, "", "");
+        Assert.Contains(csv, l => l.StartsWith(expected));
 
         // We should see b.bin:
-        Assert.Contains(csv, l => l.StartsWith("File,\"" + bPath + "\",20,,"));
+        Assert.Contains(csv, l => l.StartsWith("File,\"" + b.Path + $"\",{b.CreationTime},{b.Size},,"));
 
         // We should see the subfolder line:
-        Assert.Contains(csv, l => l.StartsWith("Folder,\"" + subDir + "\","));
+        Assert.Contains(csv, l => l.StartsWith("Folder,\"" + sub.Path + "\","));
 
         // And c.log:
-        Assert.Contains(csv, l => l.StartsWith("File,\"" + cPath + "\",5,,"));
+        Assert.Contains(csv, l => l.StartsWith("File,\"" + c.Path + $"\",{c.CreationTime},{c.Size},,"));
     }
 
     [Fact]
@@ -251,13 +211,8 @@ public sealed class FolderNodeTests : IDisposable
             Group = -1
         });
 
-        var sub = new FolderNode("/tmp/sub");
-        sub.AddFileSystemNode(file3);
-
-        var root = new FolderNode("/tmp/root");
-        root.AddFileSystemNode(file1);
-        root.AddFileSystemNode(file2);
-        root.AddFileSystemNode(sub);
+        var sub = new FolderNodeBuilder("/tmp/sub").File(file3).Build();
+        var root = new FolderNodeBuilder("/tmp/root").File(file1).File(file2).Folder(sub).Build();
 
         // act
         // compute bottom-up
@@ -283,13 +238,12 @@ public sealed class FolderNodeTests : IDisposable
             Size = 10,
             Group = -1
         });
-
-        var folder = new FolderNode("/tmp/folder");
-        folder.AddFileSystemNode(badFile);
-
+    
+        var folder = new FolderNodeBuilder("/tmp/folder").File(badFile).Build();
+    
         // act
         folder.ComputeChecksum();
-
+    
         // assert
         Assert.Empty(folder.ChecksumHex);
     }
@@ -304,16 +258,14 @@ public sealed class FolderNodeTests : IDisposable
             Group = -1
             // Don't provide checksum, so child folder can't compute checksum
         });
-
-        var childFolder = new FolderNode("/tmp/child");
-        childFolder.AddFileSystemNode(leafFile);
-
-        var parent = new FolderNode("/tmp/parent");
-        parent.AddFileSystemNode(childFolder);
-
+    
+        var childFolder = new FolderNodeBuilder("/tmp/child").File(leafFile).Build();
+    
+        var parent = new FolderNodeBuilder("/tmp").Folder(childFolder).Build();
+    
         // act
         parent.ComputeChecksum();
-
+    
         // assert
         Assert.Empty(parent.ChecksumHex);
     }
@@ -327,30 +279,27 @@ public sealed class FolderNodeTests : IDisposable
         //  ├─ sub1
         //  └─ sub2
         //
-        var root = new FolderNode("/root");
-        var sub1 = new FolderNode("/root/sub1");
-        var sub2 = new FolderNode("/root/sub2");
-
-        root.AddFileSystemNode(sub1);
-        root.AddFileSystemNode(sub2);
-
+        var sub1 = new FolderNodeBuilder("/root/sub1").Build();
+        var sub2 = new FolderNodeBuilder("/root/sub2").Build();
+        var root = new FolderNodeBuilder("/root").Folder(sub1).Folder(sub2).Build();
+    
         var order = new System.Collections.Generic.List<string>();
-
+    
         Task Down(FolderNode n)
         {
             order.Add("down:" + n.Path);
             return Task.CompletedTask;
         }
-
+    
         Task Up(FolderNode n)
         {
             order.Add("up:" + n.Path);
             return Task.CompletedTask;
         }
-
+    
         // act
         await root.TraverseFolders(Down, Up);
-
+    
         // assert
         Assert.Equal(
             Expected,
@@ -366,79 +315,75 @@ public sealed class FolderNodeTests : IDisposable
         var h1 = MD5.HashData("A"u8.ToArray());
         var h2 = MD5.HashData("B"u8.ToArray());
         var h3 = MD5.HashData("C"u8.ToArray());
-
-        var file1 = new FileNode("/tmp/a.txt", 0) { ChecksumBytes = h1 };
-        var file2 = new FileNode("/tmp/b.txt", 0) { ChecksumBytes = h2 };
-        var file3 = new FileNode("/tmp/c.txt", 0) { ChecksumBytes = h3 };
+        var t0 = DateTimeOffset.UnixEpoch;
 
         // Folder 1: children in order A, B, C
-        var fA = new FolderNode("/tmp/folder1");
-        fA.AddFileSystemNode(file1);
-        fA.AddFileSystemNode(file2);
-        fA.AddFileSystemNode(file3);
-        fA.ComputeChecksum();
-
+        var A = new FolderNodeBuilder("/X/A", t0)
+            .File(new FileNodeBuilder().Path("/X/A/1").Created(t0).Checksum(h1).Build())
+            .File(new FileNodeBuilder().Path("/X/A/2").Created(t0).Checksum(h2).Build())
+            .File(new FileNodeBuilder().Path("/X/A/3").Created(t0).Checksum(h3).Build())
+            .Build();
+        A.ComputeChecksum();
+    
         // Folder 2: same hashes but reversed order and different names
-        var g1 = new FileNode("/tmp/z.txt", 0) { ChecksumBytes = h3 };
-        var g2 = new FileNode("/tmp/y.txt", 0) { ChecksumBytes = h1 };
-        var g3 = new FileNode("/tmp/x.txt", 0) { ChecksumBytes = h2 };
-
-        var fB = new FolderNode("/tmp/folder2");
-        fB.AddFileSystemNode(g1);
-        fB.AddFileSystemNode(g2);
-        fB.AddFileSystemNode(g3);
-        fB.ComputeChecksum();
-
+        var B = new FolderNodeBuilder("/X/B", t0)
+            .File(new FileNodeBuilder().Path("/X/B/p").Created(t0).Checksum(h3).Build())
+            .File(new FileNodeBuilder().Path("/X/B/q").Created(t0).Checksum(h1).Build())
+            .File(new FileNodeBuilder().Path("/X/B/r").Created(t0).Checksum(h2).Build())
+            .Build();
+        B.ComputeChecksum();
+        
         // Folder 3: same as others but one checksum different
         var h1Alt = MD5.HashData("A_ALT"u8.ToArray());
-        var hFileAlt = new FileNode("/tmp/d.txt", 0) { ChecksumBytes = h1Alt };
-        var fC = new FolderNode("/tmp/folder3");
-        fC.AddFileSystemNode(hFileAlt);
-        fC.AddFileSystemNode(file2);
-        fC.AddFileSystemNode(file3);
-        fC.ComputeChecksum();
-
-        // Act / Assert
-        Assert.NotNull(fA.ChecksumBytes);
-        Assert.NotNull(fB.ChecksumBytes);
-        Assert.NotNull(fC.ChecksumBytes);
-
+        var C = new FolderNodeBuilder("/X/B", t0)
+            .File(new FileNodeBuilder().Path("/X/B/p").Created(t0).Checksum(h3).Build())
+            .File(new FileNodeBuilder().Path("/X/B/q").Created(t0).Checksum(h1Alt).Build())
+            .File(new FileNodeBuilder().Path("/X/B/r").Created(t0).Checksum(h2).Build())
+            .Build();
+        C.ComputeChecksum();
+        
+        Assert.NotNull(A.ChecksumBytes);
+        Assert.NotNull(B.ChecksumBytes);
+        Assert.NotNull(C.ChecksumBytes);
+        
         // Folders 1 and 2 should have identical folder checksums,
         // because their sets of child hashes are equal despite different order/names.
-        Assert.Equal(Convert.ToHexString(fA.ChecksumBytes!), Convert.ToHexString(fB.ChecksumBytes!));
-
+        Assert.Equal(Convert.ToHexString(A.ChecksumBytes!), Convert.ToHexString(B.ChecksumBytes!));
+    
         // Folder 3 differs by one child hash, so its folder checksum should differ.
-        Assert.NotEqual(Convert.ToHexString(fA.ChecksumBytes!), Convert.ToHexString(fC.ChecksumBytes!));
+        Assert.NotEqual(Convert.ToHexString(A.ChecksumBytes!), Convert.ToHexString(C.ChecksumBytes!));
     }
-
+    
     [Fact]
     public void FolderChecksum_SkipsWhenAnyChildChecksumMissing()
     {
         var f1 = new FileNode("/tmp/a", 0) { ChecksumBytes = MD5.HashData("A"u8.ToArray()) };
         var f2 = new FileNode("/tmp/b", 0) { ChecksumBytes = null }; // missing checksum
-
+    
         var folder = new FolderNode("/tmp/root");
         folder.AddFileSystemNode(f1);
         folder.AddFileSystemNode(f2);
-
+    
         folder.ComputeChecksum();
-
+    
         Assert.Null(folder.ChecksumBytes);
     }
 
     [Fact]
     public async Task DeepCloneSubtree_CopiesShapeAndMetadata()
     {
-        var root = new FolderNode("/tmp/root");
-        var a = new FolderNode("/tmp/root/A");
-        var b = new FolderNode("/tmp/root/B");
-        var f1 = new FileNode("/tmp/root/A/x.txt", 123) { Group = 7 };
-        var f2 = new FileNode("/tmp/root/B/y.bin", 456) { Group = 8 };
-
-        a.AddFileSystemNode(f1);
-        b.AddFileSystemNode(f2);
-        root.AddFileSystemNode(a);
-        root.AddFileSystemNode(b);
+        var rootCreationTime = DateTimeOffset.Now - TimeSpan.FromDays(5);
+        var aCreateTime = DateTimeOffset.Now - TimeSpan.FromDays(4);
+        var bCreateTime = DateTimeOffset.Now - TimeSpan.FromDays(3);
+        var f1CreateTime = DateTimeOffset.Now - TimeSpan.FromDays(2);
+        var f2CreateTime = DateTimeOffset.Now - TimeSpan.FromDays(1);
+        
+        var f2 = new FileNodeBuilder().Path("/tmp/root/B/y.bin").Size(456).Created(f2CreateTime).Group(8).Build();
+        var f1 = new FileNodeBuilder().Path("/tmp/root/A/x.txt").Size(123).Created(f1CreateTime).Group(7).Build();
+        var b = new FolderNodeBuilder("/tmp/root/B", bCreateTime).File(f2).Build();
+        var a = new FolderNodeBuilder("/tmp/root/A", aCreateTime).File(f1).Build();
+        var root = new FolderNodeBuilder("/tmp/root", rootCreationTime).Folder(a).Folder(b).Build();
+        
         await root.RecomputeSubtreeAggregatesAsync();
 
         var clone = root.DeepCloneSubtree();
@@ -457,39 +402,66 @@ public sealed class FolderNodeTests : IDisposable
     [Fact]
     public void FolderNode_IncludesSelf_NoChildren()
     {
-        var a = new FolderNode(PathUtil.AbsPath("/", "a")); // no children
-
+        var a = new FolderNode(PathUtil.P("/", "a")); // no children
+    
         a.UpdateFolderStats();
-
+    
         Assert.Equal(0, a.AggregateFileCount);
         Assert.Equal(1, a.AggregateFolderCount); // includes self
         Assert.Equal(0, a.Size);
     }
-
+    
     [Fact]
     public void FolderNode_IncludesSelf_WithChildFolderAndFiles()
     {
-        var a = new FolderNode(PathUtil.AbsPath("/", "a"));
-        var a1 = new FolderNode(PathUtil.AbsPath("/", "a", "a1"));
-        var f1 = new FileNode(PathUtil.AbsPath("/", "a", "f1.bin"), 10);
-        var f2 = new FileNode(PathUtil.AbsPath("/", "a", "a1", "f2.bin"), 20);
-
+        var a = new FolderNode(PathUtil.P("/", "a"));
+        var a1 = new FolderNode(PathUtil.P("/", "a", "a1"));
+        var f1 = new FileNode(PathUtil.P("/", "a", "f1.bin"), 10);
+        var f2 = new FileNode(PathUtil.P("/", "a", "a1", "f2.bin"), 20);
+    
         a1.AddFileSystemNode(f2);
         a.AddFileSystemNode(f1);
         a.AddFileSystemNode(a1);
-
+    
         // Post-order recompute (children first)
         a1.UpdateFolderStats();
         a.UpdateFolderStats();
-
+    
         // a1 counts: itself + its descendants
         Assert.Equal(1, a1.AggregateFolderCount); // a1
         Assert.Equal(1, a1.AggregateFileCount); // f2
         Assert.Equal(20, a1.Size);
-
+    
         // a counts: itself + a1
         Assert.Equal(2, a.AggregateFolderCount); // a + a1
         Assert.Equal(2, a.AggregateFileCount); // f1 + f2
         Assert.Equal(30, a.Size); // 10 + 20
+    }    
+    
+    [Fact]
+    public void FolderChecksum_Ignores_Names_And_Order()
+    {
+        var t0 = DateTimeOffset.UnixEpoch;
+        var h1 = MD5.HashData("A"u8.ToArray());
+        var h2 = MD5.HashData("B"u8.ToArray());
+        var h3 = MD5.HashData("C"u8.ToArray());
+
+        var fA = new FolderNodeBuilder("/X/A", t0)
+            .File(new FileNodeBuilder().Path("/X/A/1").Created(t0).Checksum(h1).Build())
+            .File(new FileNodeBuilder().Path("/X/A/2").Created(t0).Checksum(h2).Build())
+            .File(new FileNodeBuilder().Path("/X/A/3").Created(t0).Checksum(h3).Build())
+            .Build();
+        fA.ComputeChecksum();
+
+        var fB = new FolderNodeBuilder("/X/B", t0)
+            .File(new FileNodeBuilder().Path("/X/B/p").Created(t0).Checksum(h3).Build())
+            .File(new FileNodeBuilder().Path("/X/B/q").Created(t0).Checksum(h1).Build())
+            .File(new FileNodeBuilder().Path("/X/B/r").Created(t0).Checksum(h2).Build())
+            .Build();
+        fB.ComputeChecksum();
+
+        Assert.NotNull(fA.ChecksumBytes);
+        Assert.NotNull(fB.ChecksumBytes);
+        Assert.Equal(Convert.ToHexString(fA.ChecksumBytes!), Convert.ToHexString(fB.ChecksumBytes!));
     }
 }
