@@ -7,31 +7,37 @@ using DuplicateFileFinderLib.Scan;
 namespace DuplicateFileFinderLibTests.TestUtils;
 
 public sealed class TestEnumerateCanceler(int yieldBeforeSignal, int totalToYield, ManualResetEventSlim signal)
-    : IEntryEnumerator
+    : IFileEnumerator
 {
-    public IEnumerable<ScanEntry> EnumerateChildren(string dir, CancellationToken token)
+    public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
     {
         for (int i = 0; i < totalToYield; i++)
         {
             token.ThrowIfCancellationRequested();
             if (i == yieldBeforeSignal) signal.Set();
-            yield return new ScanEntry(IsDirectory: false,
+            yield return new FsEntry(IsDirectory: false,
                 FullPath: Path.Combine(dir, $"f{i}.bin"),
                 Length: 1,
+                LastWriteTimeUtc: DateTimeOffset.Now,
                 CreationTimeUtc: DateTimeOffset.Now);
         }
     }
 }
 
-public sealed class TestEnumeratorThrower(int throwOnIndex) : IEntryEnumerator
+public sealed class TestEnumeratorThrower(int throwOnIndex) : IFileEnumerator
 {
-    public IEnumerable<ScanEntry> EnumerateChildren(string dir, CancellationToken token)
+    public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
     {
         for (int i = 0; i < 100; i++)
         {
             token.ThrowIfCancellationRequested();
             if (i == throwOnIndex) throw new IOException("Injected iterator failure");
-            yield return new ScanEntry(false, Path.Combine(dir, $"f{i}.bin"), 10, DateTimeOffset.Now);
+            yield return new FsEntry(
+                false,
+                Path.Combine(dir, $"f{i}.bin"),
+                10,
+                DateTimeOffset.Now,
+                DateTimeOffset.Now);
         }
     }
 }

@@ -1,8 +1,10 @@
+// Scan/IScanStrategy.cs
+
 using DuplicateFileFinderLib.Indexing;
 
 namespace DuplicateFileFinderLib.Scan;
 
 public interface IScanStrategy
 {
-    IAsyncEnumerable<FileEntryMeta> EnumerateAsync(string root, CancellationToken ct);
+    IAsyncEnumerable<FileEntryMeta> EnumerateTreeAsync(string root, CancellationToken ct);
 }

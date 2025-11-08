@@ -1,5 +1,4 @@
 // DuplicateFileFinderLib/Core/DuplicateFileFinder.cs
-
 using DuplicateFileFinderLib.Grouping;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
@@ -19,22 +18,29 @@ public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
     private readonly Dictionary<long, int> _fileSizes = new(); // filesize => count
-    // private readonly IEntryEnumerator _fs;
-    private readonly IScanStrategy _fsEnumerator;
+    private readonly IFileEnumerator _fs;
     private readonly IGroupingService _grouping;
     private readonly IScanSerializer _serializer;
+    private readonly IScanStrategy _scanStrategy;
+    private readonly IEntryEnumerator _entryEnumerator;
+
 
     private RootNode _root = new();
 
-    private DuplicateFileFinder(IScanStrategy? scanStrategy = null,
+    private DuplicateFileFinder(IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null,
         IGroupingService? grouping = null,
-        IScanSerializer? serializer = null)
+        IScanSerializer? serializer = null,
+        IScanStrategy scanStrategy = null,
+     IEntryEnumerator entryEnumerator = null
+        )
     {
-        _fsEnumerator = scanStrategy ?? new DirectScanStrategy();
+        _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipeline();
         _grouping = grouping ?? new FileSystemGroupsAdapter();
         _serializer = serializer ?? new CsvScanSerializer();
+        _entryEnumerator = entryEnumerator ?? new FileSystemEntryEnumerator(new FileEnumerator());
+        _scanStrategy = scanStrategy ?? new DirectScanStrategy(_entryEnumerator); 
     }
 
     public DuplicateFileFinder() : this(null)
@@ -225,102 +231,52 @@ public sealed class DuplicateFileFinder
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken token)
     {
-        ArgumentNullException.ThrowIfNull(scope);
-        ArgumentNullException.ThrowIfNull(tempSizes);
-
         long foldersVisited = 0;
 
-        // Choose a path comparer that matches the volume semantics.
-        // NTFS/fuseblk is case-insensitive, most Linux natives are case-sensitive.
-        // If you already track per-volume flags, replace this probe.
-        static StringComparer PickPathComparer(string path)
-            => IsLikelyCaseInsensitive(path) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        
-        await scope.TraverseFolders(async folder =>
-        {
-            token.ThrowIfCancellationRequested();
-
-            foldersVisited++;
-            Report(progress, ScanPhase.Enumerating,
-                $"Scanning {folder.Path}",
-                indeterminate: true,
-                processed: foldersVisited);
-
-            // 1) Seed tempSizes from any existing (cloned/promoted) files
-            foreach (var existingFile in folder.Files)
-                IncrementCount(tempSizes, existingFile.Size);
-
-            // 2) Merge live FS enumeration with existing children (no re-adds)
-            var pathComparer = PickPathComparer(folder.Path);
-
-            var existingFiles = new HashSet<string>(pathComparer);
-            var existingDirs  = new HashSet<string>(pathComparer);
-
-            foreach (var f in folder.Files) existingFiles.Add(f.Path);
-            foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
-
-            await foreach (var e in _fsEnumerator.EnumerateAsync(folder.Path, token))
+        await scope.TraverseFolders(
+            async folder =>
             {
-                if (e.IsDirectory)
-                {
-                    if (existingDirs.Add(e.FullPath))
-                        folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc));
-                }
-                else
-                {
-                    if (existingFiles.Add(e.FullPath))
-                    {
-                        var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc);
-                        folder.AddFileSystemNode(fn);
-                        IncrementCount(tempSizes, fn.Size);
-                    }
-                }
-            }
-            await Task.CompletedTask;
+                token.ThrowIfCancellationRequested();
 
+                foldersVisited++;
+                Report(progress, ScanPhase.Enumerating,
+                    $"Scanning {folder.Path}",
+                    indeterminate: true,
+                    processed: foldersVisited);
+                await Task.CompletedTask;
+
+                // 1) Seed tempSizes from any existing (cloned/promoted) files
+                foreach (var existingFile in folder.Files)
+                    tempSizes[existingFile.Size] = tempSizes.TryGetValue(existingFile.Size, out var n) ? n + 1 : 1;
+
+                // 2) Merge live FS enumeration with existing children (no re-adds)
+                var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var f in folder.Files) existingFiles.Add(f.Path);
+                foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
+
+                await foreach (var e in _entryEnumerator.EnumerateChildrenAsync(folder.Path, token))
+                    if (Directory.Exists(Path.Combine(e.DirPath, e.Name)))
+                    {
+                        if (existingDirs.Add(Path.Combine(e.DirPath, e.Name)))
+                            folder.AddFileSystemNode(new FolderNode(Path.Combine(e.DirPath, e.Name), e.CTimeUtc));                  }
+                    else
+                    {
+                        var full = Path.Combine(e.DirPath, e.Name);
+                        if (existingFiles.Add(full))
+                        {
+                            var fn = new FileNode(full, e.SizeBytes, e.CTimeUtc);
+                            folder.AddFileSystemNode(fn);
+                            tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
+                        }
+                    }
             },
             f =>
             {
                 f.UpdateFolderStats();
                 return Task.CompletedTask;
             });
-    }
-
-    private static bool IsLikelyCaseInsensitive(string anyPathUnderVolume)
-    {
-        // Cheap heuristic:
-        //  - fuseblk (ntfs-3g) is case-insensitive
-        //  - Windows drives when running under WSL usually map to case-insensitive
-        //  - ext*, xfs, btrfs are case-sensitive by default
-        try
-        {
-            var mounts = File.ReadAllLines("/proc/mounts");
-            foreach (var m in mounts)
-            {
-                // fields: src mountpoint fstype opts ...
-                // match the longest mountpoint prefix
-                // We keep it simple: if path starts with mountpoint and fstype == fuseblk → insensitive
-                var parts = m.Split(' ');
-                if (parts.Length < 3) continue;
-                var mp = parts[1];
-                var fs = parts[2];
-                if (anyPathUnderVolume.StartsWith(mp, StringComparison.Ordinal) &&
-                    fs.Equals("fuseblk", StringComparison.Ordinal))
-                    return true;
-            }
-        }
-        catch
-        {
-            // Fall through to default
-        }
-
-        return OperatingSystem.IsWindows(); // safe default if probing failed
-    }
-
-    private void IncrementCount(Dictionary<long, int> map, long key)
-    {
-        if (map.TryGetValue(key, out var n)) map[key] = n + 1;
-        else map[key] = 1;
     }
 
     private static void Report(
