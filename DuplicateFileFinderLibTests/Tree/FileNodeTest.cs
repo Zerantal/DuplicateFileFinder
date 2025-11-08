@@ -2,42 +2,23 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Tree;
+using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
+// ReSharper disable StringLiteralTypo
 
 namespace DuplicateFileFinderLibTests.Tree;
 
 public sealed class FileNodeTests : IDisposable
 {
-    private readonly string _tempRoot;
-
-    public FileNodeTests()
-    {
-        _tempRoot = Path.Combine(Path.GetTempPath(), "FileNodeTests_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_tempRoot);
-    }
+    private TempFsFixture _fs = new();
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_tempRoot))
-                Directory.Delete(_tempRoot, recursive: true);
-        }
-        catch
-        {
-            // ignore cleanup failures
-        }
-    }
-
-    private string CreateTempFile(string relativeName, byte[] content)
-    {
-        var fullPath = Path.Combine(_tempRoot, relativeName);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        File.WriteAllBytes(fullPath, content);
-        return fullPath;
+        _fs.Dispose();
     }
 
     private static string Md5UpperHex(byte[] bytes)
@@ -51,15 +32,17 @@ public sealed class FileNodeTests : IDisposable
     {
         // arrange
         var data = new byte[123];
-        var filePath = CreateTempFile("sample.bin", data);
-
+        var createTime = DateTime.Now;
+        var filePath = _fs.File("sample.bin", data);
+        
         // act
-        var node = new FileNode(filePath, 123);
+        var node = new FileNode(filePath, 123, createTime);
 
         // assert
         Assert.Equal(filePath, node.Path);
         Assert.Equal(123, node.Size);
         Assert.Equal(-1, node.Group);
+        Assert.Equal(createTime, node.CreationTime);
         Assert.True(string.IsNullOrEmpty(node.ChecksumHex));
     }
 
@@ -91,9 +74,9 @@ public sealed class FileNodeTests : IDisposable
         // arrange
         // Pick deterministic content so we can assert the MD5.
         var content = "Hello world\n"u8.ToArray();
-        var filePath = CreateTempFile("hello.txt", content);
+        var filePath = _fs.File("hello.txt", content);
 
-        var node = new FileNode(filePath, content.Length);
+        var node = new FileNode(filePath, content.Length, DateTimeOffset.Now);
 
         // act
         await node.ComputeChecksum();
@@ -107,7 +90,7 @@ public sealed class FileNodeTests : IDisposable
     public async Task ComputeChecksum_DoesNotThrow_WhenFileMissing_AndLeavesChecksumEmpty()
     {
         // arrange
-        var missingPath = Path.Combine(_tempRoot, "idontexist.dat");
+        var missingPath = PathUtil.P(_fs.Root, "idontexist.dat");
         var node = new FileNode(new CsvRowData
         {
             Path = missingPath,
@@ -124,16 +107,8 @@ public sealed class FileNodeTests : IDisposable
         Assert.Equal(string.Empty, node.ChecksumHex);
     }
 
-    public class TestFileNode : FileNode
+    private class TestFileNode(string path, long size, DateTimeOffset creationTime) : FileNode(path, size, creationTime)
     {
-        public TestFileNode(string path, long size) : base(path, size)
-        {
-        }
-
-        internal TestFileNode(CsvRowData rowInfo) : base(rowInfo)
-        {
-        }
-
         public void SetChecksum(String checksum)
         {
             ChecksumHex = checksum;
@@ -145,14 +120,14 @@ public sealed class FileNodeTests : IDisposable
     {            
         // arrange
         var content = new byte[10]; // 10 bytes
-        var filePath = CreateTempFile("data.bin", content);
+        var filePath = _fs.File("data.bin", content);
+        var creationTime = DateTimeOffset.Now;
 
-        var node = new TestFileNode(filePath, 10);
+        var node = new TestFileNode(filePath, content.Length, creationTime);
 
         // give it a checksum and custom group so we can assert them
         node.SetChecksum("FEEDFACE");
         // ctor from path sets Group = -1, so let's ensure we see that exact value
-        // If you later change Group before writing, update this assertion accordingly.
 
         using var sw = new StringWriter();
 
@@ -160,22 +135,18 @@ public sealed class FileNodeTests : IDisposable
         node.WriteCsvEntries(sw);
 
         // assert
-        var csv = sw.ToString().TrimEnd();
-
-        // Expected format:
-        // File,"{Path}",{Size},,"{Extension}",{Checksum}, {Group}
-        //
-        // Extension should be ".bin"
-        var expectedStart = $"File,\"{filePath}\",10,,FEEDFACE,-1";
-        Assert.Equal(expectedStart, csv);
+        var csv =  sw.ToString().TrimEnd();
+        
+        Assert.Matches(new Regex($"File,\"{filePath}\",.*,10,,FEEDFACE,-1"), csv);
+        
     }
 
     [Fact]
     public void AddFileSystemNode_Throws_InvalidOperationException()
     {
         // arrange
-        var filePath = CreateTempFile("leaf.txt", new byte[1]);
-        var node = new FileNode(filePath, 1);
+        var filePath = _fs.File("leaf.txt", new byte[1]);
+        var node = new FileNode(filePath, 1, DateTimeOffset.Now);
 
         // We'll just try to add itself. Any FileSystemNode triggers the same path.
         // We only care about the message.
@@ -188,8 +159,8 @@ public sealed class FileNodeTests : IDisposable
     public void Extension_ReturnsFileExtension()
     {
         // arrange
-        var filePath = CreateTempFile("document.test.ext", new byte[3]);
-        var node = new FileNode(filePath, 3);
+        var filePath = _fs.File("document.test.ext", new byte[3]);
+        var node = new FileNode(filePath, 3, DateTimeOffset.Now);
 
         // act
         var ext = node.Extension;

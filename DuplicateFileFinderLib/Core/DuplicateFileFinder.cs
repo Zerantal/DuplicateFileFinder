@@ -253,13 +253,13 @@ public sealed class DuplicateFileFinder
                     if (e.IsDirectory)
                     {
                         if (existingDirs.Add(e.FullPath))
-                            folder.AddFileSystemNode(new FolderNode(e.FullPath));
+                            folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc));
                     }
                     else
                     {
                         if (existingFiles.Add(e.FullPath))
                         {
-                            var fn = new FileNode(e.FullPath, e.Length);
+                            var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc);
                             folder.AddFileSystemNode(fn);
                             tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
                         }
@@ -368,8 +368,7 @@ public sealed class DuplicateFileFinder
     }
 
     // ------------ Queries ----------------
-
-    // TODO: review this method. It's doing things it needn't do
+    
     public async Task<IReadOnlyList<DuplicateFileRow>> GetDuplicateFileRowsAsync()
     {
         var results = new List<DuplicateFileRow>();
@@ -392,26 +391,11 @@ public sealed class DuplicateFileFinder
         foreach (var kv in groups.Where(kv => kv.Value.Count > 1))
         foreach (var f in kv.Value)
         {
-            var folderPath = Path.GetDirectoryName(f.Path) ?? string.Empty;
-            var ext = Path.GetExtension(f.Path);
-
-            DateTime creationUtc;
-            try
-            {
-                creationUtc = File.GetCreationTimeUtc(f.Path);
-            }
-            catch
-            {
-                creationUtc = DateTime.MinValue;
-            }
-
             results.Add(new DuplicateFileRow
             {
                 Path = f.Path,
                 Size = f.Size,
-                CreationTimeUtc = creationUtc,
-                Folder = folderPath,
-                Extension = ext,
+                CreationTimeUtc = f.CreationTime,
                 Checksum = f.ChecksumHex,
                 Group = f.Group
             });

@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Grouping;
@@ -7,43 +6,32 @@ using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.Grouping;
+namespace DuplicateFileFinderLibTests.Core;
 
 public sealed class ChecksumPipelineTests : IDisposable
 {
-    private readonly string _root;
-    private readonly IoUtil _ioUtil;
-
-    public ChecksumPipelineTests()
-    {
-        _root = Path.Combine(Path.GetTempPath(), "DFF_CP_" + Guid.NewGuid().ToString("N"));
-        _ioUtil = new IoUtil(_root);
-    }
+    private readonly TempFsFixture _fs = new();
 
     public void Dispose()
     {
-        _ioUtil.Dispose();
-    }
-
-    private FileNode MakeFile(FolderNode parent, string name, byte[] content)
-    {
-        var full = Path.Combine(_root, name);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllBytes(full, content);
-        var fn = new FileNode(full, content.LongLength);
-        parent.AddFileSystemNode(fn);
-        return fn;
+        _fs.Dispose();
     }
 
     [Fact]
     public async Task Computes_Checksums_BasedOn_Predicate()
     {
-        var root = new FolderNode(_root);
+        var faContent = "HELLO"u8.ToArray();
+        var fbContent = "WORLD"u8.ToArray();
+        var fUContent = "XY"u8.ToArray();
+        var fA = new FileNodeBuilder().Path(_fs.File("a.bin", faContent ))
+            .Size(faContent.LongLength).Build();
+        var fB = new FileNodeBuilder().Path(_fs.File( "b.bin", fbContent ))
+            .Size(fbContent.LongLength).Build();
+        var fU = new FileNodeBuilder().Path(_fs.File( "u.bin", fUContent ))
+            .Size(fUContent.LongLength).Build();
+        
+        var root = new FolderNodeBuilder(_fs.Root).File(fA).File(fB).File(fU).Build();
         var scope = root;
-
-        var fA = MakeFile(root, "a.bin", "HELLO"u8.ToArray()); // size 5
-        var fB = MakeFile(root, "b.bin", "WORLD"u8.ToArray()); // size 5
-        var fU = MakeFile(root, "u.bin", "XY"u8.ToArray()); // size 2
 
         var pipe = new ChecksumPipeline();
 
@@ -66,11 +54,18 @@ public sealed class ChecksumPipelineTests : IDisposable
     [Fact]
     public async Task Computes_FolderChecksum_When_AllChildrenHashed()
     {
-        var root = new FolderNode(_root);
-        var fA = MakeFile(root, "a.bin", "HELLO"u8.ToArray()); // 5
-        var fB = MakeFile(root, "b.bin", "WORLD"u8.ToArray()); // 5
-        var fU = MakeFile(root, "u.bin", "XY"u8.ToArray()); // 2
-
+        var faContent = "HELLO"u8.ToArray();
+        var fbContent = "WORLD"u8.ToArray();
+        var fUContent = "XY"u8.ToArray();
+        var fA = new FileNodeBuilder().Path(_fs.File("a.bin", faContent ))
+            .Size(faContent.LongLength).Build();
+        var fB = new FileNodeBuilder().Path(_fs.File( "b.bin", fbContent ))
+            .Size(fbContent.LongLength).Build();
+        var fU = new FileNodeBuilder().Path(_fs.File( "u.bin", fUContent ))
+            .Size(fUContent.LongLength).Build();
+        
+        var root = new FolderNodeBuilder(_fs.Root).File(fA).File(fB).File(fU).Build();
+        
         var pipe = new ChecksumPipeline();
         await pipe.ComputeAsync(root,
             shouldHash: _ => true, // hash every file
@@ -86,10 +81,12 @@ public sealed class ChecksumPipelineTests : IDisposable
     [Fact]
     public async Task Cancels_Cleanly()
     {
-        var root = new FolderNode(_root);
+        var rootBuilder = new FolderNodeBuilder(_fs.Root);
         for (int i = 0; i < 200; i++)
-            MakeFile(root, $"f{i}.bin", new byte[4096]);
+            rootBuilder.File(new FileNodeBuilder().Path(
+                _fs.File($"f{i}.bin", new byte[4096])).Build());
 
+        var root = rootBuilder.Build();
         var pipe = new ChecksumPipeline();
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();

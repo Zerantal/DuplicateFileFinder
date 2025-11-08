@@ -10,40 +10,32 @@ using Xunit;
 namespace DuplicateFileFinderLibTests.FileSystem;
 
 
-
 public sealed class FileEnumeratorTests : IDisposable
 {
-    private readonly string _root;
-    private readonly IoUtil _ioUtil;
-
-    public FileEnumeratorTests()
-    {
-        _root = Path.Combine(Path.GetTempPath(), "FE_" + Guid.NewGuid().ToString("N"));
-        _ioUtil = new IoUtil(_root);
-    }
-
+    private readonly TempFsFixture _fs = new();
+    
     public void Dispose()
     {
-        _ioUtil.Dispose();
+        _fs.Dispose();
     }
 
     [Fact]
     public void EnumerateChildren_YieldsFilesAndDirs()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "A"));
-        var f = _ioUtil.CreateFile("x.bin", new byte[3]);
+        Directory.CreateDirectory(PathUtil.P(_fs.Root, "A"));
+        var f = _fs.File("x.bin", new byte[3]);
 
         var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(_root, CancellationToken.None));
+        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
 
-        Assert.Contains(list, e => e.IsDirectory && e.FullPath == Path.Combine(_root, "A"));
+        Assert.Contains(list, e => e.IsDirectory && e.FullPath == PathUtil.P(_fs.Root, "A"));
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == f && e.Length == 3);
     }
 
     [Fact]
     public void EnumerateChildren_HandlesMissingRoot()
     {
-        var gone = Path.Combine(_root, "vanish");
+        var gone = PathUtil.P(_fs.Root, "vanish");
         Directory.CreateDirectory(gone);
         Directory.Delete(gone);
 
@@ -69,10 +61,10 @@ public sealed class FileEnumeratorTests : IDisposable
         if (!OperatingSystem.IsLinux())
             return;
         
-        var emptyFileName = _ioUtil.CreateFile("empty.bin", []);
+        var emptyFileName = _fs.File("empty.bin", []);
     
         var sut = new FileEnumerator();
-        var list =  new List<FsEntry>(sut.EnumerateChildren(_root, CancellationToken.None));
+        var list =  new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
         
         // zero-length regular file should be present
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == emptyFileName);
@@ -90,14 +82,14 @@ public sealed class FileEnumeratorTests : IDisposable
         // - keep.txt shows up
         // - link directory is not traversed/added if it's considered unsafe
 
-        var realDir = _ioUtil.CreateDir("realDir");
-        var realFile = _ioUtil.CreateFile("realFile.txt", "DATA"u8.ToArray());
+        var realDir = _fs.Dir("realDir");
+        var realFile = _fs.File("realFile.txt", "DATA"u8.ToArray());
 
         // We'll *attempt* to create a symlink "link{Dir,File}" pointing at "real{Dir,File}".
         // If symlinks are not allowed (e.g. Windows without dev mode / admin),
         // we'll just skip the "assert it's excluded" part rather than fail.
-        var linkDir = Path.Combine(_root, "linkDir");
-        var linkFile = Path.Combine(_root, "linkFile.txt");
+        var linkDir = PathUtil.P(_fs.Root, "linkDir");
+        var linkFile = PathUtil.P(_fs.Root, "linkFile.txt");
         bool symlinkCreated;
         try
         {
@@ -118,7 +110,7 @@ public sealed class FileEnumeratorTests : IDisposable
         }
 
         var sut = new FileEnumerator();
-        var list = new List<FsEntry>(sut.EnumerateChildren(_root, CancellationToken.None));
+        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
 
         if (symlinkCreated)
         {
@@ -136,7 +128,7 @@ public sealed class FileEnumeratorTests : IDisposable
     {
         if (!OperatingSystem.IsLinux()) return;
 
-        var dir = Path.Combine(_root, "pipes");
+        var dir = PathUtil.P(_fs.Root, "pipes");
         Directory.CreateDirectory(dir);
         var fifo = Path.Combine(dir, "p.fifo");
 

@@ -153,8 +153,7 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 FileName = r.Path,
                 FileSize = r.Size,
-                CreationDate = r.CreationTimeUtc.ToLocalTime(),
-                Folder = r.Folder,
+                CreationDate = r.CreationTimeUtc.LocalDateTime,
                 FileGroup = r.Group
             }).ToList();
             
@@ -229,20 +228,29 @@ public partial class MainWindowViewModel : ObservableObject
             }, token).ConfigureAwait(true);
 
             // Gather duplicates as GUI rows
-            var rows = await Task.Run(async () =>
-                await _engine.GetDuplicateFileRowsAsync().ConfigureAwait(false), token).ConfigureAwait(true);
-
-            var items = rows.Select(r => new DuplicateFileModel
+            IReadOnlyList<DuplicateFileRow> rows;
+            using (TimingLog.Start("Retrieving Duplicates"))
             {
-                FileName = r.Path,
-                FileSize = r.Size,
-                CreationDate = r.CreationTimeUtc.ToLocalTime(),
-                Folder = r.Folder,
-                FileGroup = r.Group
-            }).ToList();
+                rows = await Task.Run(async () =>
+                    await _engine.GetDuplicateFileRowsAsync().ConfigureAwait(false), token).ConfigureAwait(true);
+            }
 
-
-            DuplicateFiles.AddRange(items, true);
+            List<DuplicateFileModel> items;
+            using (TimingLog.Start("Transforming into DuplicateFileModel"))
+            {
+                items = rows.Select(r => new DuplicateFileModel
+                {
+                    FileName = r.Path,
+                    FileSize = r.Size,
+                    CreationDate = r.CreationTimeUtc.LocalDateTime,
+                    FileGroup = r.Group
+                }).ToList();
+            }
+            
+            using (TimingLog.Start("Adding duplicates to view"))
+            {
+                DuplicateFiles.AddRange(items, true);
+            }
 
             FilesScanned = _engine.TotalFilesScanned;
             DuplicatesFound = _engine.DuplicateFilesWastedCount;

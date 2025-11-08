@@ -4,9 +4,9 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Tree;
 
-public class FolderNode(string path) : FileSystemNode(path)
+public class FolderNode(string path, DateTimeOffset creationTime = default) : FileSystemNode(path, creationTime)
 {
-    internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path)
+    internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path, rowInfo.CreationTime)
     {
         Size = rowInfo.Size;
         AggregateFileCount = rowInfo.FileCount;
@@ -32,7 +32,7 @@ public class FolderNode(string path) : FileSystemNode(path)
         // files
         foreach (var f in Files)
         {
-            var nf = new FileNode(f.Path, f.Size)
+            var nf = new FileNode(f.Path, f.Size, f.CreationTime)
             {
                 Group = f.Group,
                 ChecksumBytes = f.ChecksumBytes is { Length: > 0 } fb ? (byte[])fb.Clone() : null
@@ -79,6 +79,7 @@ public class FolderNode(string path) : FileSystemNode(path)
         var fields = new string[CsvScanSerializer.FieldMap.Count];
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Kind, nameof(KindEnum.Folder));
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Path, $@"""{Path}""");
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTime, CreationTime.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Size, Size.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.FileCount, AggregateFileCount.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Checksum, ChecksumHex);

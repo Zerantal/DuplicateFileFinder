@@ -6,7 +6,7 @@ using NLog;
 
 namespace DuplicateFileFinderLib.FileSystem;
 
-public readonly record struct FsEntry(bool IsDirectory, string FullPath, long Length);
+public readonly record struct FsEntry(bool IsDirectory, string FullPath, long Length, DateTimeOffset CreationTimeUtc );
 
 public interface IFileEnumerator
 {
@@ -61,7 +61,7 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             e = new FileSystemEnumerable<FsEntry>(
                 dir,
-                (ref FileSystemEntry fe) => new FsEntry(fe.IsDirectory, fe.ToFullPath(), fe.Length),
+                (ref FileSystemEntry fe) => new FsEntry(fe.IsDirectory, fe.ToFullPath(), fe.Length, fe.CreationTimeUtc),
                 EnumOpts)
             {
                 ShouldIncludePredicate = (ref FileSystemEntry fe) =>
@@ -139,7 +139,7 @@ public sealed class FileEnumerator : IFileEnumerator
         foreach (var d in dirs)
         {
             token.ThrowIfCancellationRequested();
-            buffer.Add(new FsEntry(true, d, 0));
+            buffer.Add(new FsEntry(true, d, 0, Directory.GetCreationTimeUtc(d) ));
         }
 
         // Step 2: files
@@ -159,9 +159,12 @@ public sealed class FileEnumerator : IFileEnumerator
             token.ThrowIfCancellationRequested();
 
             long len;
+            DateTimeOffset creationTimeUtc;
             try
             {
-                len = new FileInfo(f).Length;
+                var fi = new FileInfo(f);
+                len = fi.Length;
+                creationTimeUtc = fi.CreationTimeUtc;
             }
             catch (Exception ex)
             {
@@ -173,7 +176,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, len));
+                buffer.Add(new FsEntry(false, f, len, creationTimeUtc));
         }
     }
 

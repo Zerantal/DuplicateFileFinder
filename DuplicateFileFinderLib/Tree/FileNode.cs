@@ -8,13 +8,13 @@ public class FileNode : FileSystemNode
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
-    internal FileNode(string path, long size) : base(path)
+    internal FileNode(string path, long size, DateTimeOffset creationTime = default) : base(path, creationTime)
     {
         Size = size;
         Group = -1;
     }
 
-    internal FileNode(CsvRowData rowInfo) : base(rowInfo.Path)
+    internal FileNode(CsvRowData rowInfo) : base(rowInfo.Path, rowInfo.CreationTime)
     {
         Size = rowInfo.Size;
         ChecksumHex = rowInfo.Checksum!;
@@ -39,7 +39,7 @@ public class FileNode : FileSystemNode
 
     public FileNode DeepClone()
     {
-        var clone = new FileNode(Path, Size);
+        var clone = new FileNode(Path, Size, CreationTime);
         clone.CopyCommonFieldsTo(this); 
         
         clone.Group = this.Group;
@@ -53,6 +53,7 @@ public class FileNode : FileSystemNode
         var fields = new string[CsvScanSerializer.FieldMap.Count];
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Kind, nameof(KindEnum.File));
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Path, $@"""{Path}""");
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTime, CreationTime.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Size, Size.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Checksum, ChecksumHex);
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Group, Group.ToString());
