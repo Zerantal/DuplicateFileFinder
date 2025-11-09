@@ -46,20 +46,23 @@ public sealed class SqliteMetadataIndex : IMetadataIndex
 
     public async IAsyncEnumerable<FileEntryMeta> EnumerateAllAsync([EnumeratorCancellation] CancellationToken ct)
     {
-        var cmd = _con.CreateCommand();
-        cmd.CommandText = @"SELECT d.path, f.name, f.size_bytes, f.mtime_ns, f.ctime_ns, f.inode, f.mode
-                            FROM file f JOIN dir d ON f.dir_id=d.id";
-        using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
-        {
-            yield return new FileEntryMeta(
-                r.GetString(0), r.GetString(1),
-                r.GetInt64(2),
-                DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(3)/1_000_000),
-                DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(4)/1_000_000),
-                r.IsDBNull(5) ? null : r.GetFieldValue<ulong>(5),
-                r.GetInt32(6));
-        }
+        yield break;
+        throw new NotImplementedException();
+        
+        // var cmd = _con.CreateCommand();
+        // cmd.CommandText = @"SELECT d.path, f.name, f.size_bytes, f.mtime_ns, f.ctime_ns, f.inode, f.mode
+        //                     FROM file f JOIN dir d ON f.dir_id=d.id";
+        // using var r = await cmd.ExecuteReaderAsync(ct);
+        // while (await r.ReadAsync(ct))
+        // {
+        //     yield return new FileEntryMeta(
+        //         r.GetString(0), r.GetString(1),
+        //         r.GetInt64(2),
+        //         DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(3)/1_000_000),
+        //         DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(4)/1_000_000),
+        //         r.IsDBNull(5) ? null : r.GetFieldValue<ulong>(5),
+        //         r.GetInt32(6));
+        // }
     }
 
     public async Task<DirectoryDiff> DiffDirectoryAsync(string dirPath, DateTimeOffset dirMtime, CancellationToken ct)

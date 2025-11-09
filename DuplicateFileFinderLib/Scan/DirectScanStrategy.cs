@@ -1,45 +1,36 @@
-// Scan/DirectScanStrategy.cs
-
+using System.Runtime.CompilerServices;
 using DuplicateFileFinderLib.Indexing;
 
 namespace DuplicateFileFinderLib.Scan;
 
-public sealed class DirectScanStrategy : IScanStrategy
+public sealed class DirectScanStrategy(IFileEnumerator fs) : IScanStrategy
 {
-    private readonly IEntryEnumerator _entries;
-    public DirectScanStrategy(IEntryEnumerator entries) => _entries = entries;
-
-    public async IAsyncEnumerable<FileEntryMeta> EnumerateTreeAsync(string root, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<FileEntryMeta> EnumerateChildrenAsync(
+        string directoryPath,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        // Directory recursion stays in FolderNode.TraverseFolders, so we enumerate per directory.
-        // Yield once to be truly async
-        await Task.Yield();
-
-        var stack = new Stack<string>();
-        stack.Push(root);
-
-        while (stack.Count > 0)
+        await foreach (var e in fs.EnumerateChildrenAsync(directoryPath, ct).ConfigureAwait(false))
         {
-            var dir = stack.Pop();
+            ct.ThrowIfCancellationRequested();
 
-            // yield files first; collect subdirs for traversal
-            var subdirs = new List<string>();
+            // Split once to avoid extra combines downstream
+            var dir = Path.GetDirectoryName(e.FullPath) ?? string.Empty;
+            var name = Path.GetFileName(e.FullPath);
 
-            await foreach (var e in _entries.EnumerateChildrenAsync(dir, ct))
-            {
-                ct.ThrowIfCancellationRequested();
-                var full = Path.Combine(e.DirPath, e.Name);
-                var isDir = Directory.Exists(full); // keep behavior consistent with current enumerator
-
-                if (isDir) subdirs.Add(full);
-                else yield return e;
-            }
-
-            // DFS using your existing traversal behavior
-            for (int i = subdirs.Count - 1; i >= 0; i--) stack.Push(subdirs[i]);
+            yield return new FileEntryMeta(
+                DirPath: dir,
+                Name: name,
+                SizeBytes: e.Length,
+                MTimeUtc: e.LastWriteTimeUtc,
+                CTimeUtc: e.CreationTimeUtc,
+                Inode: null,
+                Mode: 0,
+                IsDirectory: e.IsDirectory
+            );
         }
     }
 }
+
 
 
 // // DuplicateFileFinderLib/Scan/DirectScanStrategy.cs

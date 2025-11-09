@@ -1,5 +1,6 @@
 // DuplicateFileFinderLib/Core/DuplicateFileFinder.cs
 using DuplicateFileFinderLib.Grouping;
+using DuplicateFileFinderLib.Indexing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Scan;
@@ -18,29 +19,26 @@ public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
     private readonly Dictionary<long, int> _fileSizes = new(); // filesize => count
-    private readonly IFileEnumerator _fs;
     private readonly IGroupingService _grouping;
     private readonly IScanSerializer _serializer;
     private readonly IScanStrategy _scanStrategy;
-    private readonly IEntryEnumerator _entryEnumerator;
-
 
     private RootNode _root = new();
 
-    private DuplicateFileFinder(IFileEnumerator? fs = null,
+    private DuplicateFileFinder(
         IChecksumPipeline? checksums = null,
         IGroupingService? grouping = null,
         IScanSerializer? serializer = null,
-        IScanStrategy scanStrategy = null,
-     IEntryEnumerator entryEnumerator = null
+        IScanStrategy? scanStrategy = null,
+        IFileEnumerator? fsEnumerator = null
         )
     {
-        _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipeline();
         _grouping = grouping ?? new FileSystemGroupsAdapter();
         _serializer = serializer ?? new CsvScanSerializer();
-        _entryEnumerator = entryEnumerator ?? new FileSystemEntryEnumerator(new FileEnumerator());
-        _scanStrategy = scanStrategy ?? new DirectScanStrategy(_entryEnumerator); 
+        
+        _scanStrategy = scanStrategy ?? new DirectScanStrategy(fsEnumerator ?? new FileEnumerator());
+        
     }
 
     public DuplicateFileFinder() : this(null)
@@ -76,36 +74,39 @@ public sealed class DuplicateFileFinder
         // 2) Enumerate (indeterminate progress)
         Dictionary<long, int> tempSizes = new Dictionary<long, int>();
         using (PhaseScope.Begin(ScanPhase.Enumerating))
-        using (TimingLog.Start(nameof(ScanPhase.Enumerating)))
+        using (TimingLog.StartPhase(ScanPhase.Enumerating))
         {
             await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, token);
+            TimingLog.Counter("folders", scope.AggregateFolderCount);
+            TimingLog.Counter("files",   scope.AggregateFileCount);
         }
         
         // 3) Hashing (determinate)
         using (PhaseScope.Begin(ScanPhase.Hashing))
-        using (TimingLog.Start(nameof(ScanPhase.Hashing)))
+        using (TimingLog.StartPhase(ScanPhase.Hashing))
         {
             var totalToHash = CountHashTargets(scope, tempSizes);
+            TimingLog.Counter("targets", totalToHash);
             await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
         }
 
         // 4) Grouping (determinate)
         using (PhaseScope.Begin(ScanPhase.Grouping))
-        using (TimingLog.Start(nameof(ScanPhase.Grouping)))
+        using (TimingLog.StartPhase(ScanPhase.Grouping))
         {
             await RunGroupingAsync(scope, throttledProgress, token);
         }
 
         // 5) Commit on success (atomic)
         using (PhaseScope.Begin(ScanPhase.Committing))
-        using (TimingLog.Start(nameof(ScanPhase.Committing)))
+        using (TimingLog.StartPhase(ScanPhase.Committing))
         {
             CommitWorkspace(workRoot, scope, location);
         }
 
         // 6) Recompute aggregates & rebuild size index
         using (PhaseScope.Begin(ScanPhase.RecomputingAggregates))
-        using (TimingLog.Start(nameof(ScanPhase.RecomputingAggregates)))
+        using (TimingLog.StartPhase(ScanPhase.RecomputingAggregates))
         {
             await _root.RecomputeSubtreeAggregatesAsync();
             RebuildFileSizesFromRoot();
@@ -200,9 +201,9 @@ public sealed class DuplicateFileFinder
         await _checksums.ComputeAsync(
             scope,
             f => tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null,
-            processed =>
+            (processed, filename) =>
             {
-                Report(progress, ScanPhase.Hashing, "Hashing files...",
+                Report(progress, ScanPhase.Hashing, $"File hashed: {filename}",
                     totalToHash == 0 ? 1.0 : (double)processed / totalToHash,
                     processed: processed,
                     total: totalToHash);
@@ -231,6 +232,9 @@ public sealed class DuplicateFileFinder
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken token)
     {
+        if (scope is null) throw new ArgumentNullException(nameof(scope));
+        if (tempSizes is null) throw new ArgumentNullException(nameof(tempSizes));
+
         long foldersVisited = 0;
 
         await scope.TraverseFolders(
@@ -239,31 +243,34 @@ public sealed class DuplicateFileFinder
                 token.ThrowIfCancellationRequested();
 
                 foldersVisited++;
-                Report(progress, ScanPhase.Enumerating,
-                    $"Scanning {folder.Path}",
-                    indeterminate: true,
-                    processed: foldersVisited);
-                await Task.CompletedTask;
+                Report(progress, ScanPhase.Enumerating, $"Scanning {folder.Path}",
+                    indeterminate: true, processed: foldersVisited);
 
-                // 1) Seed tempSizes from any existing (cloned/promoted) files
-                foreach (var existingFile in folder.Files)
-                    tempSizes[existingFile.Size] = tempSizes.TryGetValue(existingFile.Size, out var n) ? n + 1 : 1;
+                // seed tempSizes from preexisting nodes
+                foreach (var f in folder.Files)
+                    tempSizes[f.Size] = tempSizes.TryGetValue(f.Size, out var n) ? n + 1 : 1;
 
-                // 2) Merge live FS enumeration with existing children (no re-adds)
-                var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                // sets to avoid re-adds; keep OrdinalIgnoreCase for NTFS/fuseblk
+                var cmp = StringComparer.OrdinalIgnoreCase;
+                var existingFiles = new HashSet<string>(folder.Files.Select(x => x.Path), cmp);
+                var existingDirs = new HashSet<string>(folder.SubFolders.Select(x => x.Path), cmp);
 
-                foreach (var f in folder.Files) existingFiles.Add(f.Path);
-                foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
+                await foreach (var e in _scanStrategy.EnumerateChildrenAsync(folder.Path, token))
+                {
+                    token.ThrowIfCancellationRequested();
 
-                await foreach (var e in _entryEnumerator.EnumerateChildrenAsync(folder.Path, token))
-                    if (Directory.Exists(Path.Combine(e.DirPath, e.Name)))
+                    // full path once; avoid Path.Combine twice
+                    var full = e.DirPath.Length == 0 ? e.Name : Path.Join(e.DirPath, e.Name);
+
+                    // Directory or file? Your enumerator already knows; if not, use e.IsDirectory when you add it.
+                    
+                    if (e.IsDirectory)
                     {
-                        if (existingDirs.Add(Path.Combine(e.DirPath, e.Name)))
-                            folder.AddFileSystemNode(new FolderNode(Path.Combine(e.DirPath, e.Name), e.CTimeUtc));                  }
+                        if (existingDirs.Add(full))
+                            folder.AddFileSystemNode(new FolderNode(full, e.CTimeUtc));
+                    }
                     else
                     {
-                        var full = Path.Combine(e.DirPath, e.Name);
                         if (existingFiles.Add(full))
                         {
                             var fn = new FileNode(full, e.SizeBytes, e.CTimeUtc);
@@ -271,6 +278,7 @@ public sealed class DuplicateFileFinder
                             tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
                         }
                     }
+                }
             },
             f =>
             {
@@ -278,6 +286,32 @@ public sealed class DuplicateFileFinder
                 return Task.CompletedTask;
             });
     }
+    
+    private static FolderNode EnsureFolderNode(FolderNode ancestor, string targetFolderPath)
+    {
+        if (string.Equals(ancestor.Path, targetFolderPath, StringComparison.Ordinal)) return ancestor;
+
+        var rel = Path.GetRelativePath(ancestor.Path, targetFolderPath);
+        if (rel is "." or "") return ancestor;
+
+        var parts = rel.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        var cursor = ancestor;
+        var current = ancestor.Path;
+
+        foreach (var part in parts)
+        {
+            current = Path.Combine(current, part);
+            var existing = cursor.FindSubFolderByPath(current);
+            if (existing is null)
+            {
+                existing = new FolderNode(current,  creationTimeUtc: default);
+                cursor.AddFileSystemNode(existing);
+            }
+            cursor = existing;
+        }
+        return cursor;
+    }
+
 
     private static void Report(
         IProgress<DuplicateFileFinderProgressReport>? progress,

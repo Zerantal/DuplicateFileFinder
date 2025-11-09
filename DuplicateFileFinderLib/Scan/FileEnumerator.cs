@@ -1,5 +1,4 @@
-// DuplicateFileFinderLib/FileSystem/FileEnumerator.cs
-
+// DuplicateFileFinderLib/Scan/FileEnumerator.cs
 using System.IO.Enumeration;
 using DuplicateFileFinderLib.Util;
 using NLog;
@@ -23,6 +22,66 @@ public sealed class FileEnumerator : IFileEnumerator
             FileAttributes.NoScrubData
     };
 
+    // ---------------- NEW ASYNC VERSION ----------------
+    public async IAsyncEnumerable<FsEntry> EnumerateChildrenAsync(
+        string dir,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token)
+    {
+        // Offload blocking work onto the thread pool to avoid tying up async callers
+        await Task.Yield();
+
+        if (IsVirtualOrEphemeralRoot(dir))
+        {
+            Log.Info("Skipping ephemeral directory: {dir}", dir);
+            yield break;
+        }
+
+        var buffer = new List<FsEntry>(256);
+
+        bool ok;
+        try
+        {
+            ok = TryFillBufferFast(dir, buffer, token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Error during fast enumeration of {path}", dir);
+            ok = false;
+        }
+
+        if (!ok)
+        {
+            try
+            {
+                TryFillBufferFallback(dir, buffer, token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "Error during fallback enumeration of {path}", dir);
+                buffer.Clear();
+            }
+        }
+
+        foreach (var t in buffer)
+        {
+            token.ThrowIfCancellationRequested();
+            yield return t;
+
+            // cooperative scheduling for large dirs
+            if ((buffer.Count & 0xFF) == 0)
+                await Task.Yield();
+        }
+    }
+
+    // Legacy sync version can stay for existing tests until everything switches to async
     public IEnumerable<FsEntry> EnumerateChildren(string dir, CancellationToken token)
     {
         if (IsVirtualOrEphemeralRoot(dir))
@@ -73,7 +132,8 @@ public sealed class FileEnumerator : IFileEnumerator
                     if (OperatingSystem.IsLinux())
                     {
                         var full = fe.ToFullPath();
-                        return UnixTypes.TryGetKind(full, out var k) && k == UnixTypes.UnixKind.Regular;
+                        return UnixTypes.TryGetKind(full, out var k) &&
+                               k == UnixTypes.UnixKind.Regular;
                     }
 
                     return false;
@@ -132,7 +192,9 @@ public sealed class FileEnumerator : IFileEnumerator
         foreach (var d in dirs)
         {
             token.ThrowIfCancellationRequested();
-            buffer.Add(new FsEntry(true, d, 0, Directory.GetLastWriteTimeUtc(d), Directory.GetCreationTimeUtc(d) ));
+            buffer.Add(new FsEntry(true, d, 0,
+                Directory.GetLastWriteTimeUtc(d),
+                Directory.GetCreationTimeUtc(d)));
         }
 
         // Step 2: files
@@ -176,7 +238,6 @@ public sealed class FileEnumerator : IFileEnumerator
     }
 
     // ---------- Linux virtual/ephemeral roots ----------
-
     private static bool IsVirtualOrEphemeralRoot(string path)
     {
         if (!OperatingSystem.IsLinux()) return false;

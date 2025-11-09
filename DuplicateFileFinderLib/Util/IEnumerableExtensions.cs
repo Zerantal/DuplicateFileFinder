@@ -6,7 +6,7 @@ public static class IEnumerableExtensions
     {
         foreach (var item in enumerable)
         {
-            yield return await Task.FromResult(item);
+            yield return Task.FromResult(item).Result;
         }
     }   
 }

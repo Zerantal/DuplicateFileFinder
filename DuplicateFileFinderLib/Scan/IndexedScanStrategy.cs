@@ -31,7 +31,7 @@ public sealed class IndexedScanStrategy : IScanStrategy
     //     throw new NotImplementedException();
     // }
 
-    public IAsyncEnumerable<FileEntryMeta> EnumerateTreeAsync(string root, CancellationToken ct)
+    public IAsyncEnumerable<FileEntryMeta> EnumerateChildrenAsync(string root, CancellationToken ct)
     {
         throw new NotImplementedException();
     }

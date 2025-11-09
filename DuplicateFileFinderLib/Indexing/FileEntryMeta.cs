@@ -7,4 +7,6 @@ public sealed record FileEntryMeta(
     DateTimeOffset MTimeUtc,
     DateTimeOffset CTimeUtc,
     ulong? Inode,
-    int Mode);
+    int Mode,
+    bool IsDirectory
+    );

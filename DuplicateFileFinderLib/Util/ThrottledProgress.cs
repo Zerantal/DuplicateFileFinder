@@ -1,6 +1,4 @@
-using DuplicateFileFinderLib.Util;
-
-namespace DuplicateFileFinderLib.Core;
+namespace DuplicateFileFinderLib.Util;
 
 public sealed class ThrottledProgress(
     IProgress<DuplicateFileFinderProgressReport> inner,

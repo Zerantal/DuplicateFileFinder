@@ -4,8 +4,10 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Tree;
 
-public class FolderNode(string path, DateTimeOffset creationTime = default) : FileSystemNode(path, creationTime)
+public class FolderNode(string path, DateTimeOffset creationTimeUtc = default) : FileSystemNode(path, creationTimeUtc)
 {
+    private Dictionary<string, FileNode>? _nameIndex;
+    
     internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path, rowInfo.CreationTime)
     {
         Size = rowInfo.Size;
@@ -91,7 +93,7 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
     public virtual void UpdateFolderStats()
     {
         AggregateFileCount = Files.Count + SubFolders.Sum(s => s.AggregateFileCount);
-        Size = children.Sum(n => n.Size);
+        Size = Children.Sum(n => n.Size);
         AggregateFolderCount = 1 + SubFolders.Sum(s => s.AggregateFolderCount);
     }
 
@@ -99,10 +101,10 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
     public void ComputeChecksum(CancellationToken token = default)
     {
         // If any child lacks a checksum, we can't form a stable folder hash yet.            
-        if (children.Any(f => f.ChecksumBytes == null))
+        if (Children.Any(f => f.ChecksumBytes == null))
             return;
 
-        var combinedChecksums = children.Select(f => f.ChecksumBytes!).ToList();
+        var combinedChecksums = Children.Select(f => f.ChecksumBytes!).ToList();
 
         combinedChecksums.Sort(static (a, b) =>
         {
@@ -126,5 +128,16 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
 
         md5.TransformFinalBlock([], 0, 0);
         ChecksumBytes = md5.Hash;
+    }
+    
+    internal FileNode? FindByNameIndexed(string name, StringComparer cmp)
+    {
+        _nameIndex ??= Files.ToDictionary(f => System.IO.Path.GetFileName(f.Path), f => f, cmp);
+        return _nameIndex.TryGetValue(name, out var n) ? n : null;
+    }
+    
+    internal void IndexAdd(FileNode f, StringComparer cmp)
+    {
+        (_nameIndex ??= new(cmp))[System.IO.Path.GetFileName(f.Path)] = f;
     }
 }

@@ -6,5 +6,5 @@ namespace DuplicateFileFinderLib.Scan;
 
 public interface IScanStrategy
 {
-    IAsyncEnumerable<FileEntryMeta> EnumerateTreeAsync(string root, CancellationToken ct);
+    IAsyncEnumerable<FileEntryMeta> EnumerateChildrenAsync(string root, CancellationToken ct);
 }
