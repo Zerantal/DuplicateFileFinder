@@ -10,7 +10,7 @@ public interface IChecksumPipeline
 {
     Task ComputeAsync(FolderNode scope,
         Func<FileNode, bool> shouldHash,
-        Action<int>? onProgress,
+        Action<int, string>? onProgress,
         CancellationToken ct);
 }
 
@@ -18,7 +18,7 @@ public sealed class ChecksumPipeline : IChecksumPipeline
 {
     public async Task ComputeAsync(FolderNode scope,
         Func<FileNode, bool> shouldHash,
-        Action<int>? onProgress,
+        Action<int, string>? onProgress,
         CancellationToken ct)
     {
         var timer = Stopwatch.StartNew();
@@ -37,7 +37,7 @@ public sealed class ChecksumPipeline : IChecksumPipeline
                     await file.ComputeChecksum(ct);
                     
                     Interlocked.Increment(ref processed);
-                    onProgress?.Invoke(processed);
+                    onProgress?.Invoke(processed, file.Path);
                 }
             }, ct);
 

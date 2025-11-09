@@ -69,36 +69,39 @@ public sealed class DuplicateFileFinder
         // 2) Enumerate (indeterminate progress)
         Dictionary<long, int> tempSizes = new Dictionary<long, int>();
         using (PhaseScope.Begin(ScanPhase.Enumerating))
-        using (TimingLog.Start(nameof(ScanPhase.Enumerating)))
+        using (TimingLog.StartPhase(ScanPhase.Enumerating))
         {
             await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, token);
+            TimingLog.Counter("folders", scope.AggregateFolderCount);
+            TimingLog.Counter("files",   scope.AggregateFileCount);
         }
         
         // 3) Hashing (determinate)
         using (PhaseScope.Begin(ScanPhase.Hashing))
-        using (TimingLog.Start(nameof(ScanPhase.Hashing)))
+        using (TimingLog.StartPhase(ScanPhase.Hashing))
         {
             var totalToHash = CountHashTargets(scope, tempSizes);
+            TimingLog.Counter("targets", totalToHash);
             await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
         }
 
         // 4) Grouping (determinate)
         using (PhaseScope.Begin(ScanPhase.Grouping))
-        using (TimingLog.Start(nameof(ScanPhase.Grouping)))
+        using (TimingLog.StartPhase(ScanPhase.Grouping))
         {
             await RunGroupingAsync(scope, throttledProgress, token);
         }
 
         // 5) Commit on success (atomic)
         using (PhaseScope.Begin(ScanPhase.Committing))
-        using (TimingLog.Start(nameof(ScanPhase.Committing)))
+        using (TimingLog.StartPhase(ScanPhase.Committing))
         {
             CommitWorkspace(workRoot, scope, location);
         }
 
         // 6) Recompute aggregates & rebuild size index
         using (PhaseScope.Begin(ScanPhase.RecomputingAggregates))
-        using (TimingLog.Start(nameof(ScanPhase.RecomputingAggregates)))
+        using (TimingLog.StartPhase(ScanPhase.RecomputingAggregates))
         {
             await _root.RecomputeSubtreeAggregatesAsync();
             RebuildFileSizesFromRoot();
@@ -193,9 +196,9 @@ public sealed class DuplicateFileFinder
         await _checksums.ComputeAsync(
             scope,
             f => tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null,
-            processed =>
+            (processed, filename) =>
             {
-                Report(progress, ScanPhase.Hashing, "Hashing files...",
+                Report(progress, ScanPhase.Hashing, $"File hashed: {filename}",
                     totalToHash == 0 ? 1.0 : (double)processed / totalToHash,
                     processed: processed,
                     total: totalToHash);
