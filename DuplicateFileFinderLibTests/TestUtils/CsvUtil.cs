@@ -11,7 +11,7 @@ public static class CsvSpec
     // Single source of truth for CSV header with CreationTimeUtc added.
     public static readonly string[] Header =
     [
-        "Kind","Path", "CreationTime", "Size","FileCount","Checksum","Group"
+        "Kind","Path", "CreationTimeUtc", "ModifiedTimeUtc", "Size","FileCount","Checksum","Group"
     ];
 
     public static string HeaderLine => string.Join(',', Header);
@@ -21,6 +21,7 @@ public record CsvRow(
     KindEnum Kind,
     string Path,
     DateTimeOffset CreationTimeUtc,
+    DateTimeOffset ModifiedTimeUtc,
     long Size,
     int? FileCount,
     string Checksum,
@@ -53,12 +54,13 @@ public static class CsvTestUtil
             var kind = Enum.Parse<KindEnum>(f[0]);
             var path = Unquote(f[1]);
             var createdUtc = DateTimeOffset.Parse(f[2]);
-            var size = long.Parse(f[3]);
-            int? fileCount = int.TryParse(f[4], out var fc) ? fc : null;
-            var checksum = Unquote(f[5]);
-            var group = int.Parse(f[6]);
+            var modifiedUtc = DateTimeOffset.Parse(f[3]);
+            var size = long.Parse(f[4]);
+            int? fileCount = int.TryParse(f[5], out var fc) ? fc : null;
+            var checksum = Unquote(f[6]);
+            var group = int.Parse(f[7]);
 
-            rows.Add(new CsvRow(kind, path, createdUtc, size, fileCount, checksum, group));
+            rows.Add(new CsvRow(kind, path, createdUtc, modifiedUtc, size, fileCount, checksum, group));
         }
         return rows.ToArray();
     }

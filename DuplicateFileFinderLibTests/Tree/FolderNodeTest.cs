@@ -129,12 +129,13 @@ public sealed class FolderNodeTests : IDisposable
         //   sub/
         //     c.log (5 bytes)
 
+        var modifiedTime = DateTimeOffset.Now;
         var c = new FileNodeBuilder().Path("/root/sub/c.log").Size(5).Build();
-        var sub = new FolderNodeBuilder("/root/sub", DateTimeOffset.Now - TimeSpan.FromDays(1))
+        var sub = new FolderNodeBuilder("/root/sub", DateTimeOffset.Now - TimeSpan.FromDays(1), modifiedTime)
             .File(c).Build();
         var a = new FileNodeBuilder().Path("/root/a.txt").Size(20).Build();
         var b = new FileNodeBuilder().Path("/root/b.bin").Size(10).Build();
-        var root = new FolderNodeBuilder("/root", DateTimeOffset.Now - TimeSpan.FromDays(2))
+        var root = new FolderNodeBuilder("/root", DateTimeOffset.Now - TimeSpan.FromDays(2), modifiedTime)
             .File(a).File(b).Folder(sub).Build();
 
         // To get sensible AggregateFileCount/Size values in CSV:
@@ -154,18 +155,18 @@ public sealed class FolderNodeTests : IDisposable
         Assert.StartsWith("Folder,\"" + root.Path + "\",", csv[0]);
 
         // We should see a line for a.txt:
-        // File,"{Path}",{CreationTime},{Size},,{Checksum},{Group}
-        var expected = string.Join(',', "File", $"\"{a.Path}\"", a.CreationTime, a.Size, "", "");
+        // File,"{Path}",{CreationTimeUtc},{Size},,{Checksum},{Group}
+        var expected = string.Join(',', "File", $"\"{a.Path}\"", a.CreationTimeUtc, a.ModifiedTimeUtc, a.Size, "", "");
         Assert.Contains(csv, l => l.StartsWith(expected));
 
         // We should see b.bin:
-        Assert.Contains(csv, l => l.StartsWith("File,\"" + b.Path + $"\",{b.CreationTime},{b.Size},,"));
+        Assert.Contains(csv, l => l.StartsWith("File,\"" + b.Path + $"\",{b.CreationTimeUtc},{b.ModifiedTimeUtc},{b.Size},,"));
 
         // We should see the subfolder line:
         Assert.Contains(csv, l => l.StartsWith("Folder,\"" + sub.Path + "\","));
 
         // And c.log:
-        Assert.Contains(csv, l => l.StartsWith("File,\"" + c.Path + $"\",{c.CreationTime},{c.Size},,"));
+        Assert.Contains(csv, l => l.StartsWith("File,\"" + c.Path + $"\",{c.CreationTimeUtc},{c.ModifiedTimeUtc},{c.Size},,"));
     }
 
     [Fact]

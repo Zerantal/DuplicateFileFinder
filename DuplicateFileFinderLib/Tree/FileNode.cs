@@ -8,13 +8,17 @@ public class FileNode : FileSystemNode
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
-    internal FileNode(string path, long size, DateTimeOffset creationTime = default) : base(path, creationTime)
+    internal FileNode(
+        string path,
+        long size,
+        DateTimeOffset creationTimeUtc = default,
+        DateTimeOffset modifiedTimeUtc = default) : base(path, creationTimeUtc, modifiedTimeUtc)
     {
         Size = size;
         Group = -1;
     }
 
-    internal FileNode(CsvRowData rowInfo) : base(rowInfo.Path, rowInfo.CreationTime)
+    internal FileNode(CsvRowData rowInfo) : base(rowInfo.Path, rowInfo.CreationTimeUtc, rowInfo.ModifiedTimeUtc)
     {
         Size = rowInfo.Size;
         ChecksumHex = rowInfo.Checksum!;
@@ -39,7 +43,7 @@ public class FileNode : FileSystemNode
 
     public FileNode DeepClone()
     {
-        var clone = new FileNode(Path, Size, CreationTime);
+        var clone = new FileNode(Path, Size, CreationTimeUtc, ModifiedTimeUtc);
         clone.CopyCommonFieldsTo(this); 
         
         clone.Group = this.Group;
@@ -53,7 +57,8 @@ public class FileNode : FileSystemNode
         var fields = new string[CsvScanSerializer.FieldMap.Count];
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Kind, nameof(KindEnum.File));
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Path, $@"""{Path}""");
-        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTime, CreationTime.ToString());
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTimeUtc, CreationTimeUtc.ToString());
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.ModifiedTimeUtc, ModifiedTimeUtc.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Size, Size.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Checksum, ChecksumHex);
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Group, Group.ToString());

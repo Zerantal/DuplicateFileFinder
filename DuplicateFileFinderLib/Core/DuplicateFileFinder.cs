@@ -4,6 +4,8 @@ using DuplicateFileFinderLib.FileSystem;
 using DuplicateFileFinderLib.Grouping;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLib.Util;
 
@@ -24,8 +26,12 @@ public sealed class DuplicateFileFinder
     private readonly IScanSerializer _serializer;
 
     private RootNode _root = new();
+    
+    private readonly Repo? _repo;
+    private readonly RepoCompactionPolicy _compactPolicy = new();
 
-    private DuplicateFileFinder(IFileEnumerator? fs = null,
+    public DuplicateFileFinder(Repo? repo = null,
+        IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null,
         IGroupingService? grouping = null,
         IScanSerializer? serializer = null)
@@ -34,6 +40,7 @@ public sealed class DuplicateFileFinder
         _checksums = checksums ?? new ChecksumPipeline();
         _grouping = grouping ?? new FileSystemGroupsAdapter();
         _serializer = serializer ?? new CsvScanSerializer();
+        _repo = repo;
     }
 
     public DuplicateFileFinder() : this(null)
@@ -84,7 +91,16 @@ public sealed class DuplicateFileFinder
             TimingLog.Counter("targets", totalToHash);
             await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, token);
         }
-
+        
+        // 3.5) Persist to repo
+        if (_repo is not null)
+        {
+            using var session = _repo.BeginScan(scanId: Environment.TickCount, rootPath: location);
+            await PersistScopeToRepoAsync(session, scope, token);
+            session.Commit();
+            _repo.CompactIfNeeded(); // optional, or call at app-controlled cadence
+        }
+        
         // 4) Grouping (determinate)
         using (PhaseScope.Begin(ScanPhase.Grouping))
         using (TimingLog.StartPhase(ScanPhase.Grouping))
@@ -109,6 +125,31 @@ public sealed class DuplicateFileFinder
 
         Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
     }
+    
+    private static async Task PersistScopeToRepoAsync(ScanSession session, FolderNode scope, CancellationToken token)
+    {
+        await scope.TraverseFolders(folder =>
+        {
+            token.ThrowIfCancellationRequested();
+
+            foreach (var f in folder.Files)
+            {
+                // Only persist files that were hashed in this run (or were already hashed)
+                var hash = f.ChecksumBytes;
+                if (hash is null || hash.Length == 0) continue;
+
+                session.UpsertFile(
+                    fullPath: f.Path,
+                    size: f.Size,
+                    hash: hash,
+                    modified:  f.ModifiedTimeUtc,
+                    created:  f.CreationTimeUtc
+                );
+            }
+            return Task.CompletedTask;
+        });
+    }
+
 
     private void RebuildFileSizesFromRoot()
     {
@@ -256,13 +297,13 @@ public sealed class DuplicateFileFinder
                     if (e.IsDirectory)
                     {
                         if (existingDirs.Add(e.FullPath))
-                            folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc));
+                            folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc, e.ModifiedTimeUtc));
                     }
                     else
                     {
                         if (existingFiles.Add(e.FullPath))
                         {
-                            var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc);
+                            var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc, e.ModifiedTimeUtc);
                             folder.AddFileSystemNode(fn);
                             tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
                         }
@@ -398,7 +439,7 @@ public sealed class DuplicateFileFinder
             {
                 Path = f.Path,
                 Size = f.Size,
-                CreationTimeUtc = f.CreationTime,
+                CreationTimeUtc = f.CreationTimeUtc,
                 Checksum = f.ChecksumHex,
                 Group = f.Group
             });

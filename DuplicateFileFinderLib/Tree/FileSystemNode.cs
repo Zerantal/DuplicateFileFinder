@@ -2,7 +2,10 @@
 
 namespace DuplicateFileFinderLib.Tree;
 
-public abstract class FileSystemNode(string path, DateTimeOffset creationTime = default )
+public abstract class FileSystemNode(
+    string path,
+    DateTimeOffset creationTimeUtc = default,
+    DateTimeOffset modifiedTimeUtc = default )
 {
     protected readonly List<FileSystemNode> Children = [];
     public byte[]? ChecksumBytes { get; protected internal set; }
@@ -17,7 +20,9 @@ public abstract class FileSystemNode(string path, DateTimeOffset creationTime = 
     public int Group { get; internal set; } = -2;
     public long Size { get; protected internal set; } // in bytes
 
-    public DateTimeOffset CreationTime { get; protected set; } = creationTime; 
+    public DateTimeOffset CreationTimeUtc { get; protected set; } = creationTimeUtc;
+    
+    public DateTimeOffset ModifiedTimeUtc { get; protected set; } = modifiedTimeUtc; 
 
     public ReadOnlyCollection<FolderNode> SubFolders
     {

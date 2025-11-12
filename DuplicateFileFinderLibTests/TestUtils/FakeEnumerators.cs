@@ -18,7 +18,8 @@ public sealed class TestEnumerateCanceler(int yieldBeforeSignal, int totalToYiel
             yield return new FsEntry(IsDirectory: false,
                 FullPath: Path.Combine(dir, $"f{i}.bin"),
                 Length: 1,
-                CreationTimeUtc: DateTimeOffset.Now);
+                CreationTimeUtc: DateTimeOffset.Now,
+                ModifiedTimeUtc: DateTimeOffset.Now);
         }
     }
 }
@@ -31,7 +32,12 @@ public sealed class TestEnumeratorThrower(int throwOnIndex) : IFileEnumerator
         {
             token.ThrowIfCancellationRequested();
             if (i == throwOnIndex) throw new IOException("Injected iterator failure");
-            yield return new FsEntry(false, Path.Combine(dir, $"f{i}.bin"), 1, DateTimeOffset.Now);
+            yield return new FsEntry(
+                false, 
+                Path.Combine(dir, $"f{i}.bin"),
+                1,
+                DateTimeOffset.Now,
+                DateTimeOffset.Now);
         }
     }
 }

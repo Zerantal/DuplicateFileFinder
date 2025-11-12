@@ -6,7 +6,12 @@ using NLog;
 
 namespace DuplicateFileFinderLib.FileSystem;
 
-public readonly record struct FsEntry(bool IsDirectory, string FullPath, long Length, DateTimeOffset CreationTimeUtc );
+public readonly record struct FsEntry(
+    bool IsDirectory,
+    string FullPath,
+    long Length,
+    DateTimeOffset CreationTimeUtc,
+    DateTimeOffset ModifiedTimeUtc);
 
 public interface IFileEnumerator
 {
@@ -61,7 +66,12 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             e = new FileSystemEnumerable<FsEntry>(
                 dir,
-                (ref FileSystemEntry fe) => new FsEntry(fe.IsDirectory, fe.ToFullPath(), fe.Length, fe.CreationTimeUtc),
+                (ref FileSystemEntry fe) => new FsEntry(
+                    fe.IsDirectory,
+                    fe.ToFullPath(),
+                    fe.Length,
+                    fe.CreationTimeUtc,
+                    fe.LastWriteTimeUtc),
                 EnumOpts)
             {
                 ShouldIncludePredicate = (ref FileSystemEntry fe) =>
@@ -139,7 +149,8 @@ public sealed class FileEnumerator : IFileEnumerator
         foreach (var d in dirs)
         {
             token.ThrowIfCancellationRequested();
-            buffer.Add(new FsEntry(true, d, 0, Directory.GetCreationTimeUtc(d) ));
+            DirectoryInfo di = new DirectoryInfo(d);
+            buffer.Add(new FsEntry(true, d, 0, di.CreationTimeUtc, di.LastWriteTimeUtc ));
         }
 
         // Step 2: files
@@ -160,11 +171,13 @@ public sealed class FileEnumerator : IFileEnumerator
 
             long len;
             DateTimeOffset creationTimeUtc;
+            DateTimeOffset modifiedTimeUtc;
             try
             {
                 var fi = new FileInfo(f);
                 len = fi.Length;
                 creationTimeUtc = fi.CreationTimeUtc;
+                modifiedTimeUtc = fi.LastWriteTimeUtc;
             }
             catch (Exception ex)
             {
@@ -176,7 +189,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, len, creationTimeUtc));
+                buffer.Add(new FsEntry(false, f, len, creationTimeUtc, modifiedTimeUtc));
         }
     }
 

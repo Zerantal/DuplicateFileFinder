@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Threading.Channels;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Tree;
 
 namespace DuplicateFileFinderLib.Grouping;
@@ -36,6 +37,7 @@ public sealed class ChecksumPipeline : IChecksumPipeline
                     ct.ThrowIfCancellationRequested();
                     await file.ComputeChecksum(ct);
                     
+                    TimingLog.Counter("AggregateSize", file.Size);
                     Interlocked.Increment(ref processed);
                     onProgress?.Invoke(processed, file.Path);
                 }
