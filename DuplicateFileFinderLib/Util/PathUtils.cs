@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace DuplicateFileFinderLib.Util;
 
 public static class PathUtils
@@ -83,5 +85,35 @@ public static class PathUtils
         var p = NormalizePath(path);
         if (string.Equals(a, p, StringComparison.OrdinalIgnoreCase)) return false;
         return p.StartsWith(a + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+    
+    public static List<string> SplitPath(string absolutePath)
+    {
+        // Produce components without root prefix artifacts
+        var parts = new List<string>();
+        var span = absolutePath.AsSpan();
+        int i = 0, n = span.Length;
+
+        // Skip leading slash on Unix, or drive root on Windows
+        if (n >= 1 && (span[0] == '/' || span[0] == '\\'))
+            i = 1;
+        else if (n >= 2 && span[1] == ':' ) // "C:\"
+            i = absolutePath.IndexOf(Path.DirectorySeparatorChar) + 1;
+
+        var sb = new StringBuilder();
+        for (; i < n; i++)
+        {
+            char c = span[i];
+            if (c == '/' || c == '\\')
+            {
+                if (sb.Length > 0) { parts.Add(sb.ToString()); sb.Clear(); }
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        if (sb.Length > 0) parts.Add(sb.ToString());
+        return parts;
     }
 }

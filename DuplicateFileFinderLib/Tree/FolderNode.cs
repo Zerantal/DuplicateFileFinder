@@ -91,7 +91,7 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
     public virtual void UpdateFolderStats()
     {
         AggregateFileCount = Files.Count + SubFolders.Sum(s => s.AggregateFileCount);
-        Size = children.Sum(n => n.Size);
+        Size = Children.Sum(n => n.Size);
         AggregateFolderCount = 1 + SubFolders.Sum(s => s.AggregateFolderCount);
     }
 
@@ -99,10 +99,10 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
     public void ComputeChecksum(CancellationToken token = default)
     {
         // If any child lacks a checksum, we can't form a stable folder hash yet.            
-        if (children.Any(f => f.ChecksumBytes == null))
+        if (Children.Any(f => f.ChecksumBytes == null))
             return;
 
-        var combinedChecksums = children.Select(f => f.ChecksumBytes!).ToList();
+        var combinedChecksums = Children.Select(f => f.ChecksumBytes!).ToList();
 
         combinedChecksums.Sort(static (a, b) =>
         {

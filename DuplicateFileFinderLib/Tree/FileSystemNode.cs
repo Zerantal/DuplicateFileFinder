@@ -4,7 +4,7 @@ namespace DuplicateFileFinderLib.Tree;
 
 public abstract class FileSystemNode(string path, DateTimeOffset creationTime = default )
 {
-    protected readonly List<FileSystemNode> children = [];
+    protected readonly List<FileSystemNode> Children = [];
     public byte[]? ChecksumBytes { get; protected internal set; }
 
     public string ChecksumHex
@@ -21,19 +21,19 @@ public abstract class FileSystemNode(string path, DateTimeOffset creationTime = 
 
     public ReadOnlyCollection<FolderNode> SubFolders
     {
-        get => new([.. children.OfType<FolderNode>()]);
+        get => new([.. Children.OfType<FolderNode>()]);
         set => throw new NotImplementedException();
     }
 
     public ReadOnlyCollection<FileNode> Files
     {
-        get => new([.. children.OfType<FileNode>()]);
+        get => new([.. Children.OfType<FileNode>()]);
         set => throw new NotImplementedException();
     }
 
     internal bool RemoveChild(FileSystemNode node)
     {
-        return children.Remove(node);
+        return Children.Remove(node);
     }
 
     protected void CopyCommonFieldsTo(FileSystemNode target)
@@ -63,6 +63,6 @@ public abstract class FileSystemNode(string path, DateTimeOffset creationTime = 
 
     public virtual void AddFileSystemNode(FileSystemNode node)
     {
-        children.Add(node);
+        Children.Add(node);
     }
 }
