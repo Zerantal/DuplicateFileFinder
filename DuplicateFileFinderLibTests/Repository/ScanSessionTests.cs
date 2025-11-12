@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
@@ -32,7 +33,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.Equal(200, fr.Size);
 
         // HashIndex should point to that single file id
-        Assert.True(repo.HashIndex.TryGetValue(fr.Hash, out var ids));
+        Assert.True(repo.HashIndex.TryGetValue(HashKey.From(fr.Hash), out var ids));
         Assert.Single(ids);
         Assert.Equal(fr.Id, ids[0]);
     }
@@ -77,7 +78,7 @@ public sealed class ScanSessionTests : IDisposable
 
         Assert.Equal(2, repo.Files.Count);
         var any = repo.Files.Values.First();
-        Assert.True(repo.HashIndex.TryGetValue(any.Hash, out var ids));
+        Assert.True(repo.HashIndex.TryGetValue(HashKey.From(any.Hash), out var ids));
         Assert.Equal(2, ids.Count);
     }
 

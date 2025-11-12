@@ -54,7 +54,7 @@ public sealed class RepoTests : IDisposable
         Assert.Single(repo2.Files);
         var f = Assert.Single(repo2.Files.Values);
         Assert.Equal("a.bin", f.Name);
-        Assert.True(repo2.HashIndex.TryGetValue(f.Hash, out var ids));
+        Assert.True(repo2.HashIndex.TryGetValue(HashKey.From(f.Hash), out var ids));
         Assert.Single(ids);
         Assert.Equal(f.Id, ids[0]);
     }

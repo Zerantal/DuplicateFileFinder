@@ -1,9 +1,10 @@
 // DuplicateFileFinderLib/Repo/Repo.cs
 
-using System.Collections.Concurrent;
 using System.Text.Json;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
+using NLog;
 
 namespace DuplicateFileFinderLib.Repository;
 
@@ -13,22 +14,25 @@ namespace DuplicateFileFinderLib.Repository;
 /// </summary>
 public sealed class Repo
 {
+    private const int RepoSchemaVersion = 2;
+    
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+
     private readonly string _rootPath;
     private readonly string _metaFile;
     private readonly string _snapshotFile;
     private readonly string _logDir;
-
+    
     public RepoMeta Meta { get; private set; } = new();
-    public ConcurrentDictionary<Guid, FileRecord> Files { get; } = new();
-    public ConcurrentDictionary<Guid, DirRecord> Dirs { get; } = new();
-    public ConcurrentDictionary<string, Guid> InternedStrings { get; } = new();
+    public Dictionary<Guid, FileRecord> Files { get; private set; } = new();
+    public Dictionary<Guid, DirRecord> Dirs { get; private set; } = new();
+    public Dictionary<string, Guid> InternedStrings { get; private set; } = new();
 
     // HashBytes -> FileIds
-    public ConcurrentDictionary<ReadOnlyMemory<byte>, List<Guid>> HashIndex { get; } = new(new MemoryComparer());
+    public Dictionary<HashKey, List<Guid>> HashIndex { get; private set; } = new();
 
     // Use a field for atomic increments. Mirror to Meta.NextSequence on SaveMeta.
     private long _nextSeq;
-    private string IndexesPath => Path.Combine(_rootPath, $"indexes-{Meta.Generation}.bin");
 
     // to sync file+meta mutations.
     private readonly object _sync = new();
@@ -45,12 +49,17 @@ public sealed class Repo
     public static Repo Open(string rootPath)
     {
         var repo = new Repo(rootPath);
-        repo.LoadMeta();
-        repo.LoadSnapshot();                 // 1) data image
-        if (!repo.LoadIndexes())             // 2) prebuilt hash index for this generation
-            repo.RebuildIndexesAndPersist(); //    or rebuild and persist
-        repo.ReplayDeltas();                 // 3) bring forward by deltas; ApplyDelta updates HashIndex
-        repo._nextSeq = repo.Meta.NextSequence;
+        using (TimingLog.StartPhase("Opening Repo"))
+        {
+            repo.LoadMeta();
+            repo.LoadSnapshot(); // 1) data image
+            repo.ReplayDeltas(); // 3) bring forward by deltas; ApplyDelta updates HashIndex
+            repo._nextSeq = repo.Meta.NextSequence;
+            TimingLog.Counter("files", repo.Files.Count);
+            TimingLog.Counter("dirs", repo.Dirs.Count);
+            TimingLog.Counter("HashIndex", repo.HashIndex.Count);
+        }
+        
         return repo;
     }
 
@@ -87,25 +96,6 @@ public sealed class Repo
         }
     }
     
-    // Rebuild indexes helpers
-    private void RebuildIndexesAndPersist_NoLock()
-    {
-        HashIndex.Clear();
-        foreach (var f in Files.Values)
-            HashIndex.GetOrAdd(f.Hash, _ => new()).Add(f.Id);
-
-        var buckets = new List<HashBucket>(HashIndex.Count);
-        foreach (var kv in HashIndex)
-            buckets.Add(new HashBucket(kv.Key.ToArray(), kv.Value.ToArray()));
-
-        var idx = new RepoIndexes(Generation: Meta.Generation, Buckets: buckets);
-        var tmp = IndexesPath + ".tmp";
-        var bytes = MemoryPackSerializer.Serialize(idx);
-        File.WriteAllBytes(tmp, bytes);
-        Fsync(tmp);
-        File.Move(tmp, IndexesPath, overwrite: true);
-    }
-    
     private void SaveMeta_NoLock()
     {
         var json = JsonSerializer.Serialize(Meta, new JsonSerializerOptions { WriteIndented = true });
@@ -116,11 +106,8 @@ public sealed class Repo
 // Writes snapshot + indexes and updates meta. Caller must hold _sync.
     private void SaveSnapshot_NoLock()
     {
-        var snapshot = new RepoSnapshot(
-            Meta,
-            Files.Values.ToList(),
-            Dirs.Values.ToList(),
-            new Dictionary<string, Guid>(InternedStrings));
+        Meta.SchemaVersion = RepoSchemaVersion; // update if schema changes
+        var snapshot = new RepoSnapshotV2(Meta, Files, Dirs, InternedStrings, HashIndex);
 
         var tmp = _snapshotFile + ".tmp";
         var bytes = MemoryPackSerializer.Serialize(snapshot);
@@ -131,91 +118,62 @@ public sealed class Repo
         // Mark that this snapshot includes all deltas up to current NextSequence
         Meta.LastSnapshottedSequence = Meta.NextSequence;
         SaveMeta_NoLock();
-
-        // Rebuild and persist indexes for this image
-        RebuildIndexesAndPersist_NoLock();
+        
     }
 
     // ---------- loader pieces ----------
 
     private void LoadSnapshot()
     {
-        if (!File.Exists(_snapshotFile))
-        {
-            // empty repo
-            Files.Clear(); Dirs.Clear(); InternedStrings.Clear(); HashIndex.Clear();
-            return;
-        }
-
-        var bytes = File.ReadAllBytes(_snapshotFile);
-        var snapshot = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes)
-                       ?? throw new InvalidDataException("Snapshot corrupted");
-
-        Meta = snapshot.Meta;
-
         Files.Clear(); Dirs.Clear(); InternedStrings.Clear(); HashIndex.Clear();
-
-        foreach (var f in snapshot.Files)
-            Files[f.Id] = f;
-
-        foreach (var d in snapshot.Dirs)
-            Dirs[d.Id] = d;
-
-        foreach (var kv in snapshot.Strings)
-            InternedStrings[kv.Key] = kv.Value;
-    }
-
-    private bool LoadIndexes()
-    {
-        var path = IndexesPath;
-        if (!File.Exists(path)) return false;
-
+        if (!File.Exists(_snapshotFile)) return;
+        
+        var bytes = File.ReadAllBytes(_snapshotFile);
+        
+        // Try V2
         try
         {
-            var bytes = File.ReadAllBytes(path);
-            var idx = MemoryPackSerializer.Deserialize<RepoIndexes>(bytes);
-            if (idx == null || idx.Generation != Meta.Generation) return false;
-
-            HashIndex.Clear();
-            foreach (var b in idx.Buckets)
+            var v2 = MemoryPackSerializer.Deserialize<RepoSnapshotV2>(bytes);
+            if (v2 is not null && (v2.Meta.SchemaVersion >= 2))
             {
-                // Copy to ReadOnlyMemory keys backed by byte[]
-                var key = (ReadOnlyMemory<byte>)b.Hash;
-                HashIndex[key] = new List<Guid>(b.FileIds);
+                Meta = v2.Meta;
+                Files = v2.Files;
+                Dirs = v2.Dirs;
+                InternedStrings = v2.Strings;
+                HashIndex = v2.HashIndex;
+                return;
             }
-            return true;
         }
-        catch
+        catch (MemoryPackSerializationException)
         {
-            return false;
+            Log.Error("Failed to load repo (V2 format).");
+        }
+
+        Log.Info("Attempting to load repo (V1 format).");
+        // Fallback: load your previous V1, then rebuild index once.
+        try
+        {
+            var v1 = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes);
+            if (v1 == null) throw new InvalidDataException("Snapshot corrupted");
+
+            Meta = v1.Meta;
+            foreach (var f in v1.Files) Files[f.Id] = f;
+            foreach (var d in v1.Dirs) Dirs[d.Id] = d;
+            foreach (var kv in v1.Strings) InternedStrings[kv.Key] = kv.Value;
+            foreach (var f in v1.Files)
+            {
+                var key = HashKey.From(f.Hash);
+                if (!HashIndex.TryGetValue(key, out var list)) HashIndex[key] = list = new List<Guid>(4);
+                list.Add(f.Id);
+            }
+        }
+        catch (MemoryPackSerializationException e)
+        {
+            Log.Error(e, "Failed to load repo (V1 format).");
+            throw;
         }
     }
-
-    private void RebuildIndexesAndPersist()
-    {
-        // Rebuild in-memory
-        HashIndex.Clear();
-        foreach (var f in Files.Values)
-            HashIndex.GetOrAdd(f.Hash, _ => new()).Add(f.Id);
-
-        // Persist compact index file for this generation
-        var buckets = new List<HashBucket>(HashIndex.Count);
-        foreach (var kv in HashIndex)
-        {
-            // Make sure hash bytes are materialized as byte[] for serialization
-            var hashBytes = kv.Key.ToArray();
-            var ids = kv.Value.ToArray();
-            buckets.Add(new HashBucket(hashBytes, ids));
-        }
-        var idx = new RepoIndexes(Generation: Meta.Generation, Buckets: buckets);
-
-        var tmp = IndexesPath + ".tmp";
-        var bytes = MemoryPackSerializer.Serialize(idx);
-        File.WriteAllBytes(tmp, bytes);
-        Fsync(tmp);
-        File.Move(tmp, IndexesPath, overwrite: true);
-    }
-
+    
     private void ReplayDeltas()
     {
         if (!Directory.Exists(_logDir)) return;
@@ -249,14 +207,14 @@ public sealed class Repo
         foreach (var f in delta.Files)
         {
             Files[f.Id] = f;
-            
-            var list = HashIndex.GetOrAdd(f.Hash, _ => new());
-            // avoid duplicates if the same delta is applied again
-            if (!list.Contains(f.Id))
-                list.Add(f.Id);
+            var key = HashKey.From(f.Hash);
+            if (!HashIndex.TryGetValue(key, out var list))
+                HashIndex[key] = list = new List<Guid>(4);
+            // guard against dup if same delta is re-applied
+            if (list.Count == 0 || list[^1] != f.Id) // cheap common case
+                if (!list.Contains(f.Id)) list.Add(f.Id);
         }
-        foreach (var d in delta.Dirs)
-            Dirs[d.Id] = d;
+        foreach (var d in delta.Dirs) Dirs[d.Id] = d;
     }
 
     // ---------- Compaction ---------
@@ -281,7 +239,7 @@ public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
         if (!ShouldCompact(policy, logBytes, deltaCount, snapBytes))
             return;
 
-        // 1) Write a fresh snapshot + indexes
+        // 1) Write a fresh snapshot
         SaveSnapshot_NoLock(); // sets Meta.LastSnapshottedSequence = Meta.NextSequence and persists meta
 
         // 2) Delete deltas already captured in snapshot
@@ -371,21 +329,5 @@ private void DeleteObsoleteDeltas_NoLock()
             if (fi.Exists) { bytes += fi.Length; count++; }
         }
         return (bytes, count);
-    }
-}
-
-file sealed class MemoryComparer : IEqualityComparer<ReadOnlyMemory<byte>>
-{
-    public bool Equals(ReadOnlyMemory<byte> x, ReadOnlyMemory<byte> y) => x.Span.SequenceEqual(y.Span);
-
-    public int GetHashCode(ReadOnlyMemory<byte> obj)
-    {
-        var span = obj.Span;
-        unchecked
-        {
-            int h = 17;
-            for (int i = 0; i < span.Length; i++) h = h * 31 + span[i];
-            return h;
-        }
     }
 }

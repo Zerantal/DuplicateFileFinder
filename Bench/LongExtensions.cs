@@ -1,3 +1,4 @@
+// ReSharper disable InconsistentNaming
 namespace Bench;
 
 public static class LongExtensions

@@ -5,7 +5,7 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record RepoMeta
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public long Generation { get; set; } = 1;
     public long NextSequence { get; set; } = 0;
     

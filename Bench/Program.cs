@@ -1,6 +1,7 @@
 ﻿using Bench;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Util;
 using NLog;
 
@@ -10,10 +11,14 @@ root = PathUtils.NormalizePath(root);
 
 TimingLog.AddCounterFormatter("AggregateSize", (n) => n.ToSizeString() );
 
-var finder = new DuplicateFileFinder();
-// var sw = Stopwatch.StartNew();
+var repoDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Bench", "repo");
+Repo repo = Repo.Open(repoDir);
+var finder = new DuplicateFileFinder(repo);
+
 log.Info($"Bench location: {root}", root);
 using (TimingLog.Start("Folder scan", root))
 {
     await finder.ScanLocation(root, progressIndicator: null, CancellationToken.None);
 }
+
+repo.CompactNow();

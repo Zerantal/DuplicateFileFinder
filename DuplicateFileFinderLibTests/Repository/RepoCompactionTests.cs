@@ -29,7 +29,8 @@ public sealed class RepoCompactionTests : IDisposable
 
         for (int i = 0; i < 6; i++)
         {
-            var f = new FileRecord(Guid.NewGuid(), d.Id, $"f{i}.bin", i, [(byte)i], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1);
+            var dummyHash = (new[] { (ulong)i, (ulong)i }).SelectMany(BitConverter.GetBytes).ToArray();
+            var f = new FileRecord(Guid.NewGuid(), d.Id, $"f{i}.bin", i, dummyHash, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1);
             repo.CommitDelta(new RepoDelta(new() { f }, new()));
         }
 
@@ -74,7 +75,8 @@ public sealed class RepoCompactionTests : IDisposable
         // two files → two deltas
         for (int i = 0; i < 2; i++)
         {
-            var f = new FileRecord(Guid.NewGuid(), d.Id, $"x{i}.bin", i, new byte[] { 0xAA }, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 2);
+            var dummyHash = (new[] { (ulong)i, (ulong)i }).SelectMany(BitConverter.GetBytes).ToArray();
+            var f = new FileRecord(Guid.NewGuid(), d.Id, $"x{i}.bin", i, dummyHash, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 2);
             repo.CommitDelta(new RepoDelta(new() { f }, new()));
         }
 
@@ -87,9 +89,8 @@ public sealed class RepoCompactionTests : IDisposable
 
         // snapshot + indexes present and valid
         Assert.True(File.Exists(Path.Combine(_fs.Root, "snapshot.bin")));
-        Assert.True(File.Exists(Path.Combine(_fs.Root, $"indexes-{repo.Meta.Generation}.bin")));
     }
-
+    
     public void Dispose()
     {
         _fs.Dispose();

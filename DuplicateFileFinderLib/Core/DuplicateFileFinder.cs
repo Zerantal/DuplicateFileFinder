@@ -122,7 +122,7 @@ public sealed class DuplicateFileFinder
             await _root.RecomputeSubtreeAggregatesAsync();
             RebuildFileSizesFromRoot();
         }
-
+        
         Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
     }
     
@@ -496,5 +496,20 @@ public sealed class DuplicateFileFinder
             }).Wait();
             foreach (var f in buf) yield return f;
         }
+    }
+    
+    public IReadOnlyList<(byte[] Hash, IReadOnlyList<Guid> FileIds)> GetRepoDuplicateSets(int minCount = 2)
+    {
+        if (_repo is null) return Array.Empty<(byte[], IReadOnlyList<Guid>)>();
+        var results = new List<(byte[], IReadOnlyList<Guid>)>();
+        foreach (var kv in _repo.HashIndex)
+            if (kv.Value.Count >= minCount)
+            {
+                var hashBytes = new byte[16];
+                HashKey.ToByteArray(kv.Key, hashBytes);
+                results.Add((hashBytes, kv.Value.ToArray()));
+            }
+
+        return results;
     }
 }
