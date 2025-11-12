@@ -6,10 +6,11 @@ namespace DuplicateFileFinderLibTests.TestUtils;
 
 public sealed class TempFsFixture : IDisposable
 {
-    public string Root { get; } = Path.Combine(Path.GetTempPath(), "DFFTests_" + Guid.NewGuid().ToString("N"));
+    public string Root { get; init; }
 
-    public TempFsFixture()
+    public TempFsFixture(string root = "DFFTests_")
     {
+        Root = Path.Combine(Path.GetTempPath(), root + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
     }
 

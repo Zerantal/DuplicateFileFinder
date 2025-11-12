@@ -3,10 +3,10 @@
     <PropertyGroup>
         <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
-
         <IsPackable>false</IsPackable>
+        <DefineConstants>TEST;$(DefineConstants)</DefineConstants>
     </PropertyGroup>
-
+    
     <ItemGroup>
         <PackageReference Include="JetBrains.Annotations" Version="2025.2.2"/>
         <PackageReference Include="xunit" Version="2.*"/>
@@ -14,9 +14,11 @@
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*"/>
         <!-- <PackageReference Include="coverlet.collector" Version="8.*" /> -->
     </ItemGroup>
-
+    
     <ItemGroup>
-        <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj"/>
+        <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj">
+            <Properties>DefineConstants=$(DefineConstants);UNIT_TESTING</Properties>
+        </ProjectReference>
     </ItemGroup>
 
     <ItemGroup>
