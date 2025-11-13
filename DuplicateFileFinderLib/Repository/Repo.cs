@@ -37,6 +37,8 @@ public sealed class Repo
     // to sync file+meta mutations.
     private readonly object _sync = new();
     
+    public event EventHandler<RepoDelta>? DeltaCommitted;
+    
     private Repo(string rootPath)
     {
         _rootPath = rootPath;
@@ -86,6 +88,9 @@ public sealed class Repo
 
         Meta.NextSequence = _nextSeq;
         SaveMeta_NoLock();
+        
+        DeltaCommitted?.Invoke(this, delta);
+
     }
 
     public void SaveSnapshot()
@@ -330,4 +335,6 @@ private void DeleteObsoleteDeltas_NoLock()
         }
         return (bytes, count);
     }
+    
+    
 }

@@ -500,7 +500,7 @@ public sealed class DuplicateFileFinder
     
     public IReadOnlyList<(byte[] Hash, IReadOnlyList<Guid> FileIds)> GetRepoDuplicateSets(int minCount = 2)
     {
-        if (_repo is null) return Array.Empty<(byte[], IReadOnlyList<Guid>)>();
+        if (_repo is null) return [];
         var results = new List<(byte[], IReadOnlyList<Guid>)>();
         foreach (var kv in _repo.HashIndex)
             if (kv.Value.Count >= minCount)

@@ -1,15 +1,15 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Text;
-using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Models;
 using NLog;
+using Dff = DuplicateFileFinderLib.Core;
 
 
 // for Dispatcher.UIThread
@@ -29,9 +29,9 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<string> SearchPaths { get; } = [];
 
     // The table of duplicate file records shown in the grid
-    public DataGridCollectionView DuplicateFilesView { get; }
+    // public DataGridCollectionView DuplicateFilesView { get; }
 
-    private BulkObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
+    // private BulkObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
 
     private static readonly string[] Filters = ["csv"];
 
@@ -54,30 +54,61 @@ public partial class MainWindowViewModel : ObservableObject
 
     // cancellation source for the current scan (null when idle)
     private CancellationTokenSource? _scanCts;
-    private readonly DuplicateFileFinderLib.Core.DuplicateFileFinder _engine = new();
-
+    private readonly Dff.DuplicateFileFinder _engine;
+    
     // guard to prevent file scanning updating UI after it's finished
     private bool _finalized;
+    
+    // public RepoViewModel RepoViewModel { get; }
+    private readonly Repo _repo;
+    public DuplicatesGridViewModel Duplicates { get; }
 
-    public MainWindowViewModel(IFolderPickerService folderPicker, IFilePickerService filePicker)
+    
+    public MainWindowViewModel(Repo repo, IFolderPickerService folderPicker, IFilePickerService filePicker)
     {
+        // RepoViewModel = new RepoViewModel(repo);
+        _repo = repo;
+        Duplicates = new DuplicatesGridViewModel(_repo);
+        Duplicates.LoadFromRepo();
+        // _repo.DeltaCommitted += OnDelta;
+        _engine = new Dff.DuplicateFileFinder(repo);
+        
         _folderPicker = folderPicker;
         _filePicker = filePicker;
 
         ReadyToScan = false;
         IsScanning = false;
 
-        DuplicateFilesView = new DataGridCollectionView(DuplicateFiles);
+        // DuplicateFilesView = new DataGridCollectionView(DuplicateFiles);
 
         // Default sort: FileSize DESC
-        if (DuplicateFilesView.CanSort)
-            DuplicateFilesView.SortDescriptions.Add(
-                DataGridSortDescription.FromPath("FileSize", ListSortDirection.Descending));
+        // if (DuplicateFilesView.CanSort)
+        //     DuplicateFilesView.SortDescriptions.Add(
+        //         DataGridSortDescription.FromPath("FileSize", ListSortDirection.Descending));
 
         SearchPaths.CollectionChanged += (sender, _) =>
         {
             if (sender is ObservableCollection<string> paths) ReadyToScan = paths.Count > 0 && !IsScanning;
         };
+    }
+
+    private void OnDelta(object? s, RepoDelta delta)
+    {
+        // Apply only touched hashes; marshal to UI thread if needed
+        var touched = delta.Files.Select(f => HashKey.From(f.Hash)).ToHashSet();
+        foreach (var h in touched)
+        {
+            if (_repo.HashIndex.TryGetValue(h, out var ids))
+            {
+                var files = ids.Select(id => _repo.Files[id]).ToList();
+                if (files.Count >= 2) Duplicates.Upsert(h, files);
+                else Duplicates.Upsert(h, Array.Empty<FileRecord>());
+            }
+            else
+            {
+                Duplicates.Upsert(h, Array.Empty<FileRecord>());
+            }
+        }
     }
 
     public bool CanStartScan => !IsScanning;
@@ -105,8 +136,8 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task SaveScan()
     {
         // No data yet
-        if (DuplicateFiles.Count == 0 && _engine.TotalFilesScanned == 0)
-            return;
+        // if (DuplicateFiles.Count == 0 && _engine.TotalFilesScanned == 0)
+        //     return;
 
         var targetPath = await _filePicker.PickSaveFileAsync(
             "duplicate-scan.csv",
@@ -157,8 +188,10 @@ public partial class MainWindowViewModel : ObservableObject
                 FileGroup = r.Group
             }).ToList();
             
-            DuplicateFiles.AddRange(items, true);
+            // DuplicateFiles.AddRange(items, true);
 
+            Duplicates.LoadFromRepo();
+            
             foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
 
             FilesScanned = _engine.TotalFilesScanned;
@@ -178,7 +211,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _engine.ClearAllScans();
         SearchPaths.Clear();
-        DuplicateFiles.Clear();
+        // DuplicateFiles.Clear();
         FilesScanned = 0;
         DuplicatesFound = 0;
         SpaceTaken = 0;
@@ -249,7 +282,8 @@ public partial class MainWindowViewModel : ObservableObject
             
             using (TimingLog.Start("Adding duplicates to view"))
             {
-                DuplicateFiles.AddRange(items, true);
+                // DuplicateFiles.AddRange(items, true);
+                Duplicates.LoadFromRepo();
             }
 
             FilesScanned = _engine.TotalFilesScanned;
