@@ -72,7 +72,7 @@ public sealed class Repo : IRepo
 
     public IScanSession BeginScan(
         string rootPath,
-        int maxFilesBeforeFlush = 10_000,
+        int maxFilesBeforeFlush = 50_000,
         int maxDirsBeforeFlush = 1_000)
     {
         if (string.IsNullOrWhiteSpace(rootPath))

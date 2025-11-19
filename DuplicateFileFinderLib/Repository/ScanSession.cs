@@ -18,7 +18,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     public ScanSession(
         Repo repo,
         ScanRun run,
-        int maxFilesBeforeFlush = 10_000,
+        int maxFilesBeforeFlush = 50_000,
         int maxDirsBeforeFlush = 1000)
     {
         _repo = repo;
