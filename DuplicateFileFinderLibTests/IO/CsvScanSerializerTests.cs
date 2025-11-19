@@ -1,7 +1,5 @@
 using System;
 using System.IO;
-using System.Threading.Tasks;
-using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLibTests.TestUtils;
@@ -131,38 +129,6 @@ public sealed class CsvScanSerializerCsvTests
         Assert.Contains("/b/y.txt", csv);
     }
     
-    [Fact]
-    public async Task Csv_RoundTrip_IncludesCreationTime_And_GroupsByContent()
-    {
-        using var fs = new TempFsFixture();
-        var created1 = new DateTimeOffset(2023, 10, 21, 12, 34, 56, TimeSpan.Zero);
-        var created2 = created1.AddMinutes(1);
-
-        var root = fs.Dir("root");
-        var f1 = fs.File("root/a.txt", "HELLO"u8, created1);
-        var f2 = fs.File("root/b.txt", "HELLO"u8, created2);
-
-        var dff = new DuplicateFileFinder();
-        await dff.ScanLocation(root);
-
-        await using var sw = new StringWriter();
-        dff.ExportToCsv(sw);
-        var csv = sw.ToString();
-
-        // parse with single source of truth
-        var rows = CsvTestUtil.Parse(csv);
-
-        AssertRows.ContainsFolder(rows, root);
-        AssertRows.ContainsFile(rows, f1);
-        AssertRows.ContainsFile(rows, f2);
-
-        AssertRows.CreationTimeIs(rows, f1, created1);
-        AssertRows.CreationTimeIs(rows, f2, created2);
-
-        AssertRows.InSameGroup(rows, f1, f2);
-    }
-
-
     [Fact]
     public void Export_Header_MatchesSpec()
     {

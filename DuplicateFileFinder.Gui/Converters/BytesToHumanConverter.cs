@@ -6,18 +6,17 @@ namespace DuplicateFileFinder.Gui.Converters;
 
 public sealed class BytesToHumanConverter : IValueConverter
 {
-    // Uses 1024 base: KB, MB, GB, TB. Change unit labels if you prefer KiB/MiB…
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is null) return null;
 
-        if (!TryToLong(value, out long bytes)) return value;
+        if (!TryToLong(value, out var bytes)) return value;
 
         if (bytes < 0) return "-" + Convert(-bytes, targetType, parameter, culture);
 
         string[] units = ["B", "KB", "MB", "GB", "TB", "PB"];
         double size = bytes;
-        int unit = 0;
+        var unit = 0;
 
         while (size >= 1024 && unit < units.Length - 1)
         {
@@ -25,8 +24,7 @@ public sealed class BytesToHumanConverter : IValueConverter
             unit++;
         }
 
-        // Default format: 0, 1 or 2 decimals depending on magnitude
-        string formatted = size >= 100 ? size.ToString("N0", culture)
+        var formatted = size >= 100 ? size.ToString("N0", culture)
             : size >= 10 ? size.ToString("N1", culture)
             : size.ToString("N2", culture);
 
@@ -34,7 +32,56 @@ public sealed class BytesToHumanConverter : IValueConverter
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => AvaloniaProperty.UnsetValue;
+    {
+        if (value is null)
+            return AvaloniaProperty.UnsetValue;
+
+        var s = value as string ?? value.ToString() ?? string.Empty;
+        s = s.Trim();
+        if (s.Length == 0)
+            return 0L;
+
+        // Split into numeric + optional unit
+        var parts = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return 0L;
+
+        var numberPart = parts[0];
+        var unitPart = parts.Length > 1 ? parts[1] : "B";
+
+        if (!double.TryParse(numberPart, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var number))
+            return AvaloniaProperty.UnsetValue;
+
+        var power = unitPart.ToUpperInvariant() switch
+        {
+            "B" or "BYTE" or "BYTES" => 0,
+            "KB" or "KIB" => 1,
+            "MB" or "MIB" => 2,
+            "GB" or "GIB" => 3,
+            "TB" or "TIB" => 4,
+            "PB" or "PIB" => 5,
+            _ => 0 // unknown unit → treat as bytes
+        };
+
+        var factor = Math.Pow(1024, power);
+        var bytesDouble = number * factor;
+
+        if (double.IsNaN(bytesDouble) || double.IsInfinity(bytesDouble) ||
+            bytesDouble < 0 || bytesDouble > long.MaxValue)
+            return AvaloniaProperty.UnsetValue;
+
+        var bytes = (long)Math.Round(bytesDouble);
+
+        // Coerce to requested target type if sensible
+        if (targetType == typeof(long) || targetType == typeof(object))
+            return bytes;
+        if (targetType == typeof(int))
+            return (int)Math.Clamp(bytes, int.MinValue, int.MaxValue);
+        if (targetType == typeof(double))
+            return (double)bytes;
+
+        return bytes; // default
+    }
 
     private static bool TryToLong(object v, out long result)
     {

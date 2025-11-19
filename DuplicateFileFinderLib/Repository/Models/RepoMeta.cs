@@ -5,11 +5,13 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record RepoMeta
 {
-    public int SchemaVersion { get; set; } = 2;
-    public long Generation { get; set; } = 1;
-    public long NextSequence { get; set; } = 0;
-    
-    public long LastSnapshottedSequence { get; set; } = 0;
-    
-    public DateTimeOffset LastCompaction { get; set; } = DateTimeOffset.UtcNow;
+    [MemoryPackOrder(0)] public required int SchemaVersion { get; init; } = 4;
+    [MemoryPackOrder(1)] public required long Generation { get; init; } = 1;
+    [MemoryPackOrder(2)] public required long NextLogSequence { get; init; }
+    [MemoryPackOrder(3)] public required long LastSnapshottedLogSequence { get; init; } = -1;
+    [MemoryPackOrder(4)] public DateTimeOffset LastCompaction { get; init; } = DateTimeOffset.UtcNow;
+    [MemoryPackOrder(5)] public required Guid RepoId { get; init; }
+    [MemoryPackOrder(6)] public required string RepoPath { get; init; }
+    [MemoryPackOrder(7)] public required string RepoHostName { get; init; }
+    [MemoryPackOrder(8)] public required long NextScanSequence { get; init; }
 }

@@ -3,17 +3,11 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Models;
 
 [MemoryPackable]
-public partial record RepoSnapshot(
-    RepoMeta Meta,
-    List<FileRecord> Files,
-    List<DirRecord> Dirs,
-    IDictionary<string, Guid> Strings);
-    
-[MemoryPackable]
-public partial record RepoSnapshotV2(
-    RepoMeta Meta,
-    Dictionary<Guid, FileRecord> Files,
-    Dictionary<Guid, DirRecord> Dirs,
-    Dictionary<string, Guid> Strings,
-    Dictionary<HashKey, List<Guid>> HashIndex
-);
+public partial record RepoSnapshot
+{
+    [MemoryPackOrder(0)] public required RepoMeta Meta { get; init; }
+    [MemoryPackOrder(1)] public required Dictionary<Guid, FileRecord> Files { get; init; }
+    [MemoryPackOrder(2)] public required Dictionary<Guid, DirRecord> Dirs { get; init; }
+    [MemoryPackOrder(3)] public required Dictionary<HashKey, List<Guid>> HashIndex { get; init; } // persist indexes
+    [MemoryPackOrder(4)] public required List<ScanRun> ScanRuns { get; init; }
+}

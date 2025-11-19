@@ -25,7 +25,7 @@ internal class ScanCommand : ICommand
 
     public async Task ExecuteAsync()
     {
-        DuplicateFileFinder dupFileFinder = new();
+        DuplicateFileFinder dupFileFinder = new(null!);
         Debug.Assert(Directories != null, nameof(Directories) + " != null");
 
         // scan

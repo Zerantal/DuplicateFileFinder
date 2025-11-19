@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
@@ -26,6 +28,86 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     {
         _fs.Dispose();
     }
+
+    class FakeRepo : IRepo
+    {
+        public RepoViewSnapshot GetSnapshot()
+        {
+            throw new NotImplementedException();
+        }
+
+        public event EventHandler<RepoDelta>? DeltaCommitted;
+        public IScanSession BeginScan(string rootPath, int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
+        {
+            return new FakeSession();
+        }
+
+        public void CommitDelta(RepoDelta delta)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SaveSnapshot()
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CompactNow()
+        {
+            throw new NotImplementedException();
+        }
+
+        public string GetFullDirPath(Guid dirId)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    class FakeSession : IScanSession
+    {
+        public ScanRun Run { get; } = null!;
+        public long ScanSequence { get; } = 0;
+        public string RootPath { get; } = null!;
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public void ObserveDir(Guid id, Guid? parentId, string name, ScanEntryStatus status, string? errorMessage = null)
+        {
+        }
+
+        public void ObserveFile(Guid id, Guid dirId, string name, long size, HashKey hash, DateTimeOffset modified,
+            DateTimeOffset created, ScanEntryStatus status, string? errorMessage = null)
+        {
+        }
+
+        public Task FlushProgressAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task CompleteAsync(CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+    }
     
     [Fact]
     public async Task ScanLocation_FindsDuplicates_AndAssignsGroups()
@@ -44,7 +126,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var f1Copy = _fs.File("b/file1copy.txt", helloBytes );
         var uniq = _fs.File("c/unique.bin", worldBytes );
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
 
         // act        
         var progress = new Progress<DuplicateFileFinderProgressReport>();
@@ -94,7 +176,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var root = _fs.Dir("deep");
         _fs.File("deep/f.bin", "X"u8.ToArray());
     
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         using var cts = new CancellationTokenSource();
         // ReSharper disable once MethodHasAsyncOverload
         cts.Cancel(); // deterministic: canceled before call
@@ -127,7 +209,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var c = _fs.File(Path.Combine("A", "C", "c.txt"), "CFILE"u8.ToArray());
         var u = _fs.File(Path.Combine("A", "u.txt"), "UNIQUE"u8.ToArray());
 
-        var dff = new DuplicateFileFinder();
+        var dff = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
         // 1) Scan the descendant first (B) — only B's files should be known
@@ -206,7 +288,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         _ = _fs.File("metrics/b.bin", "DATA"u8.ToArray());
         _ = _fs.File("metrics/u.bin", "xyz"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         await finder.ScanLocation(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
 
         Assert.Equal(3, finder.TotalFilesScanned);
@@ -225,7 +307,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var d2 = _fs.File("rows/d2.txt", "SAME"u8.ToArray());
         _fs.File("rows/u1.txt", "DIFF"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         await finder.ScanLocation(root, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
 
         var rows = await finder.GetDuplicateFileRowsAsync();
@@ -246,7 +328,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         for (int i = 0; i < 200; i++)
             _fs.File(Path.Combine("hashcancel", $"f{i}.bin"), new byte[4096]); // all same size
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         using var cts = new CancellationTokenSource();
 
         // ReSharper disable AccessToDisposedClosure
@@ -280,7 +362,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var b = _fs.Dir(Path.Combine("X", "Y"));
         _fs.File(Path.Combine("X", "Y", "f.bin"), "Q"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
         await finder.ScanLocation(a, progress, CancellationToken.None);
@@ -305,7 +387,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         _fs.File(Path.Combine("B", "leaf", "b.txt"), "B"u8.ToArray());
         _fs.File(Path.Combine("C", "c.txt"), "C"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
         await finder.ScanLocation(leafDir, progress, CancellationToken.None);
@@ -326,7 +408,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         _fs.File(Path.Combine("P", "Q", "d1.txt"), "SAME"u8.ToArray());
         _fs.File(Path.Combine("P", "Q", "d2.txt"), "SAME"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
         await finder.ScanLocation(b, progress, CancellationToken.None);
@@ -347,7 +429,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var dir = _fs.Dir("ok");
         _fs.File("ok/a.txt", "A"u8.ToArray());
 
-        var finder = new DuplicateFileFinder();
+        var finder = new DuplicateFileFinder(new FakeRepo());
 
         // First, a successful scan (commits)
         await finder.ScanLocation(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
@@ -378,7 +460,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var f1 = fs.File("root/a.txt", "HELLO"u8, created);
         var f2 = fs.File("root/b.txt", "HELLO"u8, created.AddMinutes(1));
 
-        var dff = new DuplicateFileFinder();
+        var dff = new DuplicateFileFinder(new FakeRepo());
         await dff.ScanLocation(root, progressIndicator: null, token: default);
 
         using var sw = new StringWriter();
@@ -397,4 +479,35 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         // The two identical files still group together
         AssertRows.InSameGroup(rows, f1, f2);
     }
+
+[Fact]
+public async Task Csv_RoundTrip_IncludesCreationTime_And_GroupsByContent()
+{
+    using var fs = new TempFsFixture();
+    var created1 = new DateTimeOffset(2023, 10, 21, 12, 34, 56, TimeSpan.Zero);
+    var created2 = created1.AddMinutes(1);
+
+    var root = fs.Dir("root");
+    var f1 = fs.File("root/a.txt", "HELLO"u8, created1);
+    var f2 = fs.File("root/b.txt", "HELLO"u8, created2);
+
+    var dff = new DuplicateFileFinder(new FakeRepo());
+    await dff.ScanLocation(root);
+
+    await using var sw = new StringWriter();
+    dff.ExportToCsv(sw);
+    var csv = sw.ToString();
+
+    // parse with single source of truth
+    var rows = CsvTestUtil.Parse(csv);
+
+    AssertRows.ContainsFolder(rows, root);
+    AssertRows.ContainsFile(rows, f1);
+    AssertRows.ContainsFile(rows, f2);
+
+    AssertRows.CreationTimeIs(rows, f1, created1);
+    AssertRows.CreationTimeIs(rows, f2, created2);
+
+    AssertRows.InSameGroup(rows, f1, f2);
+}
 }

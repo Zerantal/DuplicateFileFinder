@@ -12,13 +12,12 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         var folderSvc = new AvaloniaFolderPickerService(this);
-        var fileSvc = new AvaloniaFilePickerService(this);
         
         var appName = "DuplicateFileFinder";
         var appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             appName);
         var repo = Repo.Open(Path.Combine(appDir, "repo"));
-        DataContext = new MainWindowViewModel(repo, folderSvc, fileSvc);
+        DataContext = new MainWindowViewModel(repo, folderSvc);
 
     }
 }

@@ -116,4 +116,30 @@ public static class PathUtils
         if (sb.Length > 0) parts.Add(sb.ToString());
         return parts;
     }
+    
+    public static bool PathsEqual(string a, string b)
+        => string.Equals(
+            NormalizePath(a),
+            NormalizePath(b),
+            OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
+    
+    public static bool IsSubPathOf(string candidate, string root)
+    {
+        candidate = PathUtils.NormalizePath(candidate);
+        root = PathUtils.NormalizePath(root);
+
+        if (PathUtils.PathsEqual(candidate, root))
+            return true;
+
+        if (!candidate.StartsWith(root, OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal))
+            return false;
+
+        // Ensure we’re not just matching a prefix (e.g. /home/z2 vs /home/z)
+        var ch = candidate.Length > root.Length ? candidate[root.Length] : '\0';
+        return ch == Path.DirectorySeparatorChar || ch == Path.AltDirectorySeparatorChar;
+    }
 }
