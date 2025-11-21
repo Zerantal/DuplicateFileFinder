@@ -9,17 +9,31 @@ public interface IScanSession
     string RootPath { get; }
     ValueTask DisposeAsync();
 
-    void ObserveDir(
-        Guid id,
-        Guid? parentId,
-        string name,
+    // void ObserveDir(
+    //     Guid id,
+    //     Guid? parentId,
+    //     string name,
+    //     ScanEntryStatus status,
+    //     string? errorMessage = null);
+
+    public Guid ObserveDirectory(
+        string fullPath,
         ScanEntryStatus status,
         string? errorMessage = null);
+    
+    // void ObserveFile(
+    //     Guid id,
+    //     Guid dirId,
+    //     string name,
+    //     long size,
+    //     HashKey hash,
+    //     DateTimeOffset modified,
+    //     DateTimeOffset created,
+    //     ScanEntryStatus status,
+    //     string? errorMessage = null);
 
-    void ObserveFile(
-        Guid id,
-        Guid dirId,
-        string name,
+    public void ObserveFile(
+        string fullFilePath,
         long size,
         HashKey hash,
         DateTimeOffset modified,

@@ -43,6 +43,14 @@
     <!-- ONE root: DockPanel; last child fills the remaining space -->
     <DockPanel Margin="8" LastChildFill="True">
         
+        <!-- Menu bar at the top -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_Repository">
+                <MenuItem Header="_Optimize repo..."
+                          Command="{Binding OptimizeRepoCommand}" />
+            </MenuItem>
+        </Menu>
+        
         <!-- Simple toolbar row -->
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
             <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />

@@ -13,7 +13,7 @@ public partial class MainWindowViewModel : ObservableObject
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
     private readonly Dff.DuplicateFileFinder _engine;
 
-    private readonly IFolderPickerService _folderPicker;
+    private readonly DialogService _dialogService;
 
     // guard to prevent file scanning updating UI after it's finished
     private bool _finalized;
@@ -32,12 +32,12 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty] private int _scanProgress;
     
-    public MainWindowViewModel(Repo repo, IFolderPickerService folderPicker)
+    public MainWindowViewModel(Repo repo, DialogService dialogService)
     {
         Duplicates = new DuplicatesViewModel(repo);
         _engine = new Dff.DuplicateFileFinder(repo);
 
-        _folderPicker = folderPicker;
+        _dialogService = dialogService;
 
         IsScanning = false;
     }
@@ -51,7 +51,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStartScan))]
     private async Task ScanLocation()
     {
-        var path = await _folderPicker.PickFolderAsync();
+        var path = await _dialogService.ShowOpenFolderDialogAsync("Scan location...");
         if (string.IsNullOrWhiteSpace(path)) return;
 
         using (ScanLog.BeginScanScope(path))
@@ -66,7 +66,23 @@ public partial class MainWindowViewModel : ObservableObject
         _scanCts?.Cancel();
     }
 
+    [RelayCommand(CanExecute = nameof(CanStartScan))]
+    private async Task OptimizeRepo()
+    {
+        try
+        {
+            await Duplicates.OptimizeRepoAsync();
+            await _dialogService.ShowInfoAsync("Repository optimized", "The repository has been compacted.");
+
+        }
+        catch (Exception ex)
+        {
+            await _dialogService.ShowErrorAsync("Failed to optimize repository", ex.Message);
+        }
+    }
+
     // ---------------- Private helper methods ----------------
+
     private async Task StartScan(string path)
     {
         var scanInterrupted = false;

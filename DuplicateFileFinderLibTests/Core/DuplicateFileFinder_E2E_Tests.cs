@@ -1,6 +1,7 @@
 // DuplicateFileFinderLibTests/DuplicateFileFinderTests.cs
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -36,6 +37,8 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
             throw new NotImplementedException();
         }
 
+        public IReadOnlyList<ScanRun> ScanRunsView { get; } = null!;
+
         public event EventHandler<RepoDelta>? DeltaCommitted;
         public IScanSession BeginScan(string rootPath, int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
         {
@@ -44,32 +47,28 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         public void CommitDelta(RepoDelta delta)
         {
-            throw new NotImplementedException();
         }
 
         public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            return Task.CompletedTask;
         }
 
         public void SaveSnapshot()
         {
-            throw new NotImplementedException();
         }
 
         public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
         {
-            throw new NotImplementedException();
         }
 
         public void CompactNow()
         {
-            throw new NotImplementedException();
         }
 
         public string GetFullDirPath(Guid dirId)
         {
-            throw new NotImplementedException();
+            return "";
         }
     }
 
@@ -84,28 +83,29 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public void ObserveDir(Guid id, Guid? parentId, string name, ScanEntryStatus status, string? errorMessage = null)
+        public Guid ObserveDirectory(string fullPath, ScanEntryStatus status, string? errorMessage = null)
         {
+            return Guid.Empty;
         }
 
-        public void ObserveFile(Guid id, Guid dirId, string name, long size, HashKey hash, DateTimeOffset modified,
-            DateTimeOffset created, ScanEntryStatus status, string? errorMessage = null)
+        public void ObserveFile(string fullFilePath, long size, HashKey hash, DateTimeOffset modified, DateTimeOffset created,
+            ScanEntryStatus status, string? errorMessage = null)
         {
         }
 
         public Task FlushProgressAsync(CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            return Task.CompletedTask;
         }
 
         public Task CompleteAsync(CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            return Task.CompletedTask;
         }
 
         public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            return Task.CompletedTask;
         }
     }
     

@@ -1,5 +1,6 @@
 // DuplicateFileFinderLib/Repo/Repo.cs
 
+using System.Collections.Concurrent;
 using System.Text.Json;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Models;
@@ -18,10 +19,11 @@ public sealed class Repo : IRepo
 
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
-    private readonly Dictionary<Guid, string> _dirPathCache = new();
+    private readonly ConcurrentDictionary<Guid, string> _dirPathCache = new();
     private readonly string _logDir;
 
     private readonly string _metaFile;
+    private readonly string _scanRunsFile;
     private readonly Dictionary<long, ScanRun> _scanRunIndex = new();
     private readonly string _snapshotFile;
 
@@ -36,6 +38,8 @@ public sealed class Repo : IRepo
         _metaFile = Path.Combine(repoPath, "meta.json");
         _snapshotFile = Path.Combine(repoPath, "snapshot.bin");
         _logDir = Path.Combine(repoPath, "log");
+        _scanRunsFile = Path.Combine(repoPath, "scanruns.json");
+
         Directory.CreateDirectory(_logDir);
     }
 
@@ -43,6 +47,17 @@ public sealed class Repo : IRepo
     
     private List<ScanRun> ScanRuns { get; set; } = new();
 
+    public IReadOnlyList<ScanRun> ScanRunsView
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return ScanRuns.ToArray();
+            }
+        }
+    }
+    
     public event EventHandler<RepoDelta>? DeltaCommitted;
 
     // ---------- public ops ----------
@@ -88,14 +103,16 @@ public sealed class Repo : IRepo
             FinishedAt = null,
             ErrorMessage = null
         };
-
+        IReadOnlyDictionary<Guid, DirRecord> dirsCopy;
         lock (_sync)
         {
+            dirsCopy = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
             _scanRunIndex[scanSequence] = run;
             ScanRuns.Add(run);
+            SaveScanRuns_NoLock(); 
         }
-
-        return new ScanSession(this, run, maxFilesBeforeFlush, maxDirsBeforeFlush);
+        
+        return new ScanSession(this, run, dirsCopy,  maxFilesBeforeFlush, maxDirsBeforeFlush);
     }
 
     // -------- CommitDelta: progressive, with log id --------
@@ -227,10 +244,12 @@ public sealed class Repo : IRepo
             repo.LoadMetaOrCreateFresh(repoPath);
             repo.LoadSnapshot(); // 1) data image
             repo.ReplayDeltas(); // 2) bring forward by deltas; ApplyDelta updates HashIndex
+            repo.LoadScanRuns();
 
             TimingLog.Counter("files", repo._files.Count);
             TimingLog.Counter("dirs", repo._dirs.Count);
             TimingLog.Counter("HashIndex", repo._hashIndex.Count);
+            
         }
 
         return repo;
@@ -336,6 +355,40 @@ public sealed class Repo : IRepo
             throw;
         }
     }
+    
+    // Load persisted scan runs from scanruns.json (if present) and
+// overlay them on top of whatever was loaded from the snapshot.
+    private void LoadScanRuns()
+    {
+        if (!File.Exists(_scanRunsFile))
+            return; // Keep whatever ScanRuns came from the snapshot
+
+        var json = File.ReadAllText(_scanRunsFile);
+        var fromFile = JsonSerializer.Deserialize<List<ScanRun>>(json) ?? new List<ScanRun>();
+
+        // Merge: snapshot data is baseline; scanruns.json overrides / adds by ScanSequence.
+        var bySeq = new Dictionary<long, ScanRun>();
+        foreach (var run in ScanRuns)
+            bySeq[run.ScanSequence] = run;
+
+        foreach (var run in fromFile)
+            bySeq[run.ScanSequence] = run;
+
+        ScanRuns = bySeq.Values.OrderBy(r => r.ScanSequence).ToList();
+
+        _scanRunIndex.Clear();
+        foreach (var run in ScanRuns)
+            _scanRunIndex[run.ScanSequence] = run;
+    }
+
+// Caller must hold _sync if there is any chance of concurrent modification.
+    private void SaveScanRuns_NoLock()
+    {
+        var json = JsonSerializer.Serialize(ScanRuns, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(_scanRunsFile, json);
+        Fsync(_scanRunsFile);
+    }
+
 
     private void ReplayDeltas()
     {
@@ -395,7 +448,7 @@ public sealed class Repo : IRepo
         {
             _dirs[d.Id] = d;
             // Invalidate cached path; will be recomputed on next GetFullDirPath
-            _dirPathCache.Remove(d.Id);
+            _dirPathCache.Remove(d.Id, out _);
         }
 
         // Deletions (tombstones)
@@ -420,7 +473,7 @@ public sealed class Repo : IRepo
             foreach (var tomb in delta.DeletedDirs)
             {
                 _dirs.Remove(tomb.Id);
-                _dirPathCache.Remove(tomb.Id);
+                _dirPathCache.Remove(tomb.Id, out _);
             }
     }
 
@@ -508,6 +561,8 @@ public sealed class Repo : IRepo
             var idx = ScanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) ScanRuns[idx] = updated;
             else ScanRuns.Add(updated);
+            
+            SaveScanRuns_NoLock(); // persist "completed" status
         }
     }
 
@@ -531,6 +586,8 @@ public sealed class Repo : IRepo
             var idx = ScanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) ScanRuns[idx] = updated;
             else ScanRuns.Add(updated);
+            
+            SaveScanRuns_NoLock(); // persist "failed/cancelled" status
         }
     }
 
@@ -581,8 +638,7 @@ public sealed class Repo : IRepo
         CommitDelta(tombstoneDelta);
         MarkScanCompleted(scanSequence);
     }
-
-    // Implement IsUnderRoot using your directory tree + GetFullDirPath or cached mapping
+    
     private bool IsUnderRoot(Guid dirId, string rootPath)
     {
         var path = GetFullDirPath(dirId);

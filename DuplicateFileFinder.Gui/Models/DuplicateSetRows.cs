@@ -1,14 +1,16 @@
-using System.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinder.Gui.Models;
 
-public sealed class DuplicateSetRow : INotifyPropertyChanged
+public sealed partial class DuplicateSetRow : ObservableObject
 {
     private readonly List<FileItem> _items = new();
     private readonly Func<FileRecord, string> _pathResolver;
 
     private List<FileRecord> _files;
+
+    [ObservableProperty] private bool _isSelected;
 
     public DuplicateSetRow(HashKey hash, IEnumerable<FileRecord> files, Func<FileRecord, string> pathResolver)
     {
@@ -28,18 +30,10 @@ public sealed class DuplicateSetRow : INotifyPropertyChanged
 
     public IReadOnlyList<FileItem> Items => _items;
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     public void Update(IEnumerable<FileRecord> files)
     {
         _files = files.ToList();
         RebuildItems();
-        Raise(nameof(Count));
-        Raise(nameof(TotalBytes));
-        Raise(nameof(Items));
-        Raise(nameof(RepresentativeName));
-        Raise(nameof(RepresentativePath));
-        Raise(nameof(Items));
     }
 
     private void RebuildItems()
@@ -50,10 +44,5 @@ public sealed class DuplicateSetRow : INotifyPropertyChanged
                 r.Name,
                 _pathResolver(r), r.Size,
                 r.Modified)));
-    }
-
-    private void Raise(string n)
-    {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
     }
 }

@@ -1,666 +1,647 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.Repository
+namespace DuplicateFileFinderLibTests.Repository;
+
+public sealed class ScanSessionTests : IDisposable
 {
-    public sealed class ScanSessionTests : IDisposable
+    private readonly string _rootDir;
+
+    public ScanSessionTests()
     {
-        private readonly string _rootDir;
+        _rootDir = Path.Combine(Path.GetTempPath(), "dff-scan-session-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_rootDir);
+    }
 
-        public ScanSessionTests()
+    private string SnapshotPath => Path.Combine(_rootDir, "snapshot.bin");
+
+    public void Dispose()
+    {
+        try
         {
-            _rootDir = Path.Combine(Path.GetTempPath(), "dff-scan-session-tests", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_rootDir);
+            if (Directory.Exists(_rootDir))
+                Directory.Delete(_rootDir, true);
         }
-
-        public void Dispose()
+        catch
         {
-            try
+            // ignore cleanup errors in tests
+        }
+    }
+
+    private static IReadOnlyList<DirRecord> RealDirs(RepoSnapshot snapshot)
+    {
+        return snapshot.Dirs.Values.Where(d => d.Status != ScanEntryStatus.None).ToList();
+    }
+
+    private RepoSnapshot ReadSnapshot()
+    {
+        var bytes = File.ReadAllBytes(SnapshotPath);
+        return MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes)!;
+    }
+
+    // ReSharper disable once InconsistentNaming
+    private static string RootPathForCurrentOS()
+    {
+        return OperatingSystem.IsWindows() ? "root" : "/root";
+    }
+
+    private static async Task<RepoSnapshot?> WaitForSnapshotAsync(
+        Repo repo,
+        string snapshotPath,
+        Func<RepoSnapshot, bool> predicate,
+        TimeSpan timeout)
+    {
+        var start = DateTime.UtcNow;
+
+        while (true)
+        {
+            repo.SaveSnapshot();
+
+            if (File.Exists(snapshotPath))
             {
-                if (Directory.Exists(_rootDir))
-                    Directory.Delete(_rootDir, recursive: true);
+                var bytes = await File.ReadAllBytesAsync(snapshotPath);
+                var snapshot = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes);
+                if (snapshot != null && predicate(snapshot))
+                    return snapshot;
             }
-            catch
-            {
-                // ignore cleanup errors in tests
-            }
+
+            if (DateTime.UtcNow - start > timeout)
+                return null;
+
+            await Task.Delay(10);
         }
+    }
 
-        private string SnapshotPath => Path.Combine(_rootDir, "snapshot.bin");
+    // --------------------------------------------------------------------
+    //    Progressive flush: Observe* + FlushProgress should commit a delta
+    //    and update repo state, but NOT mark the run completed.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task FlushProgress_CommitsObservedDirsAndFiles_WithoutCompletingRun()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
 
-        private RepoSnapshot ReadSnapshot()
+        var session = repo.BeginScan(rootPath);
+
+        session.ObserveDirectory(
+            rootPath,
+            ScanEntryStatus.Enumerated);
+
+        var hashBytes = new byte[16];
+        new Random(123).NextBytes(hashBytes);
+        var hashKey = new HashKey(hashBytes);
+
+        session.ObserveFile(
+            Path.Combine(rootPath, "file.txt"),
+            100,
+            hashKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        await session.FlushProgressAsync();
+
+        // Do not call CompleteAsync / FailAsync here.
+
+        repo.SaveSnapshot();
+        var snapshot = ReadSnapshot();
+
+        // Files and dirs should be present (ignoring dummy ancestors)
+        var dirs = RealDirs(snapshot);
+        Assert.Single(dirs);
+
+        var dir = dirs[0];
+        Assert.Equal("root", dir.Name);
+        Assert.Equal(session.ScanSequence, dir.LastSeenSequence);
+
+        var files = snapshot.Files.Values.ToList();
+        Assert.Single(files);
+
+        var file = files[0];
+        Assert.Equal("file.txt", file.Name);
+        Assert.Equal(session.ScanSequence, file.LastSeenScanSequence);
+
+
+        // ScanRun should exist and still be InProgress
+        var run = Assert.Single(snapshot.ScanRuns);
+        Assert.Equal(session.ScanSequence, run.ScanSequence);
+        Assert.Equal(ScanRunStatus.InProgress, run.Status);
+
+        await session.DisposeAsync();
+    }
+
+    // --------------------------------------------------------------------
+    //    CompleteAsync: progressive scan + completion should emit
+    //    tombstones for entries under the root that were not seen
+    //    in this scan sequence.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task CompleteAsync_EmitsTombstonesForUnseenEntriesUnderRoot()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        // Seed repo with an "old" file under /root/sub seen at scan sequence 1
+        var rootDirId = Guid.NewGuid();
+        var subDirId = Guid.NewGuid();
+        var oldFileId = Guid.NewGuid();
+
+        var hashBytes = new byte[16];
+        new Random(111).NextBytes(hashBytes);
+        var hash = new HashKey(hashBytes);
+        var seq = repo.AllocateScanSequence();
+
+        var rootDir = new DirRecord
         {
-            var bytes = File.ReadAllBytes(SnapshotPath);
-            return MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes)!;
-        }
+            Id = rootDirId,
+            ParentId = null,
+            Name = "root",
+            LastSeenSequence = seq,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-        // ReSharper disable once InconsistentNaming
-        private static string RootPathForCurrentOS() =>
-            OperatingSystem.IsWindows() ? "root" : "/root";
-
-        private static async Task<RepoSnapshot?> WaitForSnapshotAsync(
-            Repo repo,
-            string snapshotPath,
-            Func<RepoSnapshot, bool> predicate,
-            TimeSpan timeout)
+        var subDir = new DirRecord
         {
-            var start = DateTime.UtcNow;
+            Id = subDirId,
+            ParentId = rootDirId,
+            Name = "sub",
+            LastSeenSequence = seq,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-            while (true)
-            {
-                repo.SaveSnapshot();
+        var oldFile = new FileRecord
+        {
+            Id = oldFileId,
+            DirId = subDirId,
+            Name = "old.txt",
+            Size = 1,
+            Hash = hash,
+            Modified = DateTimeOffset.UtcNow,
+            Created = DateTimeOffset.UtcNow,
+            LastSeenScanSequence = seq,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-                if (File.Exists(snapshotPath))
-                {
-                    var bytes    = await File.ReadAllBytesAsync(snapshotPath);
-                    var snapshot = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes);
-                    if (snapshot != null && predicate(snapshot))
-                        return snapshot;
-                }
+        var scanSeq = repo.AllocateLogId();
+        await repo.CommitDeltaAsync(new RepoDelta
+        {
+            ScanSequence = scanSeq,
+            Dirs = [rootDir, subDir],
+            Files = [oldFile]
+        });
 
-                if (DateTime.UtcNow - start > timeout)
-                    return null;
+        repo.SaveSnapshot();
+        var snapshot1 = ReadSnapshot();
+        Assert.Single(snapshot1.Files);
+        Assert.True(snapshot1.Files.ContainsKey(oldFileId));
 
-                await Task.Delay(10);
-            }
-        }
+        // New scan: only see a new file under the same root.
+        var session = repo.BeginScan(rootPath);
+
+        session.ObserveDirectory(
+            "/root",
+            ScanEntryStatus.Enumerated);
+
+        session.ObserveDirectory(
+            "/root/sub",
+            ScanEntryStatus.Enumerated);
+
+        session.ObserveFile(
+            "/root/sub/new.txt",
+            2,
+            hash,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        // Progressive flush + completion
+        await session.FlushProgressAsync();
+        await session.CompleteAsync();
+
+        repo.SaveSnapshot();
+        var snapshot2 = ReadSnapshot();
         
-        // --------------------------------------------------------------------
-        //    Progressive flush: Observe* + FlushProgress should commit a delta
-        //    and update repo state, but NOT mark the run completed.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task FlushProgress_CommitsObservedDirsAndFiles_WithoutCompletingRun()
+        // Only the new file under root/sub should remain.
+        var files = snapshot2.Files.Values.ToList();
+        Assert.Single(files);
+
+        var remaining = files[0];
+        Assert.Equal("new.txt", remaining.Name);
+        Assert.Equal(subDirId, remaining.DirId); // still a meaningful check
+        Assert.False(snapshot2.Files.ContainsKey(oldFileId));
+
+        // ScanRun should be marked Completed for this sequence.
+        var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
+        Assert.Equal(ScanRunStatus.Completed, run.Status);
+    }
+
+    // --------------------------------------------------------------------
+    //    FailAsync: marking a scan as failed/cancelled should not
+    //    generate tombstones, even if there was prior content.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task FailAsync_DoesNotEmitTombstones()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        // Seed with an existing file under root
+        var dirId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
+
+        var hashBytes = new byte[16];
+        new Random(222).NextBytes(hashBytes);
+        var hash = new HashKey(hashBytes);
+
+        var dir = new DirRecord
         {
-            var repo = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+            Id = dirId,
+            ParentId = null,
+            Name = "root",
+            LastSeenSequence = 1,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-            var session = repo.BeginScan(rootPath);
-
-            var dirId = Guid.NewGuid();
-            var fileId = Guid.NewGuid();
-
-            session.ObserveDir(
-                id: dirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
-
-            var hashBytes = new byte[16];
-            new Random(123).NextBytes(hashBytes);
-            var hashKey = new HashKey(hashBytes);
-
-            session.ObserveFile(
-                id: fileId,
-                dirId: dirId,
-                name: "file.txt",
-                size: 100,
-                hash: hashKey,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-
-            await session.FlushProgressAsync();
-
-            // Do not call CompleteAsync / FailAsync here.
-
-            repo.SaveSnapshot();
-            var snapshot = ReadSnapshot();
-
-            // Files and dirs should be present
-            Assert.Single(snapshot.Dirs);
-            Assert.Single(snapshot.Files);
-
-            var dir = Assert.Single(snapshot.Dirs).Value;
-            Assert.Equal(dirId, dir.Id);
-            Assert.Equal("root", dir.Name);
-            Assert.Equal(session.ScanSequence, dir.LastSeenSequence);
-
-            var file = Assert.Single(snapshot.Files).Value;
-            Assert.Equal(fileId, file.Id);
-            Assert.Equal("file.txt", file.Name);
-            Assert.Equal(session.ScanSequence, file.LastSeenScanSequence);
-
-            // ScanRun should exist and still be InProgress
-            var run = Assert.Single(snapshot.ScanRuns);
-            Assert.Equal(session.ScanSequence, run.ScanSequence);
-            Assert.Equal(ScanRunStatus.InProgress, run.Status);
-
-            await session.DisposeAsync();
-        }
-
-        // --------------------------------------------------------------------
-        //    CompleteAsync: progressive scan + completion should emit
-        //    tombstones for entries under the root that were not seen
-        //    in this scan sequence.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task CompleteAsync_EmitsTombstonesForUnseenEntriesUnderRoot()
+        var file = new FileRecord
         {
-            var repo = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+            Id = fileId,
+            DirId = dirId,
+            Name = "keep.txt",
+            Size = 1,
+            Hash = hash,
+            Modified = DateTimeOffset.UtcNow,
+            Created = DateTimeOffset.UtcNow,
+            LastSeenScanSequence = 1,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-            // Seed repo with an "old" file under /root/sub seen at scan sequence 1
-            var rootDirId = Guid.NewGuid();
-            var subDirId = Guid.NewGuid();
-            var oldFileId = Guid.NewGuid();
-
-            var hashBytes = new byte[16];
-            new Random(111).NextBytes(hashBytes);
-            var hash = new HashKey(hashBytes);
-            var seq = repo.AllocateScanSequence();
-
-            var rootDir = new DirRecord
-            {
-                Id = rootDirId,
-                ParentId = null,
-                Name = "root",
-                LastSeenSequence = seq,
-                Status = ScanEntryStatus.Enumerated
-            };
-
-            var subDir = new DirRecord
-            {
-                Id = subDirId,
-                ParentId = rootDirId,
-                Name = "sub",
-                LastSeenSequence = seq,
-                Status = ScanEntryStatus.Enumerated
-            };
-
-            var oldFile = new FileRecord
-            {
-                Id = oldFileId,
-                DirId = subDirId,
-                Name = "old.txt",
-                Size = 1,
-                Hash = hash,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = seq,
-                Status = ScanEntryStatus.Enumerated
-            };
-
-            var scanSeq = repo.AllocateLogId();
-            await repo.CommitDeltaAsync(new RepoDelta
-            {
-                ScanSequence = scanSeq,
-                Dirs = [rootDir, subDir],
-                Files = [oldFile]
-            });
-
-            repo.SaveSnapshot();
-            var snapshot1 = ReadSnapshot();
-            Assert.Single(snapshot1.Files);
-            Assert.True(snapshot1.Files.ContainsKey(oldFileId));
-
-            // New scan: only see a new file under the same root.
-            var session = repo.BeginScan(rootPath);
-            var newFileId = Guid.NewGuid();
-
-            session.ObserveDir(
-                id: rootDirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
-
-            session.ObserveDir(
-                id: subDirId,
-                parentId: rootDirId,
-                name: "sub",
-                status: ScanEntryStatus.Enumerated);
-
-            session.ObserveFile(
-                id: newFileId,
-                dirId: subDirId,
-                name: "new.txt",
-                size: 2,
-                hash: hash,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-
-            // Progressive flush + completion
-            await session.FlushProgressAsync();
-            await session.CompleteAsync();
-
-            repo.SaveSnapshot();
-            var snapshot2 = ReadSnapshot();
-
-            // Old file should have been tombstoned and removed; new file remains.
-            Assert.Single(snapshot2.Files);
-            Assert.True(snapshot2.Files.ContainsKey(newFileId));
-            Assert.False(snapshot2.Files.ContainsKey(oldFileId));
-
-            // ScanRun should be marked Completed for this sequence.
-            var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
-            Assert.Equal(ScanRunStatus.Completed, run.Status);
-        }
-
-        // --------------------------------------------------------------------
-        //    FailAsync: marking a scan as failed/cancelled should not
-        //    generate tombstones, even if there was prior content.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task FailAsync_DoesNotEmitTombstones()
+        await repo.CommitDeltaAsync(new RepoDelta
         {
-            var repo = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+            ScanSequence = 1,
+            Dirs = [dir],
+            Files = [file]
+        });
 
-            // Seed with an existing file under root
-            var dirId = Guid.NewGuid();
-            var fileId = Guid.NewGuid();
+        repo.SaveSnapshot();
+        var snapshot1 = ReadSnapshot();
+        Assert.Single(snapshot1.Files);
+        Assert.True(snapshot1.Files.ContainsKey(fileId));
 
-            var hashBytes = new byte[16];
-            new Random(222).NextBytes(hashBytes);
-            var hash = new HashKey(hashBytes);
+        // Start a new scan but fail it.
+        var session = repo.BeginScan(rootPath);
 
-            var dir = new DirRecord
-            {
-                Id = dirId,
-                ParentId = null,
-                Name = "root",
-                LastSeenSequence = 1,
-                Status = ScanEntryStatus.Enumerated
-            };
+        // Optionally observe some stuff, but never complete.
+        session.ObserveDirectory("root", ScanEntryStatus.Enumerated);
+        await session.FlushProgressAsync();
 
-            var file = new FileRecord
-            {
-                Id = fileId,
-                DirId = dirId,
-                Name = "keep.txt",
-                Size = 1,
-                Hash = hash,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated
-            };
+        await session.FailAsync("cancelled", true);
 
-            await repo.CommitDeltaAsync(new RepoDelta
-            {
-                ScanSequence = 1,
-                Dirs = [dir],
-                Files = [file]
-            });
+        repo.SaveSnapshot();
+        var snapshot2 = ReadSnapshot();
 
-            repo.SaveSnapshot();
-            var snapshot1 = ReadSnapshot();
-            Assert.Single(snapshot1.Files);
-            Assert.True(snapshot1.Files.ContainsKey(fileId));
+        // Original file must still be present; no tombstone-based deletion.
+        Assert.True(snapshot2.Files.ContainsKey(fileId));
 
-            // Start a new scan but fail it.
-            var session = repo.BeginScan(rootPath);
+        // ScanRun for this sequence should be Failed or Cancelled.
+        var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
+        Assert.True(run.Status == ScanRunStatus.Failed || run.Status == ScanRunStatus.Cancelled);
+        Assert.Equal("cancelled", run.ErrorMessage);
+    }
 
-            // Optionally observe some stuff, but never complete.
-            session.ObserveDir(dirId, null, "root", ScanEntryStatus.Enumerated);
-            await session.FlushProgressAsync();
+    // --------------------------------------------------------------------
+    //    DisposeAsync: if a ScanSession is disposed without CompleteAsync
+    //    or FailAsync, it should mark the run as failed/cancelled and
+    //    not emit deletions.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task DisposeAsync_WithoutCompletion_MarksRunFailedWithoutDeletions()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
 
-            await session.FailAsync("cancelled", cancelled: true);
+        // Seed with an existing file under root
+        var dirId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
 
-            repo.SaveSnapshot();
-            var snapshot2 = ReadSnapshot();
+        var hashBytes = new byte[16];
+        new Random(333).NextBytes(hashBytes);
+        var hash = new HashKey(hashBytes);
 
-            // Original file must still be present; no tombstone-based deletion.
-            Assert.True(snapshot2.Files.ContainsKey(fileId));
-
-            // ScanRun for this sequence should be Failed or Cancelled.
-            var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
-            Assert.True(run.Status == ScanRunStatus.Failed || run.Status == ScanRunStatus.Cancelled);
-            Assert.Equal("cancelled", run.ErrorMessage);
-        }
-
-        // --------------------------------------------------------------------
-        //    DisposeAsync: if a ScanSession is disposed without CompleteAsync
-        //    or FailAsync, it should mark the run as failed/cancelled and
-        //    not emit deletions.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task DisposeAsync_WithoutCompletion_MarksRunFailedWithoutDeletions()
+        var dir = new DirRecord
         {
-            var repo = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+            Id = dirId,
+            ParentId = null,
+            Name = "root",
+            LastSeenSequence = 1,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-            // Seed with an existing file under root
-            var dirId = Guid.NewGuid();
-            var fileId = Guid.NewGuid();
-
-            var hashBytes = new byte[16];
-            new Random(333).NextBytes(hashBytes);
-            var hash = new HashKey(hashBytes);
-
-            var dir = new DirRecord
-            {
-                Id = dirId,
-                ParentId = null,
-                Name = "root",
-                LastSeenSequence = 1,
-                Status = ScanEntryStatus.Enumerated
-            };
-
-            var file = new FileRecord
-            {
-                Id = fileId,
-                DirId = dirId,
-                Name = "keep.txt",
-                Size = 1,
-                Hash = hash,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated
-            };
-
-            await repo.CommitDeltaAsync(new RepoDelta
-            {
-                ScanSequence = 1,
-                Dirs = [dir],
-                Files = [file]
-            });
-
-            repo.SaveSnapshot();
-            var snapshot1 = ReadSnapshot();
-            Assert.True(snapshot1.Files.ContainsKey(fileId));
-
-            // Start a new scan, observe something, but neither complete nor fail explicitly.
-            var session = repo.BeginScan(rootPath);
-
-            session.ObserveDir(dirId, null, "root", ScanEntryStatus.Enumerated);
-            await session.FlushProgressAsync();
-
-            await session.DisposeAsync(); // should mark run failed/cancelled
-
-            repo.SaveSnapshot();
-            var snapshot2 = ReadSnapshot();
-
-            // Original file must still be present.
-            Assert.True(snapshot2.Files.ContainsKey(fileId));
-
-            // ScanRun for this sequence should not be InProgress anymore.
-            var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
-            Assert.NotEqual(ScanRunStatus.InProgress, run.Status);
-        }
-
-        // --------------------------------------------------------------------
-        //    If thresholds are not reached, nothing is flushed automatically:
-        //    - Snapshot before FlushProgress() should contain nothing.
-        //    - Snapshot after FlushProgress() should contain the buffered entries.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task NoAutoFlush_BelowThreshold_RequiresExplicitFlush()
+        var file = new FileRecord
         {
-            var repo = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+            Id = fileId,
+            DirId = dirId,
+            Name = "keep.txt",
+            Size = 1,
+            Hash = hash,
+            Modified = DateTimeOffset.UtcNow,
+            Created = DateTimeOffset.UtcNow,
+            LastSeenScanSequence = 1,
+            Status = ScanEntryStatus.Enumerated
+        };
 
-            // High thresholds: no auto-flush
-            await using var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 10, maxDirsBeforeFlush: 10);
+        await repo.CommitDeltaAsync(new RepoDelta
+        {
+            ScanSequence = 1,
+            Dirs = [dir],
+            Files = [file]
+        });
 
-            var dirId = Guid.NewGuid();
-            var fileId = Guid.NewGuid();
+        repo.SaveSnapshot();
+        var snapshot1 = ReadSnapshot();
+        Assert.True(snapshot1.Files.ContainsKey(fileId));
 
-            var hashBytes = new byte[16];
-            new Random(456).NextBytes(hashBytes);
-            var hashKey = new HashKey(hashBytes);
+        // Start a new scan, observe something, but neither complete nor fail explicitly.
+        var session = repo.BeginScan(rootPath);
 
-            session.ObserveDir(
-                id: dirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
+        session.ObserveDirectory("root", ScanEntryStatus.Enumerated);
+        await session.FlushProgressAsync();
 
-            session.ObserveFile(
-                id: fileId,
-                dirId: dirId,
-                name: "f1.txt",
-                size: 10,
-                hash: hashKey,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+        await session.DisposeAsync(); // should mark run failed/cancelled
 
-            // Below threshold: nothing should have been flushed yet.
-            repo.SaveSnapshot();
+        repo.SaveSnapshot();
+        var snapshot2 = ReadSnapshot();
+
+        // Original file must still be present.
+        Assert.True(snapshot2.Files.ContainsKey(fileId));
+
+        // ScanRun for this sequence should not be InProgress anymore.
+        var run = Assert.Single(snapshot2.ScanRuns, r => r.ScanSequence == session.ScanSequence);
+        Assert.NotEqual(ScanRunStatus.InProgress, run.Status);
+    }
+
+    // --------------------------------------------------------------------
+    //    If thresholds are not reached, nothing is flushed automatically:
+    //    - Snapshot before FlushProgress() should contain nothing.
+    //    - Snapshot after FlushProgress() should contain the buffered entries.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task NoAutoFlush_BelowThreshold_RequiresExplicitFlush()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        // High thresholds: no auto-flush
+        await using var session = repo.BeginScan(rootPath, 10, 10);
+
+        var hashBytes = new byte[16];
+        new Random(456).NextBytes(hashBytes);
+        var hashKey = new HashKey(hashBytes);
+
+        session.ObserveDirectory(
+            "root",
+            ScanEntryStatus.Enumerated);
+
+        session.ObserveFile(
+            "root/f1.txt",
+            10,
+            hashKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        // Below threshold: nothing should have been flushed yet.
+        repo.SaveSnapshot();
+        var snapshotBefore = ReadSnapshot();
+
+        // No real dirs/files flushed yet (dummy ancestors are OK)
+        Assert.Empty(RealDirs(snapshotBefore));
+        Assert.Empty(snapshotBefore.Files);
+
+
+        // Now explicitly flush and snapshot again
+        await session.FlushProgressAsync();
+        repo.SaveSnapshot();
+        var snapshotAfter = ReadSnapshot();
+
+        var dirs = RealDirs(snapshotAfter);
+        Assert.Single(dirs);
+        Assert.Equal("root", dirs[0].Name);
+
+        var files = snapshotAfter.Files.Values.ToList();
+        Assert.Single(files);
+        Assert.Equal("f1.txt", files[0].Name);
+    }
+
+    // --------------------------------------------------------------------
+    //    Auto-flush when file threshold is reached (async).
+    //    We rely on the background FlushProgressAsync() triggered by ObserveFile.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task AutoFlush_WhenFileThresholdReached_CommitsDelta_Async()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        var session = repo.BeginScan(rootPath, 2);
+
+        session.ObserveDirectory(
+            "root",
+            ScanEntryStatus.Enumerated);
+
+        var hashBytes = new byte[16];
+        new Random(123).NextBytes(hashBytes);
+        var hashKey = new HashKey(hashBytes);
+
+        // First file (buffered)
+        session.ObserveFile(
+            "root/f1.txt",
+            10,
+            hashKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        // Second file: exceeds threshold, should trigger auto FlushProgressAsync internally
+        session.ObserveFile(
+            "root/f2.txt",
+            20,
+            hashKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        // Wait until snapshot sees both files (or timeout)
+        var snapshot = await WaitForSnapshotAsync(
+            repo,
+            SnapshotPath,
+            s => s.Files.Count == 2 && RealDirs(s).Count == 1,
+            TimeSpan.FromSeconds(2));
+
+        Assert.NotNull(snapshot);
+
+        var dirs = RealDirs(snapshot);
+        Assert.Single(dirs);
+        Assert.Equal("root", dirs[0].Name);
+
+        Assert.Equal(2, snapshot.Files.Count);
+        var names = snapshot.Files.Values.Select(f => f.Name).ToHashSet();
+        Assert.True(names.SetEquals(new[] { "f1.txt", "f2.txt" }));
+
+
+        await session.DisposeAsync();
+    }
+
+    // --------------------------------------------------------------------
+    // 2. Auto-flush when directory threshold is reached (async).
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task AutoFlush_WhenDirThresholdReached_CommitsDelta_Async()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        var session = repo.BeginScan(rootPath, 1000, 3);
+
+        session.ObserveDirectory(
+            "/root",
+            ScanEntryStatus.Enumerated);
+
+        // Second dir: exceeds threshold, should trigger auto flush
+        session.ObserveDirectory(
+            "/root/sub",
+            ScanEntryStatus.Enumerated);
+
+        var snapshot = await WaitForSnapshotAsync(
+            repo,
+            SnapshotPath,
+            s => RealDirs(s).Count == 2,
+            TimeSpan.FromSeconds(2));
+
+
+        Assert.NotNull(snapshot);
+
+        var dirs = RealDirs(snapshot);
+        Assert.Equal(2, dirs.Count);
+
+        var names = dirs.Select(d => d.Name).ToHashSet();
+        Assert.True(names.SetEquals(new[] { "root", "sub" }));
+
+
+        await session.DisposeAsync();
+    }
+
+    // --------------------------------------------------------------------
+    //    Below threshold there is no auto-flush:
+    //    - Snapshot should be empty until FlushProgressAsync is awaited.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task BelowThreshold_NoAutoFlush_RequiresExplicitFlushAsync()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        var session = repo.BeginScan(rootPath, 10, 10);
+
+        var hashBytes = new byte[16];
+        new Random(456).NextBytes(hashBytes);
+        var hashKey = new HashKey(hashBytes);
+
+        session.ObserveDirectory(
+            "root",
+            ScanEntryStatus.Enumerated);
+
+        session.ObserveFile(
+            "root/f1.txt",
+            10,
+            hashKey,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+
+        // Thresholds not reached -> no auto flush expected
+        repo.SaveSnapshot();
+        if (File.Exists(SnapshotPath))
+        {
             var snapshotBefore = ReadSnapshot();
-
             Assert.Empty(snapshotBefore.Dirs);
             Assert.Empty(snapshotBefore.Files);
-
-            // Now explicitly flush and snapshot again
-            await session.FlushProgressAsync();
-            repo.SaveSnapshot();
-            var snapshotAfter = ReadSnapshot();
-
-            Assert.Single(snapshotAfter.Dirs);
-            Assert.Single(snapshotAfter.Files);
-
-            Assert.True(snapshotAfter.Dirs.ContainsKey(dirId));
-            Assert.True(snapshotAfter.Files.ContainsKey(fileId));
-        }
-        
-        // --------------------------------------------------------------------
-        //    Auto-flush when file threshold is reached (async).
-        //    We rely on the background FlushProgressAsync() triggered by ObserveFile.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task AutoFlush_WhenFileThresholdReached_CommitsDelta_Async()
-        {
-            var repo     = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
-
-            var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 2, maxDirsBeforeFlush: 1000);
-
-            var dirId   = Guid.NewGuid();
-            var fileId1 = Guid.NewGuid();
-            var fileId2 = Guid.NewGuid();
-
-            session.ObserveDir(
-                id: dirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
-
-            var hashBytes = new byte[16];
-            new Random(123).NextBytes(hashBytes);
-            var hashKey = new HashKey(hashBytes);
-
-            // First file (buffered)
-            session.ObserveFile(
-                id: fileId1,
-                dirId: dirId,
-                name: "f1.txt",
-                size: 10,
-                hash: hashKey,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-
-            // Second file: exceeds threshold, should trigger auto FlushProgressAsync internally
-            session.ObserveFile(
-                id: fileId2,
-                dirId: dirId,
-                name: "f2.txt",
-                size: 20,
-                hash: hashKey,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-
-            // Wait until snapshot sees both files (or timeout)
-            var snapshot = await WaitForSnapshotAsync(
-                repo,
-                SnapshotPath,
-                s => s.Files.Count == 2 && s.Dirs.Count == 1,
-                timeout: TimeSpan.FromSeconds(2));
-
-            Assert.NotNull(snapshot);
-            Assert.Single(snapshot.Dirs);
-            Assert.Equal(2, snapshot.Files.Count);
-            Assert.True(snapshot.Dirs.ContainsKey(dirId));
-            Assert.True(snapshot.Files.ContainsKey(fileId1));
-            Assert.True(snapshot.Files.ContainsKey(fileId2));
-
-            await session.DisposeAsync();
         }
 
-        // --------------------------------------------------------------------
-        // 2. Auto-flush when directory threshold is reached (async).
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task AutoFlush_WhenDirThresholdReached_CommitsDelta_Async()
+        // Explicit async flush
+        await session.FlushProgressAsync();
+
+        repo.SaveSnapshot();
+        var snapshotAfter = ReadSnapshot();
+
+        var dirs = RealDirs(snapshotAfter);
+        Assert.Single(dirs);
+        Assert.Equal("root", dirs[0].Name);
+
+        var files = snapshotAfter.Files.Values.ToList();
+        Assert.Single(files);
+        Assert.Equal("f1.txt", files[0].Name);
+
+
+        await session.DisposeAsync();
+    }
+
+    // --------------------------------------------------------------------
+    //    Multiple auto-flushes: threshold hit several times during the scan.
+    //    After a final FlushProgressAsync(), all files must be persisted.
+    // --------------------------------------------------------------------
+    [Fact]
+    public async Task AutoFlush_CanTriggerMultipleTimes_AllDataPersisted_Async()
+    {
+        var repo = Repo.Open(_rootDir);
+        var rootPath = RootPathForCurrentOS();
+
+        var session = repo.BeginScan(rootPath, 2);
+
+        session.ObserveDirectory(
+            "/root",
+            ScanEntryStatus.Enumerated);
+
+        var hashBytes = new byte[16];
+        new Random(789).NextBytes(hashBytes);
+        var hashKey = new HashKey(hashBytes);
+
+        var filenames = new List<string>();
+        for (var i = 0; i < 5; i++)
         {
-            var repo     = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
-
-            var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 1000, maxDirsBeforeFlush: 2);
-
-            var dirId1 = Guid.NewGuid();
-            var dirId2 = Guid.NewGuid();
-
-            session.ObserveDir(
-                id: dirId1,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
-
-            // Second dir: exceeds threshold, should trigger auto flush
-            session.ObserveDir(
-                id: dirId2,
-                parentId: dirId1,
-                name: "sub",
-                status: ScanEntryStatus.Enumerated);
-
-            var snapshot = await WaitForSnapshotAsync(
-                repo,
-                SnapshotPath,
-                s => s.Dirs.Count == 2,
-                timeout: TimeSpan.FromSeconds(2));
-
-            Assert.NotNull(snapshot);
-            Assert.Equal(2, snapshot.Dirs.Count);
-            Assert.True(snapshot.Dirs.ContainsKey(dirId1));
-            Assert.True(snapshot.Dirs.ContainsKey(dirId2));
-
-            await session.DisposeAsync();
-        }
-
-        // --------------------------------------------------------------------
-        //    Below threshold there is no auto-flush:
-        //    - Snapshot should be empty until FlushProgressAsync is awaited.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task BelowThreshold_NoAutoFlush_RequiresExplicitFlushAsync()
-        {
-            var repo     = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
-
-            var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 10, maxDirsBeforeFlush: 10);
-
-            var dirId  = Guid.NewGuid();
-            var fileId = Guid.NewGuid();
-
-            var hashBytes = new byte[16];
-            new Random(456).NextBytes(hashBytes);
-            var hashKey = new HashKey(hashBytes);
-
-            session.ObserveDir(
-                id: dirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
+            var fn = $"f{i}.txt";
+            filenames.Add(fn);
 
             session.ObserveFile(
-                id: fileId,
-                dirId: dirId,
-                name: "f1.txt",
-                size: 10,
-                hash: hashKey,
-                modified: DateTimeOffset.UtcNow,
-                created: DateTimeOffset.UtcNow,
-                status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-
-            // Thresholds not reached -> no auto flush expected
-            repo.SaveSnapshot();
-            if (File.Exists(SnapshotPath))
-            {
-                var snapshotBefore = ReadSnapshot();
-                Assert.Empty(snapshotBefore.Dirs);
-                Assert.Empty(snapshotBefore.Files);
-            }
-
-            // Explicit async flush
-            await session.FlushProgressAsync();
-
-            repo.SaveSnapshot();
-            var snapshotAfter = ReadSnapshot();
-
-            Assert.Single(snapshotAfter.Dirs);
-            Assert.Single(snapshotAfter.Files);
-            Assert.True(snapshotAfter.Dirs.ContainsKey(dirId));
-            Assert.True(snapshotAfter.Files.ContainsKey(fileId));
-
-            await session.DisposeAsync();
+                $"/root/{fn}",
+                10 + i,
+                hashKey,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+            // Auto-flush should fire at i=1,3, and then we explicitly flush at the end.
         }
 
-        // --------------------------------------------------------------------
-        //    Multiple auto-flushes: threshold hit several times during the scan.
-        //    After a final FlushProgressAsync(), all files must be persisted.
-        // --------------------------------------------------------------------
-        [Fact]
-        public async Task AutoFlush_CanTriggerMultipleTimes_AllDataPersisted_Async()
-        {
-            var repo     = Repo.Open(_rootDir);
-            var rootPath = RootPathForCurrentOS();
+        // Final explicit drain of any remaining buffered files and in-flight auto flushes
+        await session.FlushProgressAsync();
 
-            var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 2, maxDirsBeforeFlush: 1000);
+        repo.SaveSnapshot();
+        var snapshot = ReadSnapshot();
 
-            var dirId = Guid.NewGuid();
-            session.ObserveDir(
-                id: dirId,
-                parentId: null,
-                name: "root",
-                status: ScanEntryStatus.Enumerated);
+        Assert.Single(snapshot.Dirs, d => d.Value.Status != ScanEntryStatus.None);
+        Assert.Equal(filenames.Count, snapshot.Files.Count);
 
-            var hashBytes = new byte[16];
-            new Random(789).NextBytes(hashBytes);
-            var hashKey = new HashKey(hashBytes);
+        foreach (var fn in filenames)
+            Assert.True(snapshot.Files.Values.Any(f => f.Name == fn),
+                $"Expected file '{fn}' to be present in snapshot.");
 
-            var ids = new List<Guid>();
-            for (var i = 0; i < 5; i++)
-            {
-                var fileId = Guid.NewGuid();
-                ids.Add(fileId);
-
-                session.ObserveFile(
-                    id: fileId,
-                    dirId: dirId,
-                    name: $"f{i}.txt",
-                    size: 10 + i,
-                    hash: hashKey,
-                    modified: DateTimeOffset.UtcNow,
-                    created: DateTimeOffset.UtcNow,
-                    status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-                // Auto-flush should fire at i=1,3, and then we explicitly flush at the end.
-            }
-
-            // Final explicit drain of any remaining buffered files and in-flight auto flushes
-            await session.FlushProgressAsync();
-
-            repo.SaveSnapshot();
-            var snapshot = ReadSnapshot();
-
-            Assert.Single(snapshot.Dirs);
-            Assert.Equal(5, snapshot.Files.Count);
-
-            foreach (var id in ids)
-                Assert.True(snapshot.Files.ContainsKey(id), $"Expected file {id} to be present in snapshot.");
-
-            await session.DisposeAsync();
-        }
+        await session.DisposeAsync();
     }
 }

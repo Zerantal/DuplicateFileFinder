@@ -61,8 +61,6 @@ public sealed class DuplicateFileFinder
 
         var session = _repo.BeginScan(location);
 
-        var dirIndex = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-
         try
         {
             // 1) Build workspace (transactional)
@@ -79,7 +77,7 @@ public sealed class DuplicateFileFinder
             using (PhaseScope.Begin(ScanPhase.Enumerating))
             using (TimingLog.StartPhase(ScanPhase.Enumerating))
             {
-                await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, session, dirIndex, token);
+                await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, session, token);
                 TimingLog.Counter("folders", scope.AggregateFolderCount);
                 TimingLog.Counter("files", scope.AggregateFileCount);
             }
@@ -90,7 +88,7 @@ public sealed class DuplicateFileFinder
             {
                 var totalToHash = CountHashTargets(scope, tempSizes);
                 TimingLog.Counter("targets", totalToHash);
-                await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, session, dirIndex, token);
+                await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, session, token);
             }
 
             // 4) Grouping (unchanged – still works on FolderNode tree)
@@ -115,38 +113,25 @@ public sealed class DuplicateFileFinder
                 RebuildFileSizesFromRoot();
             }
 
+            await session.CompleteAsync(token);
             Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
+            _repo.CompactIfNeeded();
+        }
+        catch (OperationCanceledException)
+        {
+            await session.FailAsync("Scan cancelled.", true, token);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await session.FailAsync(ex.Message, false, token);
+            throw;
         }
         finally
         {
             await session.DisposeAsync();
         }
     }
-
-    // private static async Task PersistScopeToRepoAsync(ScanSession session, FolderNode scope, CancellationToken token)
-    // {
-    //     await scope.TraverseFolders(folder =>
-    //     {
-    //         token.ThrowIfCancellationRequested();
-    //
-    //         foreach (var f in folder.Files)
-    //         {
-    //             // Only persist files that were hashed in this run (or were already hashed)
-    //             var hash = f.ChecksumBytes;
-    //             if (hash is null || hash.Length == 0) continue;
-    //
-    //             session.UpsertFile(
-    //                 fullPath: f.Path,
-    //                 size: f.Size,
-    //                 hash: hash,
-    //                 modified:  f.ModifiedTimeUtc,
-    //                 created:  f.CreationTimeUtc
-    //             );
-    //         }
-    //         return Task.CompletedTask;
-    //     });
-    // }
-
 
     private void RebuildFileSizesFromRoot()
     {
@@ -221,14 +206,12 @@ public sealed class DuplicateFileFinder
             token);
     }
 
-
     private async Task RunHashingAsync(
         FolderNode scope,
         Dictionary<long, int> tempSizes,
         int totalToHash,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
-        Dictionary<string, Guid> dirIndex,
         CancellationToken token)
     {
         Report(progress, ScanPhase.Hashing, "Computing checksums...");
@@ -258,48 +241,22 @@ public sealed class DuplicateFileFinder
                     processed: processed,
                     total: totalToHash);
 
-                // --- NEW: push hashed file into repo via ScanSession ---
-
                 var hashBytes = fileNode.ChecksumBytes;
                 if (hashBytes is { Length: > 0 })
                 {
-                    var dirPath = Path.GetDirectoryName(fileNode.Path);
-                    if (string.IsNullOrEmpty(dirPath))
-                        return;
-
-                    if (!dirIndex.TryGetValue(dirPath, out var dirId))
-                    {
-                        // Should be rare; fall back to creating a dir on the fly
-                        dirId = Guid.NewGuid();
-                        dirIndex[dirPath] = dirId;
-
-                        var dirName = Path.GetFileName(dirPath);
-                        session.ObserveDir(
-                            dirId,
-                            null,
-                            string.IsNullOrEmpty(dirName) ? dirPath : dirName,
-                            ScanEntryStatus.Enumerated);
-                    }
-
-                    var fileId = Guid.NewGuid();
-                    var name = Path.GetFileName(fileNode.Path);
-
                     var hashKey = new HashKey(hashBytes);
 
                     session.ObserveFile(
-                        fileId,
-                        dirId,
-                        name,
-                        fileNode.Size,
-                        hashKey,
-                        fileNode.ModifiedTimeUtc,
-                        fileNode.CreationTimeUtc,
-                        ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+                        fullFilePath: fileNode.Path,
+                        size: fileNode.Size,
+                        hash: hashKey,
+                        modified: fileNode.ModifiedTimeUtc,
+                        created: fileNode.CreationTimeUtc,
+                        status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
                 }
             },
             token);
     }
-
 
     private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
     {
@@ -314,13 +271,11 @@ public sealed class DuplicateFileFinder
         return totalToHash;
     }
 
-
     private async Task EnumeratePhaseAsync(
         FolderNode scope,
         Dictionary<long, int> tempSizes,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
-        Dictionary<string, Guid> dirIndex,
         CancellationToken token)
     {
         long foldersVisited = 0;
@@ -337,30 +292,10 @@ public sealed class DuplicateFileFinder
                     processed: foldersVisited);
                 await Task.CompletedTask;
 
-                // --- NEW: register this folder as a DirRecord in the repo ---
-
-                // Root of this scope has no parent; others derive parent from path.
-                Guid? parentId = null;
-                if (!PathUtils.IsSamePath(folder.Path, scope.Path))
-                {
-                    var parentPath = Path.GetDirectoryName(folder.Path);
-                    if (!string.IsNullOrEmpty(parentPath) &&
-                        dirIndex.TryGetValue(parentPath, out var pid))
-                        parentId = pid;
-                }
-
-                if (!dirIndex.TryGetValue(folder.Path, out var dirId))
-                {
-                    dirId = Guid.NewGuid();
-                    dirIndex[folder.Path] = dirId;
-
-                    var name = Path.GetFileName(folder.Path);
-                    session.ObserveDir(
-                        dirId,
-                        parentId,
-                        string.IsNullOrEmpty(name) ? folder.Path : name,
-                        ScanEntryStatus.Enumerated);
-                }
+                // Register this folder in the repo via path-based API.
+                // ScanSession will ensure path→DirId is unique and will
+                // handle parent creation if needed.
+                session.ObserveDirectory(folder.Path, ScanEntryStatus.Enumerated);
 
                 // 1) Seed tempSizes from existing files in this folder
                 foreach (var existingFile in folder.Files)

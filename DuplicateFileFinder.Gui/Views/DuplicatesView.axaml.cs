@@ -1,7 +1,8 @@
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Interactivity;
+using Avalonia.Input;
+using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.ViewModels;
+
 // using NLog;
 
 namespace DuplicateFileFinder.Gui.Views;
@@ -10,29 +11,32 @@ public partial class DuplicatesView : UserControl
 {
     // private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
-    public DuplicatesView() => InitializeComponent();
-    
+    public DuplicatesView()
+    {
+        InitializeComponent();
+    }
+
     private DuplicatesViewModel? Vm => DataContext as DuplicatesViewModel;
 
-    private void OnLoadMoreClick(object? sender, RoutedEventArgs e)
-    {
-        Vm?.LoadMore();
-    }
+    // private void OnLoadMoreClick(object? sender, RoutedEventArgs e)
+    // {
+    //     Vm?.LoadMore();
+    // }
 
-    private void DataGrid_OnVerticalScroll(object? sender, ScrollEventArgs e)
-    {
-        if (e.ScrollEventType == ScrollEventType.EndScroll && Vm is { CanLoadMore: true })
-        {
-            Vm?.LoadMore();
-        }
-        // Log.Info($"ScrollEvent: ({e.ScrollEventType}, {e.NewValue})");
-    }
+    // private void DataGrid_OnVerticalScroll(object? sender, ScrollEventArgs e)
+    // {
+    //     if (e.ScrollEventType == ScrollEventType.EndScroll && Vm is { CanLoadMore: true })
+    //     {
+    //         Vm?.LoadMore();
+    //     }
+    //     // Log.Info($"ScrollEvent: ({e.ScrollEventType}, {e.NewValue})");
+    // }
     
     private void OnFolderSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (Vm is null)
             return;
-
+    
         if (e.AddedItems.Count > 0 && e.AddedItems[0] is FolderNodeViewModel node)
         {
             Vm.SelectedFolderPrefix = node.FullPath;
@@ -42,4 +46,19 @@ public partial class DuplicatesView : UserControl
             Vm.SelectedFolderPrefix = null;
         }
     }
+    
+    private void OnDuplicateSetPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not DuplicatesViewModel vm)
+            return;
+
+        if (sender is not Control c)
+            return;
+
+        if (c.DataContext is not DuplicateSetRow row)
+            return;
+
+        vm.SelectedSet = row;
+    }
+    
 }
