@@ -39,7 +39,6 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = null!;
 
-        public event EventHandler<RepoDelta>? DeltaCommitted;
         public IScanSession BeginScan(string rootPath, int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
         {
             return new FakeSession();

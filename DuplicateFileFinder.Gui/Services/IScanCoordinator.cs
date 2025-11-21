@@ -1,7 +1,5 @@
 // Gui/Services/IScanCoordinator.cs
-using System.Threading;
-using System.Threading.Tasks;
-using DuplicateFileFinder.Gui.ViewModels;
+
 using DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.Services;

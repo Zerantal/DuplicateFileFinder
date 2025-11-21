@@ -1,10 +1,5 @@
 // DuplicateFileFinderLib/Repository/ScanSession.cs
 
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository;
@@ -253,7 +248,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
             dirPath = RootPath;
 
         // Ensure directory chain exists and leaf dir is at least Enumerated
-        var dirId = ObserveDirectory(dirPath, ScanEntryStatus.Enumerated, null);
+        var dirId = ObserveDirectory(dirPath, ScanEntryStatus.Enumerated);
         var name  = Path.GetFileName(fullFilePath);
 
         var file = new FileRecord

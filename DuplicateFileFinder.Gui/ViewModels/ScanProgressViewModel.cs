@@ -1,5 +1,5 @@
 // Gui/ViewModels/ScanProgressViewModel.cs
-using System;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Services;
@@ -27,7 +27,7 @@ public partial class ScanProgressViewModel : ObservableObject
     {
         PhaseText = MapPhase(report.Phase);
 
-        StatusMessage = report.StatusMessage ?? string.Empty;
+        StatusMessage = report.StatusMessage;
         DisplayStatusMessage = StatusMessage;
 
         IsIndeterminate = report.IsIndeterminate;
