@@ -17,20 +17,6 @@ public partial class DuplicatesView : UserControl
     }
 
     private DuplicatesViewModel? Vm => DataContext as DuplicatesViewModel;
-
-    // private void OnLoadMoreClick(object? sender, RoutedEventArgs e)
-    // {
-    //     Vm?.LoadMore();
-    // }
-
-    // private void DataGrid_OnVerticalScroll(object? sender, ScrollEventArgs e)
-    // {
-    //     if (e.ScrollEventType == ScrollEventType.EndScroll && Vm is { CanLoadMore: true })
-    //     {
-    //         Vm?.LoadMore();
-    //     }
-    //     // Log.Info($"ScrollEvent: ({e.ScrollEventType}, {e.NewValue})");
-    // }
     
     private void OnFolderSelected(object? sender, SelectionChangedEventArgs e)
     {

@@ -82,7 +82,7 @@ public sealed class DialogService : IDialogService
         });
     }
 
-    public async Task<string?> ShowOpenFolderDialogAsync(
+    public async Task<string?> ShowFolderPickerDialogAsync(
         string title,
         string? initialDirectory = null)
     {
@@ -143,7 +143,7 @@ public sealed class DialogService : IDialogService
         return result?.Path.LocalPath;
     }
 
-    private Window GetOwnerWindow()
+    public Window GetOwnerWindow()
     {
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
             {

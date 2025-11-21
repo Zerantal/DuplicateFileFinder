@@ -10,14 +10,17 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
-        var dialogService = new DialogService();
+        
         
         var appName = "DuplicateFileFinder";
         var appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             appName);
+        
         var repo = Repo.Open(Path.Combine(appDir, "repo"));
-        DataContext = new MainWindowViewModel(repo, dialogService);
+        var dialogService = new DialogService();
+        var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(repo);
+        var scanCoordinator = new ScanCoordinator(repo, scanEngine);
+        DataContext = new MainWindowViewModel(repo, scanCoordinator, dialogService);
 
     }
 }

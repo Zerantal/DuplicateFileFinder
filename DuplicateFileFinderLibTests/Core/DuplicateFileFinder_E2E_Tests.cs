@@ -130,7 +130,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         // act        
         var progress = new Progress<DuplicateFileFinderProgressReport>();
-        await finder.ScanLocation(_fs.Root, progressIndicator: progress,
+        await finder.ScanLocationAsync(_fs.Root, progressIndicator: progress,
             token: CancellationToken.None);
 
         // dump CSV for inspection
@@ -183,7 +183,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
     
         // Act + Assert: must throw
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocation(root, new Progress<DuplicateFileFinderProgressReport>(), cts.Token));
+            await finder.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>(), cts.Token));
     
         // No files added
         Assert.Equal(0, finder.TotalFilesScanned);
@@ -213,7 +213,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
         // 1) Scan the descendant first (B) — only B's files should be known
-        await dff.ScanLocation(B, progress, CancellationToken.None);
+        await dff.ScanLocationAsync(B, progress, CancellationToken.None);
 
         var rootsAfterDescendant = dff.SearchPaths;
         Assert.Single(rootsAfterDescendant);
@@ -230,7 +230,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
 
         // 2) Now scan the ancestor (A)
         //    Expect: promotion to A as sole root, B stays under A, and the sibling subtree C + file u.txt are included.
-        await dff.ScanLocation(A, progress, CancellationToken.None);
+        await dff.ScanLocationAsync(A, progress, CancellationToken.None);
 
         var rootsAfterAncestor = dff.SearchPaths;
         Assert.Single(rootsAfterAncestor);
@@ -289,7 +289,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         _ = _fs.File("metrics/u.bin", "xyz"u8.ToArray());
 
         var finder = new DuplicateFileFinder(new FakeRepo());
-        await finder.ScanLocation(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
+        await finder.ScanLocationAsync(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
 
         Assert.Equal(3, finder.TotalFilesScanned);
 
@@ -308,7 +308,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         _fs.File("rows/u1.txt", "DIFF"u8.ToArray());
 
         var finder = new DuplicateFileFinder(new FakeRepo());
-        await finder.ScanLocation(root, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
+        await finder.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
 
         var rows = await finder.GetDuplicateFileRowsAsync();
 
@@ -342,7 +342,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         // We accept either an OperationCanceledException or a partial build
         try
         {
-            await finder.ScanLocation(root, progress, cts.Token);
+            await finder.ScanLocationAsync(root, progress, cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -365,13 +365,13 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocation(a, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(a, progress, CancellationToken.None);
         var roots1 = finder.SearchPaths;
         Assert.Single(roots1);
         Assert.Equal(PathUtils.NormalizePath(a), roots1[0]);
 
         // Scan descendant — should not add another root
-        await finder.ScanLocation(b, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(b, progress, CancellationToken.None);
         var roots2 = finder.SearchPaths;
         Assert.Single(roots2);
         Assert.Equal(roots1[0], roots2[0]);
@@ -390,8 +390,8 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocation(leafDir, progress, CancellationToken.None);
-        await finder.ScanLocation(cDir, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(leafDir, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(cDir, progress, CancellationToken.None);
 
         var roots = finder.SearchPaths;
         Assert.Equal(2, roots.Count);
@@ -411,12 +411,12 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var finder = new DuplicateFileFinder(new FakeRepo());
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocation(b, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(b, progress, CancellationToken.None);
         var totalBefore = finder.TotalFilesScanned;
         var wastedBefore = finder.DuplicateSpaceBytes;
 
         // Promote
-        await finder.ScanLocation(a, progress, CancellationToken.None);
+        await finder.ScanLocationAsync(a, progress, CancellationToken.None);
 
         // Should still be only two files counted, one duplicate wasted of size(len "SAME" = 4)
         Assert.Equal(totalBefore, finder.TotalFilesScanned);
@@ -432,7 +432,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var finder = new DuplicateFileFinder(new FakeRepo());
 
         // First, a successful scan (commits)
-        await finder.ScanLocation(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
+        await finder.ScanLocationAsync(dir, new Progress<DuplicateFileFinderProgressReport>(), CancellationToken.None);
         var csvBefore = new StringWriter(); finder.ExportToCsv(csvBefore);
         var snapshot = csvBefore.ToString();
 
@@ -442,7 +442,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         {
             using var cts = new CancellationTokenSource();
             cts.Cancel(); // force failure
-            await finder.ScanLocation(missing, new Progress<DuplicateFileFinderProgressReport>(), cts.Token);
+            await finder.ScanLocationAsync(missing, new Progress<DuplicateFileFinderProgressReport>(), cts.Token);
         });
 
         // State must be unchanged
@@ -461,7 +461,7 @@ public sealed class DuplicateFileFinder_E2E_Tests : IDisposable
         var f2 = fs.File("root/b.txt", "HELLO"u8, created.AddMinutes(1));
 
         var dff = new DuplicateFileFinder(new FakeRepo());
-        await dff.ScanLocation(root, progressIndicator: null, token: default);
+        await dff.ScanLocationAsync(root, progressIndicator: null, token: default);
 
         using var sw = new StringWriter();
         dff.ExportToCsv(sw);
@@ -492,7 +492,7 @@ public async Task Csv_RoundTrip_IncludesCreationTime_And_GroupsByContent()
     var f2 = fs.File("root/b.txt", "HELLO"u8, created2);
 
     var dff = new DuplicateFileFinder(new FakeRepo());
-    await dff.ScanLocation(root);
+    await dff.ScanLocationAsync(root);
 
     await using var sw = new StringWriter();
     dff.ExportToCsv(sw);

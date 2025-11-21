@@ -31,7 +31,7 @@ internal class ScanCommand : ICommand
         // scan
         _progressBar.BlockCount = 20;
         var progressIndicator = new Progress<DuplicateFileFinderProgressReport>(_progressBar.PrintProgress);
-        foreach (var d in Directories) await dupFileFinder.ScanLocation(d, progressIndicator);
+        foreach (var d in Directories) await dupFileFinder.ScanLocationAsync(d, progressIndicator);
 
         // output csv file
         Debug.Assert(OutputFilename != null, nameof(OutputFilename) + " != null");

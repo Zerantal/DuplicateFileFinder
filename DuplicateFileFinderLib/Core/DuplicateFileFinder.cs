@@ -51,7 +51,7 @@ public sealed class DuplicateFileFinder
 
     // ------------ Public scanning API ----------------
 
-    public async Task ScanLocation(string location,
+    public async Task ScanLocationAsync(string location,
         IProgress<DuplicateFileFinderProgressReport>? progressIndicator = null,
         CancellationToken token = default)
     {

@@ -57,8 +57,6 @@ public sealed class Repo : IRepo
             }
         }
     }
-    
-    public event EventHandler<RepoDelta>? DeltaCommitted;
 
     // ---------- public ops ----------
 
@@ -138,8 +136,6 @@ public sealed class Repo : IRepo
         File.Move(tmp, final, true);
 
         ApplyDelta(delta);
-
-        DeltaCommitted?.Invoke(this, delta);
     }
 
     public void SaveSnapshot()

@@ -1,69 +1,43 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinder.Gui.Views;
 using DuplicateFileFinderLib.Repository;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
-public partial class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel(
+    Repo repo,
+    IScanCoordinator scanCoordinator,
+    IDialogService dialogService)
+    : ObservableObject
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    private readonly Dff.DuplicateFileFinder _engine;
+    private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
 
-    private readonly DialogService _dialogService;
+    private readonly IScanCoordinator _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
 
-    // guard to prevent file scanning updating UI after it's finished
-    private bool _finalized;
-    [ObservableProperty] private bool _isIndeterminateProgressPhase;
-
-    // Observable properties
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
-    [NotifyCanExecuteChangedFor(nameof(StopScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OptimizeRepoCommand))]
     private bool _isScanning;
 
-    [ObservableProperty] private string _operation = string.Empty;
-
-    // cancellation source for the current scan (null when idle)
-    private CancellationTokenSource? _scanCts;
-
-    [ObservableProperty] private int _scanProgress;
-    
-    public MainWindowViewModel(Repo repo, DialogService dialogService)
-    {
-        Duplicates = new DuplicatesViewModel(repo);
-        _engine = new Dff.DuplicateFileFinder(repo);
-
-        _dialogService = dialogService;
-
-        IsScanning = false;
-    }
-
-    public DuplicatesViewModel Duplicates { get; }
+    public DuplicatesViewModel Duplicates { get; } = new(repo);
 
     public bool CanStartScan => !IsScanning;
 
     // ---------------- Commands ----------------
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
-    private async Task ScanLocation()
+    private async Task ScanLocationAsync()
     {
-        var path = await _dialogService.ShowOpenFolderDialogAsync("Scan location...");
-        if (string.IsNullOrWhiteSpace(path)) return;
+        var path = await _dialogService.ShowFolderPickerDialogAsync("Scan location...");
+        if (string.IsNullOrWhiteSpace(path))
+            return;
 
-        using (ScanLog.BeginScanScope(path))
-        {
-            await StartScan(path);
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(IsScanning))]
-    private void StopScan()
-    {
-        _scanCts?.Cancel();
+        await StartScan(path);
     }
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
@@ -73,7 +47,6 @@ public partial class MainWindowViewModel : ObservableObject
         {
             await Duplicates.OptimizeRepoAsync();
             await _dialogService.ShowInfoAsync("Repository optimized", "The repository has been compacted.");
-
         }
         catch (Exception ex)
         {
@@ -81,63 +54,51 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    // ---------------- Private helper methods ----------------
+    // ---------------- Scan orchestration ----------------
 
     private async Task StartScan(string path)
     {
-        var scanInterrupted = false;
+        if (IsScanning)
+            return;
 
         Log.Info("Initialising scan of {path}", path);
-
-        if (IsScanning) return;
-
-        _finalized = false;
-
-        // Reset UI state            
-        ScanProgress = 0;
-        Operation = "Preparing scan...";
         IsScanning = true;
 
-        _scanCts = new CancellationTokenSource();
-        var token = _scanCts.Token;
-
-        // Progress from the library → UI
-        var progress = new Progress<Dff.DuplicateFileFinderProgressReport>(report =>
+        var progressVm = new ScanProgressViewModel(_scanCoordinator);
+        var dialog = new ScanProgressWindow
         {
-            if (_finalized) return;
+            DataContext = progressVm
+        };
 
-            if (!string.IsNullOrWhiteSpace(report.StatusMessage))
-                Operation = report.StatusMessage;
+        void HandleProgress(object? _, Dff.DuplicateFileFinderProgressReport report)
+        {
+            progressVm.Update(report);
+        }
 
-            IsIndeterminateProgressPhase = report.IsIndeterminate;
+        void HandleCompleted(object? _, ScanCompletedEventArgs e)
+        {
+            Duplicates.LoadFromRepo();
+        }
 
-            if (!report.IsIndeterminate)
-                ScanProgress = (int)Math.Clamp(report.PercentComplete * 100.0, 0, 100);
-        });
+        _scanCoordinator.ProgressChanged += HandleProgress;
+        _scanCoordinator.ScanCompleted += HandleCompleted;
+
+        var owner = _dialogService.GetOwnerWindow();
+        var dialogTask = dialog.ShowDialog(owner);
 
         try
         {
-            await Task.Run(async () =>
-            {
-                await _engine.ScanLocation(path, progress, token)
-                    .ConfigureAwait(false);
-            }, token).ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-            Operation = "Scan cancelled.";
-            scanInterrupted = true;
+            await _scanCoordinator.RunScanAsync(path);
         }
         finally
         {
-            _scanCts?.Dispose();
-            _scanCts = null;
+            _scanCoordinator.ProgressChanged -= HandleProgress;
+            _scanCoordinator.ScanCompleted -= HandleCompleted;
 
-            _finalized = true;
+            dialog.Close();
+            await dialogTask;
+
             IsScanning = false;
-            ScanProgress = 0;
-            IsIndeterminateProgressPhase = false;
-            if (!scanInterrupted) Operation = "Finished scanning";
         }
     }
 }

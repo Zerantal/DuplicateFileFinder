@@ -54,17 +54,10 @@
         <!-- Simple toolbar row -->
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
             <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
-            <Button Content="Stop" Command="{Binding StopScanCommand}" />
         </StackPanel>
 
         <!-- Status area -->
         <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto, *" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
-            <!-- Progress -->
-            <ProgressBar Grid.Row="0" Grid.ColumnSpan="2"
-                         Minimum="0" Maximum="100"
-                         Height="8"
-                         IsIndeterminate="{Binding IsIndeterminateProgressPhase}"
-                         Value="{Binding ScanProgress}" />
             <!-- Metrics + operation -->
             <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
                 <TextBlock Text="Files scanned:" />
@@ -76,17 +69,6 @@
                 <TextBlock Text="Space wasted:" Margin="12,0,0,0" />
                 <TextBlock Text="{Binding Duplicates.WastedBytes, Converter={StaticResource BytesToHuman}}" />
             </StackPanel>
-            <!-- Operation (right, fills remaining width) -->
-            <TextBlock Grid.Row="1" Grid.Column="1"
-                       Margin="80,6,0,0"
-                       HorizontalAlignment="Stretch"
-                       VerticalAlignment="Center"
-                       TextAlignment="Left"
-                       TextWrapping="NoWrap"
-                       TextTrimming="CharacterEllipsis"
-                       Text="{Binding Operation}"
-                       ToolTip.Tip="{Binding Operation}" />
-            <!-- <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Operation}" Margin="12,6,0,0" /> -->
         </Grid>
 
         <!-- Main content -->

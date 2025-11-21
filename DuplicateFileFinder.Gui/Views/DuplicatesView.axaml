@@ -20,17 +20,6 @@
     <Grid RowDefinitions="Auto,2*,*"
           ColumnDefinitions="2*,5*">
 
-        <!-- Filters / controls (span both columns). -->
-        <StackPanel Grid.Row="0"
-                    Grid.ColumnSpan="2"
-                    Orientation="Horizontal"
-                    Spacing="12"
-                    Margin="0,0,0,6">
-
-            <TextBlock Text="Filter:" Margin="0,0,8,0" VerticalAlignment="Center" />
-            <TextBox Width="200"
-                     Text="{Binding PathContains, UpdateSourceTrigger=PropertyChanged}" />
-        </StackPanel>
 
         <!-- LEFT: folder tree, spans both grids vertically -->
         <TreeView Grid.Row="1"
@@ -134,7 +123,8 @@
             <dgrid:DataGrid.Columns>
                 <dgrid:DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
                 <dgrid:DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*" />
-                <dgrid:DataGridTextColumn Header="Size" Binding="{Binding Size, Converter={StaticResource BytesToHuman}}" Width="120" />
+                <dgrid:DataGridTextColumn Header="Size"
+                                          Binding="{Binding Size, Converter={StaticResource BytesToHuman}}" Width="120" />
                 <dgrid:DataGridTextColumn Header="Modified"
                                           Binding="{Binding Modified, StringFormat=g}"
                                           Width="180" />

@@ -1,5 +1,7 @@
 // DuplicateFileFinder.Gui/Services/IDialogService.cs
 
+using Avalonia.Controls;
+
 namespace DuplicateFileFinder.Gui.Services;
 
 public interface IDialogService
@@ -7,6 +9,8 @@ public interface IDialogService
     Task ShowInfoAsync(string title, string message);
     Task ShowErrorAsync(string title, string message);
 
+    public Window GetOwnerWindow();
+    
     /// <summary>
     ///     Show a confirmation dialog. Returns true if the user clicked OK (or equivalent).
     /// </summary>
@@ -16,7 +20,7 @@ public interface IDialogService
         string okText = "OK",
         string cancelText = "Cancel");
 
-    Task<string?> ShowOpenFolderDialogAsync(
+    Task<string?> ShowFolderPickerDialogAsync(
         string title,
         string? initialDirectory = null);
 
