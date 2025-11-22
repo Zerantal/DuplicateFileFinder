@@ -42,11 +42,17 @@ public sealed class DuplicateFileFinder
         _repo = repo;
     }
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public IReadOnlyList<string> SearchPaths
         => _root.SubFolders.Select(f => PathUtils.NormalizePath(f.Path)).ToArray();
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public int TotalFilesScanned => _root.SubFolders.Sum(l => l.AggregateFileCount);
+
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public long DuplicateSpaceBytes => ComputeDuplicateSpaceBytes();
+
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public int DuplicateFilesWastedCount => ComputeDuplicateWastedFileCount();
 
     // ------------ Public scanning API ----------------
@@ -63,13 +69,12 @@ public sealed class DuplicateFileFinder
 
         try
         {
-            // 1) Build workspace (transactional)
+            // 1) Build workspace for this scan only (no persistent RootNode updates)
             FolderNode scope;
-            RootNode workRoot;
             using (PhaseScope.Begin(ScanPhase.Preparing))
             using (TimingLog.Start(nameof(ScanPhase.Preparing)))
             {
-                (workRoot, scope) = PrepareWorkspace(location);
+                scope = new FolderNode(location);
             }
 
             // 2) Enumerate
@@ -91,28 +96,14 @@ public sealed class DuplicateFileFinder
                 await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, session, token);
             }
 
-            // 4) Grouping (unchanged – still works on FolderNode tree)
+            // 4) Grouping
             using (PhaseScope.Begin(ScanPhase.Grouping))
             using (TimingLog.StartPhase(ScanPhase.Grouping))
             {
                 await RunGroupingAsync(scope, throttledProgress, token);
             }
 
-            // 5) Commit in-memory workspace (legacy representation)
-            using (PhaseScope.Begin(ScanPhase.Committing))
-            using (TimingLog.StartPhase(ScanPhase.Committing))
-            {
-                CommitWorkspace(workRoot, scope, location);
-            }
-
-            // 6) Aggregates + file size index (legacy representation)
-            using (PhaseScope.Begin(ScanPhase.RecomputingAggregates))
-            using (TimingLog.StartPhase(ScanPhase.RecomputingAggregates))
-            {
-                await _root.RecomputeSubtreeAggregatesAsync();
-                RebuildFileSizesFromRoot();
-            }
-
+            // No legacy commit/aggregate phases: repo is the source of truth now.
             await session.CompleteAsync(token);
             Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
             _repo.CompactIfNeeded();
@@ -133,143 +124,7 @@ public sealed class DuplicateFileFinder
         }
     }
 
-    private void RebuildFileSizesFromRoot()
-    {
-        _fileSizes.Clear();
-        foreach (var top in _root.SubFolders)
-            top.TraverseFolders(f =>
-            {
-                foreach (var file in f.Files)
-                    _fileSizes[file.Size] = _fileSizes.TryGetValue(file.Size, out var n) ? n + 1 : 1;
-                return Task.CompletedTask;
-            }).Wait();
-    }
-
-    private void CommitWorkspace(RootNode workRoot, FolderNode scope, string location)
-    {
-        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
-        var sameOrAncestor = _root.SubFolders.FirstOrDefault(r =>
-            PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
-
-        if (sameOrAncestor is not null)
-        {
-            // Replace that subtree with scanned clone
-            var existing = _root.SubFolders.First(f => PathUtils.IsSamePath(f.Path, scope.Path));
-            _root.RemoveChild(existing);
-            _root.AddFileSystemNode(scope);
-        }
-        else if (hasDescendants)
-        {
-            // Whole promoted layout becomes new truth
-            _root = workRoot;
-        }
-        else
-        {
-            // Independent new root
-            _root.AddFileSystemNode(scope);
-        }
-    }
-
-    private async Task RunGroupingAsync(
-        FolderNode scope,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        CancellationToken token)
-    {
-        // Pre-count work units for a determinate bar (folders + files)
-        long total = 0;
-        await scope.TraverseFolders(f =>
-        {
-            token.ThrowIfCancellationRequested();
-            total += 1; // folder
-            total += f.Files.Count; // files
-            return Task.CompletedTask;
-        });
-
-        // Initial report (0% or 100% if empty)
-        Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-            processed: 0,
-            percent: total == 0 ? 1.0 : 0.0,
-            total: total);
-
-        await _grouping.AssignGroupsAsync(
-            scope,
-            processed =>
-            {
-                var done = Math.Min(processed, total);
-                var pct = total == 0 ? 1.0 : Math.Min(1.0, (double)done / total);
-
-                Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-                    processed: done,
-                    percent: pct,
-                    total: total);
-            },
-            token);
-    }
-
-    private async Task RunHashingAsync(
-        FolderNode scope,
-        Dictionary<long, int> tempSizes,
-        int totalToHash,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        IScanSession session,
-        CancellationToken token)
-    {
-        Report(progress, ScanPhase.Hashing, "Computing checksums...");
-
-        bool TargetPredicate(FileNode f)
-        {
-            return tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null;
-        }
-
-        long processed = 0;
-
-        await _checksums.ComputeAsync(
-            scope,
-            TargetPredicate,
-            fileNode =>
-            {
-                processed++;
-
-                // Progress reporting
-                var pct = totalToHash == 0
-                    ? 1.0
-                    : Math.Min(1.0, (double)processed / totalToHash);
-
-                Report(progress, ScanPhase.Hashing,
-                    $"File hashed: {fileNode.Path}",
-                    pct,
-                    processed: processed,
-                    total: totalToHash);
-
-                var hashBytes = fileNode.ChecksumBytes;
-                if (hashBytes is { Length: > 0 })
-                {
-                    var hashKey = new HashKey(hashBytes);
-
-                    session.ObserveFile(
-                        fullFilePath: fileNode.Path,
-                        size: fileNode.Size,
-                        hash: hashKey,
-                        modified: fileNode.ModifiedTimeUtc,
-                        created: fileNode.CreationTimeUtc,
-                        status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-                }
-            },
-            token);
-    }
-
-    private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
-    {
-        var totalToHash = 0;
-        scope.TraverseFolders(f =>
-        {
-            foreach (var file in f.Files)
-                if (tempSizes.TryGetValue(file.Size, out var cnt) && cnt > 1 && file.ChecksumBytes == null)
-                    totalToHash++;
-            return Task.CompletedTask;
-        }).Wait();
-        return totalToHash;
-    }
+    // ------------ Enumeration phase ----------------
 
     private async Task EnumeratePhaseAsync(
         FolderNode scope,
@@ -331,6 +186,112 @@ public sealed class DuplicateFileFinder
             });
     }
 
+    // ------------ Hashing phase ----------------
+    
+    private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
+    {
+        var totalToHash = 0;
+        scope.TraverseFolders(f =>
+        {
+            foreach (var file in f.Files)
+                if (tempSizes.TryGetValue(file.Size, out var cnt) && cnt > 1 && file.ChecksumBytes == null)
+                    totalToHash++;
+            return Task.CompletedTask;
+        }).Wait();
+        return totalToHash;
+    }
+    
+    private async Task RunHashingAsync(
+        FolderNode scope,
+        Dictionary<long, int> tempSizes,
+        int totalToHash,
+        IProgress<DuplicateFileFinderProgressReport>? progress,
+        IScanSession session,
+        CancellationToken token)
+    {
+        Report(progress, ScanPhase.Hashing, "Computing checksums...");
+
+        bool TargetPredicate(FileNode f)
+        {
+            return tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null;
+        }
+
+        long processed = 0;
+
+        await _checksums.ComputeAsync(
+            scope,
+            TargetPredicate,
+            fileNode =>
+            {
+                processed++;
+
+                // Progress reporting
+                var pct = totalToHash == 0
+                    ? 1.0
+                    : Math.Min(1.0, (double)processed / totalToHash);
+
+                Report(progress, ScanPhase.Hashing,
+                    $"File hashed: {fileNode.Path}",
+                    pct,
+                    processed: processed,
+                    total: totalToHash);
+
+                var hashBytes = fileNode.ChecksumBytes;
+                if (hashBytes is { Length: > 0 })
+                {
+                    var hashKey = new HashKey(hashBytes);
+
+                    session.ObserveFile(
+                        fullFilePath: fileNode.Path,
+                        size: fileNode.Size,
+                        hash: hashKey,
+                        modified: fileNode.ModifiedTimeUtc,
+                        created: fileNode.CreationTimeUtc,
+                        status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+                }
+            },
+            token);
+    }
+
+    // ------------ Grouping phase ----------------
+    
+    private async Task RunGroupingAsync(
+        FolderNode scope,
+        IProgress<DuplicateFileFinderProgressReport>? progress,
+        CancellationToken token)
+    {
+        // Pre-count work units for a determinate bar (folders + files)
+        long total = 0;
+        await scope.TraverseFolders(f =>
+        {
+            token.ThrowIfCancellationRequested();
+            total += 1; // folder
+            total += f.Files.Count; // files
+            return Task.CompletedTask;
+        });
+
+        // Initial report (0% or 100% if empty)
+        Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
+            processed: 0,
+            percent: total == 0 ? 1.0 : 0.0,
+            total: total);
+
+        await _grouping.AssignGroupsAsync(
+            scope,
+            processed =>
+            {
+                var done = Math.Min(processed, total);
+                var pct = total == 0 ? 1.0 : Math.Min(1.0, (double)done / total);
+
+                Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
+                    processed: done,
+                    percent: pct,
+                    total: total);
+            },
+            token);
+    }
+
+    
     private static void Report(
         IProgress<DuplicateFileFinderProgressReport>? progress,
         ScanPhase phase,
@@ -390,6 +351,7 @@ public sealed class DuplicateFileFinder
 
     // ------------ CSV I/O ---------------
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public void ClearAllScans()
     {
         _root = new RootNode();
@@ -397,11 +359,13 @@ public sealed class DuplicateFileFinder
         _grouping.Reset();
     }
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public void ExportToCsv(TextWriter writer)
     {
         _serializer.Export(_root, writer);
     }
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public void ImportFromCsv(TextReader reader, ImportMode mode = ImportMode.Merge)
     {
         if (reader == null) throw new ArgumentNullException(nameof(reader));
@@ -428,6 +392,7 @@ public sealed class DuplicateFileFinder
 
     // ------------ Queries ----------------
 
+    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public async Task<IReadOnlyList<DuplicateFileRow>> GetDuplicateFileRowsAsync()
     {
         var results = new List<DuplicateFileRow>();
