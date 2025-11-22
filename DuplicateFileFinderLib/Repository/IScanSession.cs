@@ -46,28 +46,6 @@ public interface IScanSession
         ScanEntryStatus?  status       = null,
         string?          errorMessage = null);
 
-    // ---------------------------------------------------------------------
-    // Legacy path-based APIs (kept for compatibility, routed to upsert APIs)
-    // ---------------------------------------------------------------------
-
-    [Obsolete("Use AddOrUpdateDirectory instead.")]
-    Guid ObserveDirectory(
-        string fullPath,
-        ScanEntryStatus status,
-        string? errorMessage = null);
-
-    [Obsolete("Use AddOrUpdateFile instead.")]
-    void ObserveFile(
-        string fullFilePath,
-        long size,
-        HashKey hash,
-        DateTimeOffset modified,
-        DateTimeOffset created,
-        ScanEntryStatus status,
-        string? errorMessage = null);
-
-    // ---------------------------------------------------------------------
-
     Task FlushProgressAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);
     Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default);

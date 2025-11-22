@@ -91,7 +91,7 @@ public sealed class ScanSessionTests : IDisposable
 
         var session = repo.BeginScan(rootPath);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             rootPath,
             ScanEntryStatus.Enumerated);
 
@@ -99,7 +99,7 @@ public sealed class ScanSessionTests : IDisposable
         new Random(123).NextBytes(hashBytes);
         var hashKey = new HashKey(hashBytes);
 
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             Path.Combine(rootPath, "file.txt"),
             100,
             hashKey,
@@ -206,15 +206,15 @@ public sealed class ScanSessionTests : IDisposable
         // New scan: only see a new file under the same root.
         var session = repo.BeginScan(rootPath);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "/root",
             ScanEntryStatus.Enumerated);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "/root/sub",
             ScanEntryStatus.Enumerated);
 
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             "/root/sub/new.txt",
             2,
             hash,
@@ -299,7 +299,7 @@ public sealed class ScanSessionTests : IDisposable
         var session = repo.BeginScan(rootPath);
 
         // Optionally observe some stuff, but never complete.
-        session.ObserveDirectory("root", ScanEntryStatus.Enumerated);
+        session.AddOrUpdateDirectory("root", ScanEntryStatus.Enumerated);
         await session.FlushProgressAsync();
 
         await session.FailAsync("cancelled", true);
@@ -371,7 +371,7 @@ public sealed class ScanSessionTests : IDisposable
         // Start a new scan, observe something, but neither complete nor fail explicitly.
         var session = repo.BeginScan(rootPath);
 
-        session.ObserveDirectory("root", ScanEntryStatus.Enumerated);
+        session.AddOrUpdateDirectory("root", ScanEntryStatus.Enumerated);
         await session.FlushProgressAsync();
 
         await session.DisposeAsync(); // should mark run failed/cancelled
@@ -405,11 +405,11 @@ public sealed class ScanSessionTests : IDisposable
         new Random(456).NextBytes(hashBytes);
         var hashKey = new HashKey(hashBytes);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "root",
             ScanEntryStatus.Enumerated);
 
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             "root/f1.txt",
             10,
             hashKey,
@@ -452,7 +452,7 @@ public sealed class ScanSessionTests : IDisposable
 
         var session = repo.BeginScan(rootPath, 2);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "root",
             ScanEntryStatus.Enumerated);
 
@@ -461,7 +461,7 @@ public sealed class ScanSessionTests : IDisposable
         var hashKey = new HashKey(hashBytes);
 
         // First file (buffered)
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             "root/f1.txt",
             10,
             hashKey,
@@ -470,7 +470,7 @@ public sealed class ScanSessionTests : IDisposable
              ScanEntryStatus.Hashed);
 
         // Second file: exceeds threshold, should trigger auto FlushProgressAsync internally
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             "root/f2.txt",
             20,
             hashKey,
@@ -510,12 +510,12 @@ public sealed class ScanSessionTests : IDisposable
 
         var session = repo.BeginScan(rootPath, 1000, 3);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "/root",
             ScanEntryStatus.Enumerated);
 
         // Second dir: exceeds threshold, should trigger auto flush
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "/root/sub",
             ScanEntryStatus.Enumerated);
 
@@ -554,11 +554,11 @@ public sealed class ScanSessionTests : IDisposable
         new Random(456).NextBytes(hashBytes);
         var hashKey = new HashKey(hashBytes);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "root",
             ScanEntryStatus.Enumerated);
 
-        session.ObserveFile(
+        session.AddOrUpdateFile(
             "root/f1.txt",
             10,
             hashKey,
@@ -605,7 +605,7 @@ public sealed class ScanSessionTests : IDisposable
 
         var session = repo.BeginScan(rootPath, 2);
 
-        session.ObserveDirectory(
+        session.AddOrUpdateDirectory(
             "/root",
             ScanEntryStatus.Enumerated);
 
@@ -619,7 +619,7 @@ public sealed class ScanSessionTests : IDisposable
             var fn = $"f{i}.txt";
             filenames.Add(fn);
 
-            session.ObserveFile(
+            session.AddOrUpdateFile(
                 $"/root/{fn}",
                 10 + i,
                 hashKey,

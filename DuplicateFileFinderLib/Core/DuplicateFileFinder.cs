@@ -2,7 +2,6 @@
 
 using DuplicateFileFinderLib.FileSystem;
 using DuplicateFileFinderLib.Grouping;
-using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
@@ -20,27 +19,18 @@ public enum ImportMode
 public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
-    private readonly Dictionary<long, int> _fileSizes = new(); // filesize => count
     private readonly IFileEnumerator _fs;
-    private readonly IGroupingService _grouping;
-    private readonly IScanSerializer _serializer;
-
-    private RootNode _root = new();
 
     private readonly IRepo _repo;
     
-    private bool _throttleProgress = true;
+    private readonly bool _throttleProgress = true;
 
     public DuplicateFileFinder(IRepo repo,
         IFileEnumerator? fs = null,
-        IChecksumPipeline? checksums = null,
-        IGroupingService? grouping = null,
-        IScanSerializer? serializer = null)
+        IChecksumPipeline? checksums = null)
     {
         _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipeline();
-        _grouping = grouping ?? new FileSystemGroupsAdapter();
-        _serializer = serializer ?? new CsvScanSerializer();
         _repo = repo;
     }
     
@@ -49,15 +39,6 @@ public sealed class DuplicateFileFinder
     {
         _throttleProgress = throttleProgress;
     }
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public int TotalFilesScanned => _root.SubFolders.Sum(l => l.AggregateFileCount);
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public long DuplicateSpaceBytes => ComputeDuplicateSpaceBytes();
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public int DuplicateFilesWastedCount => ComputeDuplicateWastedFileCount();
 
     // ------------ Public scanning API ----------------
 
@@ -109,13 +90,6 @@ public sealed class DuplicateFileFinder
                 var totalToHash = CountHashTargets(scope, tempSizes);
                 TimingLog.Counter("targets", totalToHash);
                 await RunHashingAsync(scope, tempSizes, totalToHash, progress, session, token);
-            }
-
-            // 4) Grouping
-            using (PhaseScope.Begin(ScanPhase.Grouping))
-            using (TimingLog.StartPhase(ScanPhase.Grouping))
-            {
-                await RunGroupingAsync(scope, progress, token);
             }
 
             // No legacy commit/aggregate phases: repo is the source of truth now.
@@ -201,14 +175,6 @@ public sealed class DuplicateFileFinder
                             modified: e.ModifiedTimeUtc,
                             created: e.CreationTimeUtc,
                             status: ScanEntryStatus.Enumerated);
-                        
-                        // session.ObserveFile(
-                        //     fullFilePath: e.FullPath,
-                        //     size: e.Length,
-                        //     hash: HashKey.NotComputed, 
-                        //     modified: e.ModifiedTimeUtc,
-                        //     created: e.CreationTimeUtc,
-                        //     status: ScanEntryStatus.Enumerated);
                     }
             },
             f =>
@@ -281,45 +247,6 @@ public sealed class DuplicateFileFinder
             },
             token);
     }
-
-    // ------------ Grouping phase ----------------
-    
-    private async Task RunGroupingAsync(
-        FolderNode scope,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        CancellationToken token)
-    {
-        // Pre-count work units for a determinate bar (folders + files)
-        long total = 0;
-        await scope.TraverseFolders(f =>
-        {
-            token.ThrowIfCancellationRequested();
-            total += 1; // folder
-            total += f.Files.Count; // files
-            return Task.CompletedTask;
-        });
-
-        // Initial report (0% or 100% if empty)
-        Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-            processed: 0,
-            percent: total == 0 ? 1.0 : 0.0,
-            total: total);
-
-        await _grouping.AssignGroupsAsync(
-            scope,
-            processed =>
-            {
-                var done = Math.Min(processed, total);
-                var pct = total == 0 ? 1.0 : Math.Min(1.0, (double)done / total);
-
-                Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-                    processed: done,
-                    percent: pct,
-                    total: total);
-            },
-            token);
-    }
-
     
     private static void Report(
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -341,132 +268,5 @@ public sealed class DuplicateFileFinder
             Total = total,
             IsRunning = running
         });
-    }
-    
-    // ------------ CSV I/O ---------------
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public void ClearAllScans()
-    {
-        _root = new RootNode();
-        _fileSizes.Clear();
-        _grouping.Reset();
-    }
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public void ExportToCsv(TextWriter writer)
-    {
-        _serializer.Export(_root, writer);
-    }
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public void ImportFromCsv(TextReader reader, ImportMode mode = ImportMode.Merge)
-    {
-        if (reader == null) throw new ArgumentNullException(nameof(reader));
-        if (mode == ImportMode.Replace) ClearAllScans();
-
-        _serializer.ImportInto(_root, reader);
-
-        // recompute aggregates
-        foreach (var top in _root.SubFolders)
-            top.TraverseFolders(
-                null,
-                f =>
-                {
-                    f.UpdateFolderStats();
-                    return Task.CompletedTask;
-                }
-            ).Wait();
-
-        // rebuild _fileSizes
-        _fileSizes.Clear();
-        foreach (var file in EnumerateAllFiles())
-            _fileSizes[file.Size] = _fileSizes.TryGetValue(file.Size, out var n) ? n + 1 : 1;
-    }
-
-    // ------------ Queries ----------------
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public async Task<IReadOnlyList<DuplicateFileRow>> GetDuplicateFileRowsAsync()
-    {
-        var results = new List<DuplicateFileRow>();
-        var groups = new Dictionary<int, List<FileNode>>();
-
-        foreach (var top in _root.SubFolders)
-            await top.TraverseFolders(folder =>
-            {
-                foreach (var f in folder.Files)
-                {
-                    if (f.Group < 0) continue;
-                    if (!groups.TryGetValue(f.Group, out var list))
-                        groups[f.Group] = list = new List<FileNode>();
-                    list.Add(f);
-                }
-
-                return Task.CompletedTask;
-            });
-
-        foreach (var kv in groups.Where(kv => kv.Value.Count > 1))
-        foreach (var f in kv.Value)
-            results.Add(new DuplicateFileRow
-            {
-                Path = f.Path,
-                Size = f.Size,
-                CreationTimeUtc = f.CreationTimeUtc,
-                Checksum = f.ChecksumHex,
-                Group = f.Group
-            });
-
-        return results;
-    }
-
-    private long ComputeDuplicateSpaceBytes()
-    {
-        var groups = new Dictionary<int, (long total, long rep, int count)>();
-        foreach (var f in EnumerateAllFiles())
-        {
-            if (f.Group < 0) continue;
-            var acc = groups.GetValueOrDefault(f.Group);
-            acc.total += f.Size;
-            acc.count++;
-            if (acc.rep == 0) acc.rep = f.Size;
-            groups[f.Group] = acc;
-        }
-
-        long wasted = 0;
-        foreach (var a in groups.Values)
-            if (a.count > 1)
-                wasted += a.total - a.rep;
-        return wasted;
-    }
-
-    private int ComputeDuplicateWastedFileCount()
-    {
-        var counts = new Dictionary<int, int>();
-        foreach (var f in EnumerateAllFiles())
-        {
-            if (f.Group < 0) continue;
-            counts[f.Group] = counts.TryGetValue(f.Group, out var n) ? n + 1 : 1;
-        }
-
-        var wasted = 0;
-        foreach (var c in counts.Values)
-            if (c > 1)
-                wasted += c - 1;
-        return wasted;
-    }
-
-    private IEnumerable<FileNode> EnumerateAllFiles()
-    {
-        foreach (var loc in _root.SubFolders)
-        {
-            var buf = new List<FileNode>();
-            loc.TraverseFolders(f =>
-            {
-                buf.AddRange(f.Files);
-                return Task.CompletedTask;
-            }).Wait();
-            foreach (var f in buf) yield return f;
-        }
     }
 }
