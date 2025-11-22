@@ -68,9 +68,9 @@ public sealed class ChecksumPipelineTests : IDisposable
         
         var pipe = new ChecksumPipeline();
         await pipe.ComputeAsync(root,
-            shouldHash: _ => true, // hash every file
-            onProgress: null,
-            ct: CancellationToken.None);
+            predicate: _ => true, // hash every file
+            onFileHashed: null,
+            token: CancellationToken.None);
 
         Assert.NotNull(fA.ChecksumBytes);
         Assert.NotNull(fB.ChecksumBytes);

@@ -126,13 +126,16 @@ public sealed class CsvScanSerializer : IScanSerializer
 
         if (!int.TryParse(GetField(fields, CsvFields.Group), out var group)) return false;
 
-        if (!DateTimeOffset.TryParse(GetField(fields, CsvFields.CreationTime), out var creationTime)) return false;
+        if (!DateTimeOffset.TryParse(GetField(fields, CsvFields.CreationTimeUtc), out var creationTime)) return false;
+        
+        if (!DateTimeOffset.TryParse(GetField(fields, CsvFields.ModifiedTimeUtc), out var modifiedTime)) return false;
         
         rowInfo = new CsvRowData
         {
             Kind = kind,
             Path = GetField(fields, CsvFields.Path),
-            CreationTime = creationTime,
+            CreationTimeUtc = creationTime,
+            ModifiedTimeUtc = modifiedTime,
             Size = size,
             FileCount = fileCount,
             Checksum = GetField(fields, CsvFields.Checksum),
@@ -178,7 +181,8 @@ public sealed class CsvScanSerializer : IScanSerializer
     {
         Kind = 0,
         Path,
-        CreationTime,
+        CreationTimeUtc,
+        ModifiedTimeUtc,
         Size,
         FileCount,
         Checksum,

@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <PackageReference Include="Avalonia" Version="11.3.6"/>
+        <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.1.5" />
         <PackageReference Include="Avalonia.Desktop" Version="11.3.6"/>
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6"/>
         <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.6"/>
@@ -37,6 +38,10 @@
     <ItemGroup>
         <Compile Update="Views\MainWindow.axaml.cs">
             <DependentUpon>MainWindow.axaml</DependentUpon>
+            <SubType>Code</SubType>
+        </Compile>
+        <Compile Update="Views\ScanProgressWindow.axaml.cs">
+            <DependentUpon>ScanProgressWindow.axaml</DependentUpon>
             <SubType>Code</SubType>
         </Compile>
     </ItemGroup>

@@ -1,290 +1,104 @@
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Text;
-using Avalonia.Collections;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinder.Gui.Util;
-using DuplicateFileFinderLib.Core;
-using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinder.Gui.Views;
+using DuplicateFileFinderLib.Repository;
 using NLog;
-
-
-// for Dispatcher.UIThread
+using Dff = DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
-public partial class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel(
+    Repo repo,
+    IScanCoordinator scanCoordinator,
+    IDialogService dialogService)
+    : ObservableObject
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    
-    private readonly IFolderPickerService _folderPicker;
-    private readonly IFilePickerService _filePicker;
+    private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
 
+    private readonly IScanCoordinator _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
 
-    // ---------- Observable collections ----------
-    // Folders the user wants to scan
-    public ObservableCollection<string> SearchPaths { get; } = [];
-
-    // The table of duplicate file records shown in the grid
-    public DataGridCollectionView DuplicateFilesView { get; }
-
-    private BulkObservableCollection<DuplicateFileModel> DuplicateFiles { get; } = [];
-
-    private static readonly string[] Filters = ["csv"];
-
-    // Observable properties
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
-    [NotifyCanExecuteChangedFor(nameof(StopScanCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenScanCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SaveScanCommand))]
-    [NotifyCanExecuteChangedFor(nameof(NewScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OptimizeRepoCommand))]
     private bool _isScanning;
 
-    [ObservableProperty] private bool _readyToScan;
-    [ObservableProperty] private int _scanProgress;
-    [ObservableProperty] private string _operation = string.Empty;
-    [ObservableProperty] private int _filesScanned;
-    [ObservableProperty] private int _duplicatesFound;
-    [ObservableProperty] private long _spaceTaken;
-    [ObservableProperty] private bool _isIndeterminateProgressPhase;
-
-    // cancellation source for the current scan (null when idle)
-    private CancellationTokenSource? _scanCts;
-    private readonly DuplicateFileFinderLib.Core.DuplicateFileFinder _engine = new();
-
-    // guard to prevent file scanning updating UI after it's finished
-    private bool _finalized;
-
-    public MainWindowViewModel(IFolderPickerService folderPicker, IFilePickerService filePicker)
-    {
-        _folderPicker = folderPicker;
-        _filePicker = filePicker;
-
-        ReadyToScan = false;
-        IsScanning = false;
-
-        DuplicateFilesView = new DataGridCollectionView(DuplicateFiles);
-
-        // Default sort: FileSize DESC
-        if (DuplicateFilesView.CanSort)
-            DuplicateFilesView.SortDescriptions.Add(
-                DataGridSortDescription.FromPath("FileSize", ListSortDirection.Descending));
-
-        SearchPaths.CollectionChanged += (sender, _) =>
-        {
-            if (sender is ObservableCollection<string> paths) ReadyToScan = paths.Count > 0 && !IsScanning;
-        };
-    }
+    public DuplicatesViewModel Duplicates { get; } = new(repo);
 
     public bool CanStartScan => !IsScanning;
-    public bool CanImportExport => !IsScanning;
 
     // ---------------- Commands ----------------
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
-    private async Task ScanLocation()
+    private async Task ScanLocationAsync()
     {
-        var path = await _folderPicker.PickFolderAsync();
-        if (string.IsNullOrWhiteSpace(path)) return;
-
-        if (!SearchPaths.Contains(path))
-            SearchPaths.Add(path);
-
-        using (ScanLog.BeginScanScope(path))
-        {
-            await StartScan(path);
-        }
-    }
-
-
-    [RelayCommand(CanExecute = nameof(CanImportExport))]
-    private async Task SaveScan()
-    {
-        // No data yet
-        if (DuplicateFiles.Count == 0 && _engine.TotalFilesScanned == 0)
+        var path = await _dialogService.ShowFolderPickerDialogAsync("Scan location...");
+        if (string.IsNullOrWhiteSpace(path))
             return;
 
-        var targetPath = await _filePicker.PickSaveFileAsync(
-            "duplicate-scan.csv",
-            [("CSV files", Filters)]);
+        await StartScan(path);
+    }
 
-        if (string.IsNullOrWhiteSpace(targetPath)) return;
-
+    [RelayCommand(CanExecute = nameof(CanStartScan))]
+    private async Task OptimizeRepo()
+    {
         try
         {
-            await using var fs = File.Create(targetPath);
-            await using var sw = new StreamWriter(fs, new UTF8Encoding(false));
-            _engine.ExportToCsv(sw); // relies on your existing lib API
-            Operation = $"Exported scan to {targetPath}";
+            await Duplicates.OptimizeRepoAsync();
+            await _dialogService.ShowInfoAsync("Repository optimized", "The repository has been compacted.");
         }
         catch (Exception ex)
         {
-            Operation = $"Export failed: {ex.Message}";
+            await _dialogService.ShowErrorAsync("Failed to optimize repository", ex.Message);
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanImportExport))]
-    private async Task OpenScan()
-    {
-        var srcPath = await _filePicker.PickOpenFileAsync(
-            [("CSV files", Filters)]);
-        if (string.IsNullOrWhiteSpace(srcPath)) return;
+    // ---------------- Scan orchestration ----------------
 
-        try
-        {
-            await using var fs = File.OpenRead(srcPath);
-            using var sr = new StreamReader(fs, Encoding.UTF8, true);
-
-            // Clear current state
-            SearchPaths.Clear();
-            FilesScanned = 0;
-            DuplicatesFound = 0;
-            SpaceTaken = 0;
-
-            // Populate engine from CSV then materialize grid rows
-            _engine.ImportFromCsv(sr, ImportMode.Replace);
-
-            var rows = await _engine.GetDuplicateFileRowsAsync();
-            var items = rows.Select(r => new DuplicateFileModel
-            {
-                FileName = r.Path,
-                FileSize = r.Size,
-                CreationDate = r.CreationTimeUtc.LocalDateTime,
-                FileGroup = r.Group
-            }).ToList();
-            
-            DuplicateFiles.AddRange(items, true);
-
-            foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
-
-            FilesScanned = _engine.TotalFilesScanned;
-            DuplicatesFound = _engine.DuplicateFilesWastedCount;
-            SpaceTaken = _engine.DuplicateSpaceBytes;
-
-            Operation = $"Imported scan from {srcPath}";
-        }
-        catch (Exception ex)
-        {
-            Operation = $"Import failed: {ex.Message}";
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanImportExport))]
-    private void NewScan()
-    {
-        _engine.ClearAllScans();
-        SearchPaths.Clear();
-        DuplicateFiles.Clear();
-        FilesScanned = 0;
-        DuplicatesFound = 0;
-        SpaceTaken = 0;
-        Operation = "Cleared results";
-    }
-
-    // ---------------- Private helper methods ----------------
     private async Task StartScan(string path)
     {
-        var scanInterrupted = false;
-        
+        if (IsScanning)
+            return;
+
         Log.Info("Initialising scan of {path}", path);
-        
-        if (IsScanning || SearchPaths.Count == 0) return;
-
-        _finalized = false;
-
-        // Reset UI state            
-        ScanProgress = 0;
-        Operation = "Preparing scan...";
-        ReadyToScan = false;
         IsScanning = true;
 
-        _scanCts = new CancellationTokenSource();
-        var token = _scanCts.Token;
-
-        // Progress from the library → UI
-        var progress = new Progress<DuplicateFileFinderProgressReport>(report =>
+        var progressVm = new ScanProgressViewModel(_scanCoordinator);
+        var dialog = new ScanProgressWindow
         {
-            if (_finalized) return;
+            DataContext = progressVm
+        };
 
-            if (!string.IsNullOrWhiteSpace(report.StatusMessage))
-                Operation = report.StatusMessage;
+        void HandleProgress(object? _, Dff.DuplicateFileFinderProgressReport report)
+        {
+            progressVm.Update(report);
+        }
 
-            IsIndeterminateProgressPhase = report.IsIndeterminate;
+        void HandleCompleted(object? _, ScanCompletedEventArgs e)
+        {
+            Duplicates.LoadFromRepo();
+        }
 
-            if (!report.IsIndeterminate)
-                ScanProgress = (int)Math.Clamp(report.PercentComplete * 100.0, 0, 100);
-        });
+        _scanCoordinator.ProgressChanged += HandleProgress;
+        _scanCoordinator.ScanCompleted += HandleCompleted;
+
+        var owner = _dialogService.GetOwnerWindow();
+        var dialogTask = dialog.ShowDialog(owner);
 
         try
         {
-            await Task.Run(async () =>
-            {
-                await _engine.ScanLocation(path, progress, token)
-                    .ConfigureAwait(false);
-            }, token).ConfigureAwait(true);
-
-            // Gather duplicates as GUI rows
-            IReadOnlyList<DuplicateFileRow> rows;
-            using (TimingLog.Start("Retrieving Duplicates"))
-            {
-                rows = await Task.Run(async () =>
-                    await _engine.GetDuplicateFileRowsAsync().ConfigureAwait(false), token).ConfigureAwait(true);
-            }
-
-            List<DuplicateFileModel> items;
-            using (TimingLog.Start("Transforming into DuplicateFileModel"))
-            {
-                items = rows.Select(r => new DuplicateFileModel
-                {
-                    FileName = r.Path,
-                    FileSize = r.Size,
-                    CreationDate = r.CreationTimeUtc.LocalDateTime,
-                    FileGroup = r.Group
-                }).ToList();
-            }
-            
-            using (TimingLog.Start("Adding duplicates to view"))
-            {
-                DuplicateFiles.AddRange(items, true);
-            }
-
-            FilesScanned = _engine.TotalFilesScanned;
-            DuplicatesFound = _engine.DuplicateFilesWastedCount;
-            SpaceTaken = _engine.DuplicateSpaceBytes;
-
-            ReadyToScan = SearchPaths.Count > 0;
-
-            // refresh SearchPaths in case _engine has promoted prior scanned search paths
-            SearchPaths.Clear();
-            foreach (var item in _engine.SearchPaths) SearchPaths.Add(item);
-        }
-        catch (OperationCanceledException)
-        {
-            Operation = "Scan cancelled.";
-            scanInterrupted = true;
+            await _scanCoordinator.RunScanAsync(path);
         }
         finally
         {
-            _scanCts?.Dispose();
-            _scanCts = null;
+            _scanCoordinator.ProgressChanged -= HandleProgress;
+            _scanCoordinator.ScanCompleted -= HandleCompleted;
 
+            dialog.Close();
+            await dialogTask;
 
-            _finalized = true;
             IsScanning = false;
-            ReadyToScan = SearchPaths.Count > 0;
-            ScanProgress = 0;
-            IsIndeterminateProgressPhase = false;
-            if (!scanInterrupted) Operation = "Finished scanning";
         }
-    }
-
-    [RelayCommand]
-    private void StopScan()
-    {
-        _scanCts?.Cancel();
     }
 }

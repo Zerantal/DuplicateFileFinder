@@ -2,81 +2,140 @@
 
 using System.Collections.Concurrent;
 using System.Text.Json;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
+using NLog;
 
 namespace DuplicateFileFinderLib.Repository;
 
 /// <summary>
-/// The persistent database of all scanned files across all scan locations.
-/// Uses a snapshot + append-only delta log for durability.
+///     The persistent database of all scanned files across all scan locations.
+///     Uses a snapshot + append-only delta log for durability.
 /// </summary>
-public sealed class Repo
+public sealed class Repo : IRepo
 {
-    private readonly string _rootPath;
-    private readonly string _metaFile;
-    private readonly string _snapshotFile;
+    private const int RepoSchemaVersion = 4;
+
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+
+    private readonly ConcurrentDictionary<Guid, string> _dirPathCache = new();
     private readonly string _logDir;
 
-    public RepoMeta Meta { get; private set; } = new();
-    public ConcurrentDictionary<Guid, FileRecord> Files { get; } = new();
-    public ConcurrentDictionary<Guid, DirRecord> Dirs { get; } = new();
-    public ConcurrentDictionary<string, Guid> InternedStrings { get; } = new();
+    private readonly string _metaFile;
+    private readonly string _scanRunsFile;
+    private readonly Dictionary<long, ScanRun> _scanRunIndex = new();
+    private readonly string _snapshotFile;
 
-    // HashBytes -> FileIds
-    public ConcurrentDictionary<ReadOnlyMemory<byte>, List<Guid>> HashIndex { get; } = new(new MemoryComparer());
+    // to sync snapshot+meta mutations.
+    private readonly Lock _sync = new();
+    private Dictionary<Guid, DirRecord> _dirs = new();
+    private Dictionary<Guid, FileRecord> _files = new();
+    private Dictionary<HashKey, List<Guid>> _hashIndex = new();
 
-    // Use a field for atomic increments. Mirror to Meta.NextSequence on SaveMeta.
-    private long _nextSeq;
-    private string IndexesPath => Path.Combine(_rootPath, $"indexes-{Meta.Generation}.bin");
-
-    // to sync file+meta mutations.
-    private readonly object _sync = new();
-    
-    private Repo(string rootPath)
+    private Repo(string repoPath)
     {
-        _rootPath = rootPath;
-        _metaFile = Path.Combine(rootPath, "meta.json");
-        _snapshotFile = Path.Combine(rootPath, "snapshot.bin");
-        _logDir = Path.Combine(rootPath, "log");
+        _metaFile = Path.Combine(repoPath, "meta.json");
+        _snapshotFile = Path.Combine(repoPath, "snapshot.bin");
+        _logDir = Path.Combine(repoPath, "log");
+        _scanRunsFile = Path.Combine(repoPath, "scanruns.json");
+
         Directory.CreateDirectory(_logDir);
     }
 
-    public static Repo Open(string rootPath)
+    private RepoMeta Meta { get; set; } = null!;
+    
+    private List<ScanRun> ScanRuns { get; set; } = new();
+
+    public IReadOnlyList<ScanRun> ScanRunsView
     {
-        var repo = new Repo(rootPath);
-        repo.LoadMeta();
-        repo.LoadSnapshot();                 // 1) data image
-        if (!repo.LoadIndexes())             // 2) prebuilt hash index for this generation
-            repo.RebuildIndexesAndPersist(); //    or rebuild and persist
-        repo.ReplayDeltas();                 // 3) bring forward by deltas; ApplyDelta updates HashIndex
-        repo._nextSeq = repo.Meta.NextSequence;
-        return repo;
+        get
+        {
+            lock (_sync)
+            {
+                return ScanRuns.ToArray();
+            }
+        }
     }
 
     // ---------- public ops ----------
 
-    public ScanSession BeginScan(int scanId, string rootPath)
+    public RepoViewSnapshot GetSnapshot()
     {
-        if (string.IsNullOrWhiteSpace(rootPath)) throw new ArgumentException(nameof(rootPath));
-        return new ScanSession(this, scanId, rootPath);
+        lock (_sync)
+        {
+            // Clone dictionaries so the caller gets its own copies.
+            var filesCopy = _files.ToDictionary(kv => kv.Key, kv => kv.Value);
+            var dirsCopy = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
+
+            var hashIndexCopy = _hashIndex.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyList<Guid>)kv.Value.ToArray());
+
+            return new RepoViewSnapshot
+            {
+                Files = filesCopy,
+                Dirs = dirsCopy,
+                HashIndex = hashIndexCopy
+            };
+        }
     }
+
+    // -------- BeginScan (creates ScanRun + ScanSession) --------
+
+    public IScanSession BeginScan(
+        string rootPath,
+        int maxFilesBeforeFlush = 50_000,
+        int maxDirsBeforeFlush = 1_000)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+            throw new ArgumentException(nameof(rootPath));
+
+        var scanSequence = AllocateScanSequence();
+        var run = new ScanRun
+        {
+            ScanSequence = scanSequence,
+            RootPath = rootPath,
+            StartedAt = DateTimeOffset.UtcNow,
+            Status = ScanRunStatus.InProgress,
+            FinishedAt = null,
+            ErrorMessage = null
+        };
+        IReadOnlyDictionary<Guid, DirRecord> dirsCopy;
+        lock (_sync)
+        {
+            dirsCopy = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
+            _scanRunIndex[scanSequence] = run;
+            ScanRuns.Add(run);
+            SaveScanRuns_NoLock(); 
+        }
+        
+        return new ScanSession(this, run, dirsCopy,  maxFilesBeforeFlush, maxDirsBeforeFlush);
+    }
+
+    // -------- CommitDelta: progressive, with log id --------
 
     public void CommitDelta(RepoDelta delta)
     {
-        var seq = Interlocked.Increment(ref _nextSeq);
-        var tmp = Path.Combine(_logDir, $"{Meta.Generation}-{seq}.tmp");
-        var final = Path.Combine(_logDir, $"{Meta.Generation}-{seq}.delta");
+        // Simple bridge: ScanSession should use CommitDeltaAsync; other callers can stay sync.
+        CommitDeltaAsync(delta).GetAwaiter().GetResult();
+    }
+
+    public async Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default)
+    {
+        // delta.ScanSequence must already be set by caller (ScanSession)
+        var logId = AllocateLogId(); // still sync + locked; fine
+
+        var tmp = Path.Combine(_logDir, $"{Meta.Generation}-{logId}.tmp");
+        var final = Path.Combine(_logDir, $"{Meta.Generation}-{logId}.delta");
 
         var bytes = MemoryPackSerializer.Serialize(delta);
-        File.WriteAllBytes(tmp, bytes);
-        Fsync(tmp);
-        File.Move(tmp, final, overwrite: true);
+
+        await File.WriteAllBytesAsync(tmp, bytes, cancellationToken).ConfigureAwait(false);
+        Fsync(tmp); // still sync; if you want fully async, you’d need an async fsync wrapper
+        File.Move(tmp, final, true);
 
         ApplyDelta(delta);
-
-        Meta.NextSequence = _nextSeq;
-        SaveMeta_NoLock();
     }
 
     public void SaveSnapshot()
@@ -86,135 +145,246 @@ public sealed class Repo
             SaveSnapshot_NoLock();
         }
     }
-    
-    // Rebuild indexes helpers
-    private void RebuildIndexesAndPersist_NoLock()
+
+    // ---------- Compaction ---------
+
+    public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
     {
-        HashIndex.Clear();
-        foreach (var f in Files.Values)
-            HashIndex.GetOrAdd(f.Hash, _ => new()).Add(f.Id);
+        policy ??= new RepoCompactionPolicy();
 
-        var buckets = new List<HashBucket>(HashIndex.Count);
-        foreach (var kv in HashIndex)
-            buckets.Add(new HashBucket(kv.Key.ToArray(), kv.Value.ToArray()));
+        // Fast path: compute sizes without locking
+        var (logBytes, deltaCount) = GetLogSizeAndCount();
+        var snapBytes = File.Exists(_snapshotFile) ? new FileInfo(_snapshotFile).Length : 0L;
 
-        var idx = new RepoIndexes(Generation: Meta.Generation, Buckets: buckets);
-        var tmp = IndexesPath + ".tmp";
-        var bytes = MemoryPackSerializer.Serialize(idx);
-        File.WriteAllBytes(tmp, bytes);
-        Fsync(tmp);
-        File.Move(tmp, IndexesPath, overwrite: true);
+        if (!ShouldCompact(policy, logBytes, deltaCount, snapBytes))
+            return;
+
+        // Serialize with other writers
+        lock (_sync)
+        {
+            // Recompute under lock to avoid TOCTOU
+            (logBytes, deltaCount) = GetLogSizeAndCount();
+            snapBytes = File.Exists(_snapshotFile) ? new FileInfo(_snapshotFile).Length : 0L;
+            if (!ShouldCompact(policy, logBytes, deltaCount, snapBytes))
+                return;
+
+            // 1) Write a fresh snapshot
+            SaveSnapshot_NoLock(); // sets Meta.LastSnapshottedLogSequence = Meta.NextLogSequence and persists meta
+
+            // 2) Delete deltas already captured in snapshot
+            DeleteObsoleteDeltas_NoLock();
+        }
     }
-    
+
+    public void CompactNow()
+    {
+        lock (_sync)
+        {
+            SaveSnapshot_NoLock();
+            DeleteObsoleteDeltas_NoLock();
+        }
+    }
+
+    public string GetFullDirPath(Guid dirId)
+    {
+        // Fast path: return cached value
+        if (_dirPathCache.TryGetValue(dirId, out var cached))
+            return cached;
+
+        if (!_dirs.TryGetValue(dirId, out var node))
+            throw new KeyNotFoundException($"DirId {dirId} not found in repo.");
+
+        // Reconstruct path from leaf → root
+        var parts = new List<string>(16);
+
+        var cursor = node;
+        while (true)
+        {
+            parts.Add(cursor.Name);
+
+            if (cursor.ParentId is { } parentId)
+            {
+                if (!_dirs.TryGetValue(parentId, out cursor))
+                    throw new InvalidOperationException(
+                        $"Broken parent chain: missing parent {parentId}");
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Reverse so root → leaf
+        parts.Reverse();
+
+        // Build platform-correct path
+        // e.g. "/" + "home/z/Work"
+        string fullPath;
+
+        if (OperatingSystem.IsWindows())
+            // On Windows, first part may already be "C:" or "D:"
+            fullPath = Path.Combine(parts.ToArray());
+        else
+            fullPath = Path.DirectorySeparatorChar + Path.Combine(parts.ToArray());
+
+        _dirPathCache[dirId] = fullPath;
+        return fullPath;
+    }
+
+
+    public static Repo Open(string repoPath)
+    {
+        var repo = new Repo(repoPath);
+        using (TimingLog.StartPhase("Opening Repo"))
+        {
+            repo.LoadMetaOrCreateFresh(repoPath);
+            repo.LoadSnapshot(); // 1) data image
+            repo.ReplayDeltas(); // 2) bring forward by deltas; ApplyDelta updates HashIndex
+            repo.LoadScanRuns();
+
+            TimingLog.Counter("files", repo._files.Count);
+            TimingLog.Counter("dirs", repo._dirs.Count);
+            TimingLog.Counter("HashIndex", repo._hashIndex.Count);
+            
+        }
+
+        return repo;
+    }
+
+    // Allocate a new scan/log sequence, persist it, and return it.
+    internal long AllocateScanSequence()
+    {
+        lock (_sync)
+        {
+            var seq = Meta.NextScanSequence;
+            Meta = Meta with { NextScanSequence = seq + 1 };
+            SaveMeta_NoLock();
+            return seq;
+        }
+    }
+
+    internal long AllocateLogId()
+    {
+        lock (_sync)
+        {
+            var id = Meta.NextLogSequence;
+            Meta = Meta with { NextLogSequence = id + 1 };
+            SaveMeta_NoLock();
+            return id;
+        }
+    }
+
     private void SaveMeta_NoLock()
     {
         var json = JsonSerializer.Serialize(Meta, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(_metaFile, json);
         Fsync(_metaFile);
     }
-    
+
 // Writes snapshot + indexes and updates meta. Caller must hold _sync.
     private void SaveSnapshot_NoLock()
     {
-        var snapshot = new RepoSnapshot(
-            Meta,
-            Files.Values.ToList(),
-            Dirs.Values.ToList(),
-            new Dictionary<string, Guid>(InternedStrings));
+        var lastSnapLog = Meta.NextLogSequence - 1; // -1 when no logs yet
+
+        var newMeta = Meta with
+        {
+            SchemaVersion = RepoSchemaVersion,
+            LastSnapshottedLogSequence = lastSnapLog
+        };
+        Meta = newMeta;
+
+        var snapshot = new RepoSnapshot
+        {
+            Meta = newMeta,
+            Files = _files,
+            Dirs = _dirs,
+            HashIndex = _hashIndex,
+            ScanRuns = ScanRuns
+        };
 
         var tmp = _snapshotFile + ".tmp";
         var bytes = MemoryPackSerializer.Serialize(snapshot);
         File.WriteAllBytes(tmp, bytes);
         Fsync(tmp);
-        File.Move(tmp, _snapshotFile, overwrite: true);
+        File.Move(tmp, _snapshotFile, true);
 
-        // Mark that this snapshot includes all deltas up to current NextSequence
-        Meta.LastSnapshottedSequence = Meta.NextSequence;
         SaveMeta_NoLock();
-
-        // Rebuild and persist indexes for this image
-        RebuildIndexesAndPersist_NoLock();
     }
 
     // ---------- loader pieces ----------
 
     private void LoadSnapshot()
     {
-        if (!File.Exists(_snapshotFile))
-        {
-            // empty repo
-            Files.Clear(); Dirs.Clear(); InternedStrings.Clear(); HashIndex.Clear();
-            return;
-        }
+        _files.Clear();
+        _dirs.Clear();
+        _hashIndex.Clear();
+        ScanRuns.Clear();
+        _scanRunIndex.Clear();
+        _dirPathCache.Clear();
+
+        if (!File.Exists(_snapshotFile)) return;
 
         var bytes = File.ReadAllBytes(_snapshotFile);
-        var snapshot = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes)
-                       ?? throw new InvalidDataException("Snapshot corrupted");
-
-        Meta = snapshot.Meta;
-
-        Files.Clear(); Dirs.Clear(); InternedStrings.Clear(); HashIndex.Clear();
-
-        foreach (var f in snapshot.Files)
-            Files[f.Id] = f;
-
-        foreach (var d in snapshot.Dirs)
-            Dirs[d.Id] = d;
-
-        foreach (var kv in snapshot.Strings)
-            InternedStrings[kv.Key] = kv.Value;
-    }
-
-    private bool LoadIndexes()
-    {
-        var path = IndexesPath;
-        if (!File.Exists(path)) return false;
 
         try
         {
-            var bytes = File.ReadAllBytes(path);
-            var idx = MemoryPackSerializer.Deserialize<RepoIndexes>(bytes);
-            if (idx == null || idx.Generation != Meta.Generation) return false;
-
-            HashIndex.Clear();
-            foreach (var b in idx.Buckets)
+            var snapshot = MemoryPackSerializer.Deserialize<RepoSnapshot>(bytes);
+            if (snapshot is not null)
             {
-                // Copy to ReadOnlyMemory keys backed by byte[]
-                var key = (ReadOnlyMemory<byte>)b.Hash;
-                HashIndex[key] = new List<Guid>(b.FileIds);
+                // Optional: sanity checks
+                // if (snapshot.Meta.RepoId != Meta.RepoId) throw ...
+                // if (snapshot.Meta.Generation != Meta.Generation) throw ...
+
+                _files = snapshot.Files;
+                _dirs = snapshot.Dirs;
+                _hashIndex = snapshot.HashIndex;
+                ScanRuns = snapshot.ScanRuns;
+
+                _scanRunIndex.Clear();
+                foreach (var run in ScanRuns)
+                    _scanRunIndex[run.ScanSequence] = run;
             }
-            return true;
         }
-        catch
+        catch (MemoryPackSerializationException)
         {
-            return false;
+            Log.Error("Failed to load repo snapshot.");
+            throw;
         }
     }
-
-    private void RebuildIndexesAndPersist()
+    
+    // Load persisted scan runs from scanruns.json (if present) and
+// overlay them on top of whatever was loaded from the snapshot.
+    private void LoadScanRuns()
     {
-        // Rebuild in-memory
-        HashIndex.Clear();
-        foreach (var f in Files.Values)
-            HashIndex.GetOrAdd(f.Hash, _ => new()).Add(f.Id);
+        if (!File.Exists(_scanRunsFile))
+            return; // Keep whatever ScanRuns came from the snapshot
 
-        // Persist compact index file for this generation
-        var buckets = new List<HashBucket>(HashIndex.Count);
-        foreach (var kv in HashIndex)
-        {
-            // Make sure hash bytes are materialized as byte[] for serialization
-            var hashBytes = kv.Key.ToArray();
-            var ids = kv.Value.ToArray();
-            buckets.Add(new HashBucket(hashBytes, ids));
-        }
-        var idx = new RepoIndexes(Generation: Meta.Generation, Buckets: buckets);
+        var json = File.ReadAllText(_scanRunsFile);
+        var fromFile = JsonSerializer.Deserialize<List<ScanRun>>(json) ?? new List<ScanRun>();
 
-        var tmp = IndexesPath + ".tmp";
-        var bytes = MemoryPackSerializer.Serialize(idx);
-        File.WriteAllBytes(tmp, bytes);
-        Fsync(tmp);
-        File.Move(tmp, IndexesPath, overwrite: true);
+        // Merge: snapshot data is baseline; scanruns.json overrides / adds by ScanSequence.
+        var bySeq = new Dictionary<long, ScanRun>();
+        foreach (var run in ScanRuns)
+            bySeq[run.ScanSequence] = run;
+
+        foreach (var run in fromFile)
+            bySeq[run.ScanSequence] = run;
+
+        ScanRuns = bySeq.Values.OrderBy(r => r.ScanSequence).ToList();
+
+        _scanRunIndex.Clear();
+        foreach (var run in ScanRuns)
+            _scanRunIndex[run.ScanSequence] = run;
     }
+
+// Caller must hold _sync if there is any chance of concurrent modification.
+    private void SaveScanRuns_NoLock()
+    {
+        var json = JsonSerializer.Serialize(ScanRuns, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(_scanRunsFile, json);
+        Fsync(_scanRunsFile);
+    }
+
 
     private void ReplayDeltas()
     {
@@ -222,22 +392,19 @@ public sealed class Repo
 
         var files = Directory.GetFiles(_logDir, $"{Meta.Generation}-*.delta")
             .OrderBy(f => f, StringComparer.Ordinal);
-        
+
         foreach (var path in files)
         {
-            // filename pattern: "<gen>-<seq>.delta"
-            var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<seq>"
+            var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<logId>"
             var dash = name.IndexOf('-');
             if (dash <= 0) continue;
 
-            var seqPart = name[(dash + 1)..];
-            if (long.TryParse(seqPart, out var seq))
-            {
-                // Only skip deltas already captured in the snapshot
-                if (seq <= Meta.LastSnapshottedSequence)
+            var idPart = name[(dash + 1)..];
+            if (long.TryParse(idPart, out var logId))
+                // skip deltas already covered by snapshot
+                if (logId <= Meta.LastSnapshottedLogSequence)
                     continue;
-            }
-            
+
             var bytes = File.ReadAllBytes(path);
             var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
             if (delta != null) ApplyDelta(delta);
@@ -246,110 +413,232 @@ public sealed class Repo
 
     private void ApplyDelta(RepoDelta delta)
     {
+        // Upserts / updates
         foreach (var f in delta.Files)
         {
-            Files[f.Id] = f;
-            
-            var list = HashIndex.GetOrAdd(f.Hash, _ => new());
-            // avoid duplicates if the same delta is applied again
-            if (!list.Contains(f.Id))
-                list.Add(f.Id);
+            // If an existing file's hash changed, remove from old hash bucket
+            if (_files.TryGetValue(f.Id, out var existing))
+                if (!existing.Hash.Equals(f.Hash))
+                    if (_hashIndex.TryGetValue(existing.Hash, out var oldList))
+                    {
+                        oldList.Remove(f.Id);
+                        if (oldList.Count == 0)
+                            _hashIndex.Remove(existing.Hash);
+                    }
+
+            _files[f.Id] = f;
+
+            if (!_hashIndex.TryGetValue(f.Hash, out var list))
+            {
+                list = new List<Guid>(4);
+                _hashIndex[f.Hash] = list;
+            }
+
+            // guard against dup if same delta is re-applied
+            if (list.Count == 0 || list[^1] != f.Id)
+                if (!list.Contains(f.Id))
+                    list.Add(f.Id);
         }
+
         foreach (var d in delta.Dirs)
-            Dirs[d.Id] = d;
-    }
-
-    // ---------- Compaction ---------
-
-public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
-{
-    policy ??= new RepoCompactionPolicy();
-
-    // Fast path: compute sizes without locking
-    var (logBytes, deltaCount) = GetLogSizeAndCount();
-    var snapBytes = File.Exists(_snapshotFile) ? new FileInfo(_snapshotFile).Length : 0L;
-
-    if (!ShouldCompact(policy, logBytes, deltaCount, snapBytes))
-        return;
-
-    // Serialize with other writers
-    lock (_sync)
-    {
-        // Recompute under lock to avoid TOCTOU
-        (logBytes, deltaCount) = GetLogSizeAndCount();
-        snapBytes = File.Exists(_snapshotFile) ? new FileInfo(_snapshotFile).Length : 0L;
-        if (!ShouldCompact(policy, logBytes, deltaCount, snapBytes))
-            return;
-
-        // 1) Write a fresh snapshot + indexes
-        SaveSnapshot_NoLock(); // sets Meta.LastSnapshottedSequence = Meta.NextSequence and persists meta
-
-        // 2) Delete deltas already captured in snapshot
-        DeleteObsoleteDeltas_NoLock();
-    }
-}
-
-public void CompactNow()
-{
-    lock (_sync)
-    {
-        SaveSnapshot_NoLock();
-        DeleteObsoleteDeltas_NoLock();
-    }
-}
-
-
-
-private static bool ShouldCompact(RepoCompactionPolicy policy, long logBytes, int deltaCount, long snapBytes)
-{
-    if (deltaCount < policy.MinDeltaCount) return false;
-    if (logBytes < policy.MinLogBytes) return false;
-
-    if (snapBytes <= 0) return true; // no snapshot yet → compact
-
-    var ratio = (double)logBytes / Math.Max(1L, snapBytes);
-    return ratio >= policy.RatioThreshold;
-}
-
-// Deletes all deltas with seq ≤ LastSnapshottedSequence. Caller must hold _sync.
-private void DeleteObsoleteDeltas_NoLock()
-{
-    if (!Directory.Exists(_logDir)) return;
-
-    foreach (var path in Directory.GetFiles(_logDir, $"{Meta.Generation}-*.delta"))
-    {
-        var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<seq>"
-        var dash = name.IndexOf('-');
-        if (dash <= 0) continue;
-        var seqPart = name[(dash + 1)..];
-        if (long.TryParse(seqPart, out var seq) && seq <= Meta.LastSnapshottedSequence)
         {
-            try { File.Delete(path); } catch { /* tolerate */ }
+            _dirs[d.Id] = d;
+            // Invalidate cached path; will be recomputed on next GetFullDirPath
+            _dirPathCache.Remove(d.Id, out _);
+        }
+
+        // Deletions (tombstones)
+        if (delta.DeletedFiles is { Count: > 0 })
+            foreach (var tomb in delta.DeletedFiles)
+            {
+                if (!_files.TryGetValue(tomb.Id, out var file))
+                    continue;
+
+                // Remove from hash index
+                if (_hashIndex.TryGetValue(file.Hash, out var list))
+                {
+                    list.Remove(tomb.Id);
+                    if (list.Count == 0)
+                        _hashIndex.Remove(file.Hash);
+                }
+
+                _files.Remove(tomb.Id);
+            }
+
+        if (delta.DeletedDirs is { Count: > 0 })
+            foreach (var tomb in delta.DeletedDirs)
+            {
+                _dirs.Remove(tomb.Id);
+                _dirPathCache.Remove(tomb.Id, out _);
+            }
+    }
+
+    private static bool ShouldCompact(RepoCompactionPolicy policy, long logBytes, int deltaCount, long snapBytes)
+    {
+        if (deltaCount < policy.MinDeltaCount) return false;
+        if (logBytes < policy.MinLogBytes) return false;
+
+        if (snapBytes <= 0) return true; // no snapshot yet → compact
+
+        var ratio = (double)logBytes / Math.Max(1L, snapBytes);
+        return ratio >= policy.RatioThreshold;
+    }
+
+// Deletes all deltas with seq ≤ LastSnapshottedLogSequence. Caller must hold _sync.
+    private void DeleteObsoleteDeltas_NoLock()
+    {
+        if (!Directory.Exists(_logDir)) return;
+
+        foreach (var path in Directory.GetFiles(_logDir, $"{Meta.Generation}-*.delta"))
+        {
+            var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<seq>"
+            var dash = name.IndexOf('-');
+            if (dash <= 0) continue;
+            var seqPart = name[(dash + 1)..];
+            if (long.TryParse(seqPart, out var seq) && seq <= Meta.LastSnapshottedLogSequence)
+                try
+                {
+                    File.Delete(path);
+                }
+                catch
+                {
+                    // tolerate
+                }
         }
     }
-}
 
-    
-    
     // ---------- meta I/O ----------
 
-    private void LoadMeta()
+    private void LoadMetaOrCreateFresh(string repoPath)
     {
-        if (File.Exists(_metaFile))
+        if (!File.Exists(_metaFile))
         {
-            Meta = JsonSerializer.Deserialize<RepoMeta>(File.ReadAllText(_metaFile)) ?? new RepoMeta();
+            // First time creating a repo → initialise everything
+            Meta = new RepoMeta
+            {
+                SchemaVersion = RepoSchemaVersion,
+                Generation = 1,
+                NextLogSequence = 0,
+                LastSnapshottedLogSequence = -1,
+                LastCompaction = DateTimeOffset.UtcNow,
+                RepoId = Guid.NewGuid(),
+                RepoPath = repoPath,
+                RepoHostName = Environment.MachineName,
+                NextScanSequence = 0
+            };
+
+            SaveMeta_NoLock();
+            return;
         }
-        else
+
+        // Load existing
+        Meta = JsonSerializer.Deserialize<RepoMeta>(File.ReadAllText(_metaFile))
+               ?? throw new InvalidDataException("Failed to load RepoMeta.");
+    }
+
+
+    // Scan lifecycle helpers
+
+    internal void MarkScanCompleted(long sequence)
+    {
+        lock (_sync)
         {
-            SaveMeta();
+            if (!_scanRunIndex.TryGetValue(sequence, out var run))
+                return;
+
+            var updated = run with
+            {
+                Status = ScanRunStatus.Completed,
+                FinishedAt = DateTimeOffset.UtcNow,
+                ErrorMessage = null
+            };
+
+            _scanRunIndex[sequence] = updated;
+            var idx = ScanRuns.FindIndex(r => r.ScanSequence == sequence);
+            if (idx >= 0) ScanRuns[idx] = updated;
+            else ScanRuns.Add(updated);
+            
+            SaveScanRuns_NoLock(); // persist "completed" status
         }
     }
 
-    private void SaveMeta()
+    internal void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
     {
-        var json = JsonSerializer.Serialize(Meta, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_metaFile, json);
-        Fsync(_metaFile);
+        lock (_sync)
+        {
+            if (!_scanRunIndex.TryGetValue(sequence, out var run))
+                return;
+
+            var status = cancelled ? ScanRunStatus.Cancelled : ScanRunStatus.Failed;
+
+            var updated = run with
+            {
+                Status = status,
+                FinishedAt = DateTimeOffset.UtcNow,
+                ErrorMessage = errorMessage
+            };
+
+            _scanRunIndex[sequence] = updated;
+            var idx = ScanRuns.FindIndex(r => r.ScanSequence == sequence);
+            if (idx >= 0) ScanRuns[idx] = updated;
+            else ScanRuns.Add(updated);
+            
+            SaveScanRuns_NoLock(); // persist "failed/cancelled" status
+        }
+    }
+
+    // -------- Completion: generate tombstone delta for a root --------
+
+    internal void CompleteScanForRoot(long scanSequence, string rootPath)
+    {
+        // Compute which files/dirs under root were *not* seen at scanSequence
+        var deletedFiles = new List<FileTombstone>();
+        var deletedDirs = new List<DirTombstone>();
+
+        foreach (var kvp in _files)
+        {
+            var file = kvp.Value;
+            if (!IsUnderRoot(file.DirId, rootPath))
+                continue;
+
+            if (file.LastSeenScanSequence < scanSequence)
+                deletedFiles.Add(new FileTombstone(file.Id, scanSequence));
+        }
+
+        foreach (var kvp in _dirs)
+        {
+            var dir = kvp.Value;
+            if (!IsUnderRoot(dir.Id, rootPath))
+                continue;
+
+            if (dir.LastSeenSequence < scanSequence)
+                deletedDirs.Add(new DirTombstone(dir.Id, scanSequence));
+        }
+
+        if (deletedFiles.Count == 0 && deletedDirs.Count == 0)
+        {
+            // Nothing to tombstone, just mark completed
+            MarkScanCompleted(scanSequence);
+            return;
+        }
+
+        var tombstoneDelta = new RepoDelta
+        {
+            ScanSequence = scanSequence,
+            Files = new List<FileRecord>(),
+            Dirs = new List<DirRecord>(),
+            DeletedFiles = deletedFiles,
+            DeletedDirs = deletedDirs
+        };
+
+        CommitDelta(tombstoneDelta);
+        MarkScanCompleted(scanSequence);
+    }
+    
+    private bool IsUnderRoot(Guid dirId, string rootPath)
+    {
+        var path = GetFullDirPath(dirId);
+        return path.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
     }
 
     // ---------- util ----------
@@ -357,35 +646,25 @@ private void DeleteObsoleteDeltas_NoLock()
     private static void Fsync(string path)
     {
         using var fs = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-        fs.Flush(flushToDisk: true);
+        fs.Flush(true);
     }
-    
+
     private (long logBytes, int count) GetLogSizeAndCount()
     {
         if (!Directory.Exists(_logDir)) return (0L, 0);
+
         long bytes = 0;
-        int count = 0;
+        var count = 0;
         foreach (var p in Directory.GetFiles(_logDir, $"{Meta.Generation}-*.delta"))
         {
             var fi = new FileInfo(p);
-            if (fi.Exists) { bytes += fi.Length; count++; }
+            if (fi.Exists)
+            {
+                bytes += fi.Length;
+                count++;
+            }
         }
+
         return (bytes, count);
-    }
-}
-
-file sealed class MemoryComparer : IEqualityComparer<ReadOnlyMemory<byte>>
-{
-    public bool Equals(ReadOnlyMemory<byte> x, ReadOnlyMemory<byte> y) => x.Span.SequenceEqual(y.Span);
-
-    public int GetHashCode(ReadOnlyMemory<byte> obj)
-    {
-        var span = obj.Span;
-        unchecked
-        {
-            int h = 17;
-            for (int i = 0; i < span.Length; i++) h = h * 31 + span[i];
-            return h;
-        }
     }
 }

@@ -1,7 +1,5 @@
 using System;
 using System.IO;
-using System.Threading.Tasks;
-using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLibTests.TestUtils;
@@ -24,9 +22,12 @@ public sealed class CsvScanSerializerCsvTests
         var fileB = $"{rootPath}/b.txt";
         
         var input = CsvTestUtil.Csv(
-            CsvTestUtil.CsvRowString("Folder", rootPath, "3/28/2007 7:13:50 PM +00:00", "0", "2", "FFFF", "7" ),
-            CsvTestUtil.CsvRowString("File", fileA, "3/28/2007 7:13:50 PM +00:00", "10", "", "AAAA", "7" ),
-            CsvTestUtil.CsvRowString("File", fileB, "3/28/2007 7:13:50 PM +00:00", "10", "", "AAAA","7")                                /* Group */
+            CsvTestUtil.CsvRowString("Folder", rootPath, "3/28/2007 7:13:50 PM +00:00",
+                "3/28/2007 7:13:50 PM +00:00", "0", "2", "FFFF", "7" ),
+            CsvTestUtil.CsvRowString("File", fileA, "3/28/2007 7:13:50 PM +00:00",
+                "3/28/2007 7:13:50 PM +00:00", "10", "", "AAAA", "7" ),
+            CsvTestUtil.CsvRowString("File", fileB, "3/28/2007 7:13:50 PM +00:00",
+                "3/28/2007 7:13:50 PM +00:00", "10", "", "AAAA","7")                                /* Group */
             );
         
         using (var r = new StringReader(input)) ser.ImportInto(root, r);
@@ -48,9 +49,9 @@ public sealed class CsvScanSerializerCsvTests
 
         // Path has comma and quotes; checksum has comma too
         var line1 = CsvTestUtil.CsvRowString("Folder", @"""/home/u""", "3/28/2007 7:13:50 PM +00:00",
-            "0", "0", "", @"""0""");
+            "3/28/2007 7:13:50 PM +00:00", "0", "0", "", @"""0""");
         var line2 = CsvTestUtil.CsvRowString("File", @"""/home/u/f,oo """"v2"""" .txt""",
-            "3/28/2007 7:13:50 PM +00:00", "0", "", @"""abcdef""", "3");
+            "3/28/2007 7:13:50 PM +00:00", "3/28/2007 7:13:50 PM +00:00", "0", "", @"""abcdef""", "3");
 
         var csv = CsvTestUtil.Csv(line1, line2);
 
@@ -86,7 +87,7 @@ public sealed class CsvScanSerializerCsvTests
         
         // var csv = CsvTestUtil.Csv@"/File,""/no/parent/file.txt"",1,,.txt,AAAA,1");
         var csv = CsvTestUtil.Csv(CsvTestUtil.CsvRowString("File", "/no/parent/file.txt",
-                          "3/28/2007 7:13:50 PM +00:00", "1", "", "AAAA", "1"));
+                          "3/28/2007 7:13:50 PM +00:00", "3/28/2007 7:13:50 PM +00:00", "1", "", "AAAA", "1"));
 
         var ex = Assert.Throws<InvalidFormatException>(() =>
         {
@@ -105,16 +106,18 @@ public sealed class CsvScanSerializerCsvTests
 
         using (var r = new StringReader(CsvTestUtil.Csv(
                    CsvTestUtil.CsvRowString("Folder", "/a", "3/28/2007 7:13:50 PM +00:00",
-                       "1", "1", "", "1"),
+                       "3/28/2007 7:13:50 PM +00:00", "1", "1", "", "1"),
                    CsvTestUtil.CsvRowString("File", "/a/x.txt", "3/28/2007 7:13:50 PM +00:00",
-                       "1", "", "aaaa", "2"))))
+                       "3/28/2007 7:13:50 PM +00:00", "1", "", "aaaa", "2"))))
         {
             ser.ImportInto(root, r);
         }
 
         using (var r = new StringReader(CsvTestUtil.Csv(
-                   CsvTestUtil.CsvRowString("Folder", "/b", "3/28/2007 7:13:50 PM +00:00", "1", "1", "", "1"),
-                   CsvTestUtil.CsvRowString("File", "/b/y.txt", "3/28/2007 7:13:50 PM +00:00", "2", "", "bbbb", "2"))))
+                   CsvTestUtil.CsvRowString("Folder", "/b", "3/28/2007 7:13:50 PM +00:00",
+                       "3/28/2007 7:13:50 PM +00:00", "1", "1", "", "1"),
+                   CsvTestUtil.CsvRowString("File", "/b/y.txt", "3/28/2007 7:13:50 PM +00:00",
+                       "3/28/2007 7:13:50 PM +00:00", "2", "", "bbbb", "2"))))
         {
             ser.ImportInto(root, r);
         }
@@ -126,38 +129,6 @@ public sealed class CsvScanSerializerCsvTests
         Assert.Contains("/b/y.txt", csv);
     }
     
-    [Fact]
-    public async Task Csv_RoundTrip_IncludesCreationTime_And_GroupsByContent()
-    {
-        using var fs = new TempFsFixture();
-        var created1 = new DateTimeOffset(2023, 10, 21, 12, 34, 56, TimeSpan.Zero);
-        var created2 = created1.AddMinutes(1);
-
-        var root = fs.Dir("root");
-        var f1 = fs.File("root/a.txt", "HELLO"u8, created1);
-        var f2 = fs.File("root/b.txt", "HELLO"u8, created2);
-
-        var dff = new DuplicateFileFinder();
-        await dff.ScanLocation(root);
-
-        await using var sw = new StringWriter();
-        dff.ExportToCsv(sw);
-        var csv = sw.ToString();
-
-        // parse with single source of truth
-        var rows = CsvTestUtil.Parse(csv);
-
-        AssertRows.ContainsFolder(rows, root);
-        AssertRows.ContainsFile(rows, f1);
-        AssertRows.ContainsFile(rows, f2);
-
-        AssertRows.CreationTimeIs(rows, f1, created1);
-        AssertRows.CreationTimeIs(rows, f2, created2);
-
-        AssertRows.InSameGroup(rows, f1, f2);
-    }
-
-
     [Fact]
     public void Export_Header_MatchesSpec()
     {

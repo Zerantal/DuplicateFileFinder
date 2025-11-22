@@ -42,7 +42,7 @@ public sealed class FileNodeTests : IDisposable
         Assert.Equal(filePath, node.Path);
         Assert.Equal(123, node.Size);
         Assert.Equal(-1, node.Group);
-        Assert.Equal(createTime, node.CreationTime);
+        Assert.Equal(createTime, node.CreationTimeUtc);
         Assert.True(string.IsNullOrEmpty(node.ChecksumHex));
     }
 
@@ -107,7 +107,7 @@ public sealed class FileNodeTests : IDisposable
         Assert.Equal(string.Empty, node.ChecksumHex);
     }
 
-    private class TestFileNode(string path, long size, DateTimeOffset creationTime) : FileNode(path, size, creationTime)
+    private class TestFileNode(string path, long size, DateTimeOffset creationTimeUtc) : FileNode(path, size, creationTimeUtc)
     {
         public void SetChecksum(String checksum)
         {

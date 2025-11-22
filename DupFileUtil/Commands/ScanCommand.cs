@@ -25,13 +25,13 @@ internal class ScanCommand : ICommand
 
     public async Task ExecuteAsync()
     {
-        DuplicateFileFinder dupFileFinder = new();
+        DuplicateFileFinder dupFileFinder = new(null!);
         Debug.Assert(Directories != null, nameof(Directories) + " != null");
 
         // scan
         _progressBar.BlockCount = 20;
         var progressIndicator = new Progress<DuplicateFileFinderProgressReport>(_progressBar.PrintProgress);
-        foreach (var d in Directories) await dupFileFinder.ScanLocation(d, progressIndicator);
+        foreach (var d in Directories) await dupFileFinder.ScanLocationAsync(d, progressIndicator);
 
         // output csv file
         Debug.Assert(OutputFilename != null, nameof(OutputFilename) + " != null");

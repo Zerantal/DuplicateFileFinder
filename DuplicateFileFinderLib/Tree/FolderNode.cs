@@ -4,9 +4,12 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Tree;
 
-public class FolderNode(string path, DateTimeOffset creationTime = default) : FileSystemNode(path, creationTime)
+public class FolderNode(
+    string path, 
+    DateTimeOffset creationTimeUtc = default,
+    DateTimeOffset modifiedTimeUtc = default) : FileSystemNode(path, creationTimeUtc, modifiedTimeUtc)
 {
-    internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path, rowInfo.CreationTime)
+    internal FolderNode(CsvRowData rowInfo) : this(rowInfo.Path, rowInfo.CreationTimeUtc, rowInfo.ModifiedTimeUtc)
     {
         Size = rowInfo.Size;
         AggregateFileCount = rowInfo.FileCount;
@@ -32,7 +35,7 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
         // files
         foreach (var f in Files)
         {
-            var nf = new FileNode(f.Path, f.Size, f.CreationTime)
+            var nf = new FileNode(f.Path, f.Size, f.CreationTimeUtc, f.ModifiedTimeUtc)
             {
                 Group = f.Group,
                 ChecksumBytes = f.ChecksumBytes is { Length: > 0 } fb ? (byte[])fb.Clone() : null
@@ -79,7 +82,8 @@ public class FolderNode(string path, DateTimeOffset creationTime = default) : Fi
         var fields = new string[CsvScanSerializer.FieldMap.Count];
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Kind, nameof(KindEnum.Folder));
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Path, $@"""{Path}""");
-        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTime, CreationTime.ToString());
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.CreationTimeUtc, CreationTimeUtc.ToString());
+        CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.ModifiedTimeUtc, ModifiedTimeUtc.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Size, Size.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.FileCount, AggregateFileCount.ToString());
         CsvScanSerializer.SetField(fields, CsvScanSerializer.CsvFields.Checksum, ChecksumHex);

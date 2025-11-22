@@ -3,12 +3,20 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Models;
 
 [MemoryPackable]
-public partial record FileRecord(
-    Guid Id,
-    Guid DirId,
-    string Name,
-    long Size,
-    byte[] Hash,
-    DateTimeOffset Modified,
-    DateTimeOffset Created,
-    int ScanId);
+public partial record FileRecord
+{
+    [MemoryPackOrder(0)] public required Guid Id { get; init; }
+    [MemoryPackOrder(1)] public required Guid DirId { get; init; }
+    [MemoryPackOrder(2)] public required string Name { get; init; }
+    [MemoryPackOrder(3)] public long Size { get; init; }
+    [MemoryPackOrder(4)] public HashKey Hash { get; init; }
+    [MemoryPackOrder(5)] public DateTimeOffset Modified { get; init; }
+    [MemoryPackOrder(6)] public DateTimeOffset Created { get; init; }
+    [MemoryPackOrder(7)] public required long LastSeenScanSequence { get; init; }
+    [MemoryPackOrder(8)] public required ScanEntryStatus Status { get; init; }
+    [MemoryPackOrder(9)] public string? ErrorMessage { get; init; }
+
+    // Future enhancement? enable detecting moves without rescanning
+    // public ulong? Inode { get; init; } // or FileId on Windows
+    // public ulong? DeviceId { get; init; }
+}

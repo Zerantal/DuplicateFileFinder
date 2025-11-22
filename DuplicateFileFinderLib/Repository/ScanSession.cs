@@ -1,163 +1,344 @@
-// DuplicateFileFinderLib/Repo/ScanSession.cs
+// DuplicateFileFinderLib/Repository/ScanSession.cs
 
-using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using DuplicateFileFinderLib.Repository.Models;
-using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository;
 
-/// <summary>
-/// Collects new/updated nodes for a single scan and emits a RepoDelta in one commit.
-/// Deterministic IDs: DirId = GUID(md5(normalizedDirPath)); FileId = GUID(md5(normalizedFullPath)).
-/// This makes upserts idempotent: later scans overwrite by key.
-/// </summary>
-public sealed class ScanSession : IDisposable
+public sealed class ScanSession : IAsyncDisposable, IScanSession
 {
     private readonly Repo _repo;
-    private readonly int _scanId;
-    private readonly string _rootPathNorm;
+    private readonly int _maxFilesBeforeFlush;
+    private readonly int _maxDirsBeforeFlush;
 
-    // Buffers for this session
-    private readonly Dictionary<Guid, DirRecord> _dirBuffer = new();
-    private readonly Dictionary<Guid, FileRecord> _fileBuffer = new();
+    private readonly Lock _bufferLock = new();
+    private readonly SemaphoreSlim _flushGate = new(1, 1);
 
-    // Cache to avoid rebuilding parent chains repeatedly
-    private readonly ConcurrentDictionary<string, Guid> _dirIdCache = new(StringComparer.Ordinal);
-
-    // Thresholds for opportunistic flush into a delta file
-    private readonly int _fileFlushThreshold;
-    private readonly int _dirFlushThreshold;
-
-    private bool _disposed;
-
-    public ScanSession(Repo repo, int scanId, string rootPath, int fileFlushThreshold = 50_000, int dirFlushThreshold = 10_000)
+    // Session-local view of all directories (both from repo snapshot and created during this scan)
+    private readonly Dictionary<Guid, DirRecord> _dirsById;
+    
+    // Normalized full path -> DirId
+    private readonly Dictionary<string, Guid> _dirPathIndex;
+    private readonly StringComparer _pathComparer;
+    
+    // Buffered records for the next RepoDelta
+    private readonly List<DirRecord> _pendingDirs = new();
+    private readonly List<FileRecord> _pendingFiles = new();
+    
+    private bool _finished;
+    
+    public ScanSession(
+        Repo repo,
+        ScanRun run,
+        IReadOnlyDictionary<Guid, DirRecord> existingDirsInRepo,
+        int maxFilesBeforeFlush = 10_000,
+        int maxDirsBeforeFlush  = 1_000)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _scanId = scanId;
-        _rootPathNorm = PathUtils.NormalizePath(rootPath);
+        _repo = repo;
+        Run = run;
 
-        _fileFlushThreshold = fileFlushThreshold;
-        _dirFlushThreshold = dirFlushThreshold;
+        _maxFilesBeforeFlush = maxFilesBeforeFlush;
+        _maxDirsBeforeFlush = maxDirsBeforeFlush;
 
-        // Ensure the root directory node exists in this session
-        var rootDirId = EnsureDir(_rootPathNorm);
-        _ = rootDirId;
+        _pathComparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+
+        _dirsById      = new Dictionary<Guid, DirRecord>(existingDirsInRepo.Count);
+        _dirPathIndex = new Dictionary<string, Guid>(_pathComparer);
+
+        // Seed session dirs and path index from repo snapshot
+        foreach (var (id, dir) in existingDirsInRepo)
+    {
+            _dirsById[id] = dir;
+
+            var fullPath   = _repo.GetFullDirPath(id);
+            var normalized = NormalizePath(fullPath);
+            _dirPathIndex[normalized] = id;
     }
-
-    /// <summary>
-    /// Add or update a directory by absolute path. Creates ancestors on demand.
-    /// Returns the deterministic DirId.
-    /// </summary>
-    public Guid EnsureDir(string dirPath)
-    {
-        dirPath = PathUtils.NormalizePath(dirPath);
-
-        if (_dirIdCache.TryGetValue(dirPath, out var cached))
-            return cached;
-
-        // Build parents from root to leaf
-        var parts = PathUtils.SplitPath(dirPath);
-        var acc = new List<string>(parts.Count);
-        Guid? parent = null;
-        for (int i = 0; i < parts.Count; i++)
-        {
-            acc.Add(parts[i]);
-            var curPath = "/" + string.Join(Path.DirectorySeparatorChar, acc);
-            if (!_dirIdCache.TryGetValue(curPath, out var id))
-            {
-                id = StableGuid(curPath);
-                var name = parts[i];
-                var parentId = parent;
-                var dir = new DirRecord(id, parentId, name);
-                _dirBuffer[id] = dir;               // upsert
-                _dirIdCache[curPath] = id;
-            }
-            parent = _dirIdCache[curPath];
         }
-        return _dirIdCache[dirPath];
+    
+    public ScanRun Run { get; }
+
+    public long ScanSequence => Run.ScanSequence;
+    public string RootPath => Run.RootPath;
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            // Best-effort drain; explicit Complete/Fail are the durable paths
+            await FlushProgressAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // swallow in Dispose
+        }
+
+        if (!_finished)
+            _repo.MarkScanFailed(ScanSequence, "ScanSession disposed before completion.", cancelled: true);
     }
+
+    // ---------------------------------------------------------------------
+    // Path helpers
+    // ---------------------------------------------------------------------
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path is null or empty", nameof(path));
+
+        var full = Path.GetFullPath(path);
+        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    // ---------------------------------------------------------------------
+    // Directory observation (path-based)
+    // ---------------------------------------------------------------------
 
     /// <summary>
-    /// Upsert a file by absolute path.
+    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.Id.
+    /// Creates any missing parents as dummy dirs (Status=None), and the leaf with the
+    /// requested <paramref name="status"/>.
+    /// Returns the DirId.
     /// </summary>
-    public void UpsertFile(string fullPath,
-                           long size,
-                           ReadOnlySpan<byte> hash,
-                           DateTimeOffset modified,
-                           DateTimeOffset created)
+ public Guid ObserveDirectory(
+    string fullPath,
+    ScanEntryStatus status,
+    string? errorMessage = null)
+{
+    if (string.IsNullOrWhiteSpace(fullPath))
+        throw new ArgumentException("Path is null or empty", nameof(fullPath));
+
+    fullPath = NormalizePath(fullPath);
+
+        var shouldFlush = false;
+
+        // Fast path: we already know this path (from repo or this session)
+    if (_dirPathIndex.TryGetValue(fullPath, out var existingId))
     {
-        var normPath = PathUtils.NormalizePath(fullPath);
-        var dirPath  = Path.GetDirectoryName(normPath) ?? _rootPathNorm;
-        var name     = Path.GetFileName(normPath);
+        UpdateExistingDir(existingId, status, errorMessage, ref shouldFlush);
 
-        var dirId = EnsureDir(dirPath);
-        var fileId = StableGuid(normPath);
+        if (shouldFlush)
+            _ = FlushProgressAsync();
 
-        // Copy hash to small array
-        var hashCopy = new byte[hash.Length];
-        hash.CopyTo(hashCopy);
-
-        var fr = new FileRecord(
-            Id:        fileId,
-            DirId:     dirId,
-            Name:      name,
-            Size:      size,
-            Hash:      hashCopy,
-            Modified:  modified,
-            Created:   created,
-            ScanId:    _scanId
-        );
-
-        _fileBuffer[fileId] = fr; // upsert
-
-        // Opportunistic flush if buffers are large
-        if (_fileBuffer.Count >= _fileFlushThreshold || _dirBuffer.Count >= _dirFlushThreshold)
-            FlushDelta();
+        return existingId;
     }
 
-    /// <summary>
-    /// Writes remaining buffered changes as a single delta and clears buffers.
-    /// Safe to call multiple times.
-    /// </summary>
-    public void FlushDelta()
+        // Build the chain of unknown paths from leaf up to the first known ancestor
+    var toCreate = new Stack<string>();
+    var current  = fullPath;
+
+    while (true)
     {
-        if (_fileBuffer.Count == 0 && _dirBuffer.Count == 0) return;
+        if (_dirPathIndex.ContainsKey(current))
+            break;
 
-        var delta = new RepoDelta(
-            Files: _fileBuffer.Values.ToList(),
-            Dirs:  _dirBuffer.Values.ToList()
-        );
+        toCreate.Push(current);
 
-        _repo.CommitDelta(delta);
+        var parentPath = Path.GetDirectoryName(current);
+        if (string.IsNullOrEmpty(parentPath) || _pathComparer.Equals(parentPath, current))
+            break;
 
-        _fileBuffer.Clear();
-        _dirBuffer.Clear();
+        current = NormalizePath(parentPath);
     }
 
-    /// <summary>
-    /// Flush and dispose.
-    /// </summary>
-    public void Commit()
+    Guid? parentId = null;
+
+    // If we stopped because we hit a known parent, remember its Id
+    if (_dirPathIndex.TryGetValue(current, out var knownParentId))
+        parentId = knownParentId;
+
+        // Create missing parents and the leaf
+    while (toCreate.Count > 0)
     {
-        FlushDelta();
+        var path = toCreate.Pop();
+        var name = Path.GetFileName(path);
+        if (string.IsNullOrEmpty(name))
+        {
+            // Root cases like "C:\" or "/"
+            name = path;
+        }
+
+        var isLeaf = _pathComparer.Equals(path, fullPath);
+        var dirStatus = isLeaf ? status : ScanEntryStatus.None;
+        var dirError  = isLeaf ? errorMessage : null;
+
+        var id = Guid.NewGuid();
+
+        var dir = new DirRecord
+        {
+            Id               = id,
+            ParentId         = parentId,
+            Name             = name,
+            LastSeenSequence = ScanSequence,
+            Status           = dirStatus,
+            ErrorMessage     = dirError
+        };
+
+        parentId = id;
+
+            _dirsById[id] = dir;
+
+        lock (_bufferLock)
+        {
+            _pendingDirs.Add(dir);
+            _dirPathIndex[path] = id;
+
+            if (_pendingDirs.Count >= _maxDirsBeforeFlush)
+                shouldFlush = true;
+        }
     }
 
-    public void Dispose()
+    var leafId = parentId!.Value;
+
+    if (shouldFlush)
+        _ = FlushProgressAsync();
+
+    return leafId;
+}
+
+    private void UpdateExistingDir(Guid id, ScanEntryStatus status, string? errorMessage, ref bool shouldFlush)
     {
-        if (_disposed) return;
-        try { Commit(); }
-        finally { _disposed = true; }
+        if (!_dirsById.TryGetValue(id, out var existing))
+            return;
+
+        var newStatus = status == ScanEntryStatus.None
+            ? existing.Status
+            : existing.Status | status;
+
+        var updated = existing with
+        {
+            LastSeenSequence = ScanSequence,
+            Status           = newStatus,
+            ErrorMessage     = errorMessage ?? existing.ErrorMessage
+        };
+
+        // Always update LastSeenSequence even if status didn't change
+        _dirsById[id] = updated;
+
+        lock (_bufferLock)
+        {
+            _pendingDirs.Add(updated);
+
+            if (_pendingDirs.Count >= _maxDirsBeforeFlush)
+                shouldFlush = true;
+        }
     }
 
-    // ---------- helpers ----------
+    // ---------------------------------------------------------------------
+    // File observation (path-based)
+    // ---------------------------------------------------------------------
 
-    private static Guid StableGuid(string input)
+    public void ObserveFile(
+        string fullFilePath,
+        long size,
+        HashKey hash,
+        DateTimeOffset modified,
+        DateTimeOffset created,
+        ScanEntryStatus status,
+        string? errorMessage = null)
     {
-        // MD5 bytes → GUID. Stable across runs. Not for security.
-        Span<byte> md5 = stackalloc byte[16];
-        MD5.HashData(Encoding.UTF8.GetBytes(input), md5);
-        return new Guid(md5);
+        if (string.IsNullOrWhiteSpace(fullFilePath))
+            throw new ArgumentException("File path is null or empty", nameof(fullFilePath));
+
+        fullFilePath = NormalizePath(fullFilePath);
+
+        var dirPath = Path.GetDirectoryName(fullFilePath);
+        if (string.IsNullOrEmpty(dirPath))
+            dirPath = RootPath;
+
+        // Ensure directory chain exists and leaf dir is at least Enumerated
+        var dirId = ObserveDirectory(dirPath, ScanEntryStatus.Enumerated);
+        var name  = Path.GetFileName(fullFilePath);
+
+        var file = new FileRecord
+        {
+            Id                  = Guid.NewGuid(),
+            DirId               = dirId,
+            Name                = name,
+            Size                = size,
+            Hash                = hash,
+            Modified            = modified,
+            Created             = created,
+            LastSeenScanSequence = ScanSequence,
+            Status              = status,
+            ErrorMessage        = errorMessage
+        };
+
+        var shouldFlush = false;
+
+        lock (_bufferLock)
+        {
+            _pendingFiles.Add(file);
+            if (_pendingFiles.Count >= _maxFilesBeforeFlush)
+                shouldFlush = true;
+        }
+
+        if (shouldFlush)
+            _ = FlushProgressAsync();
+    }
+
+    // ---------------------------------------------------------------------
+    // Flush
+    // ---------------------------------------------------------------------
+
+    public Task FlushProgressAsync(CancellationToken cancellationToken = default) =>
+        FlushProgressInternalAsync(cancellationToken);
+
+    private async Task FlushProgressInternalAsync(CancellationToken cancellationToken)
+    {
+        await _flushGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            List<DirRecord>  dirsToFlush;
+            List<FileRecord> filesToFlush;
+
+            lock (_bufferLock)
+            {
+                if (_pendingDirs.Count == 0 && _pendingFiles.Count == 0)
+                    return;
+
+                dirsToFlush  = new List<DirRecord>(_pendingDirs);
+                filesToFlush = new List<FileRecord>(_pendingFiles);
+
+                _pendingDirs.Clear();
+                _pendingFiles.Clear();
+            }
+
+            var delta = new RepoDelta
+            {
+                ScanSequence = ScanSequence,
+                Dirs         = dirsToFlush,
+                Files        = filesToFlush,
+                DeletedDirs  = new List<DirTombstone>(),
+                DeletedFiles = new List<FileTombstone>()
+            };
+
+            await _repo.CommitDeltaAsync(delta, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _flushGate.Release();
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Completion / failure
+    // ---------------------------------------------------------------------
+
+    public async Task CompleteAsync(CancellationToken cancellationToken = default)
+    {
+        await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
+
+        _repo.CompleteScanForRoot(ScanSequence, Run.RootPath);
+        _finished = true;
+    }
+
+    public async Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
+    {
+        await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
+
+        _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
+        _finished = true;
     }
 }

@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Threading.Channels;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Tree;
 
 namespace DuplicateFileFinderLib.Grouping;
@@ -9,17 +10,17 @@ namespace DuplicateFileFinderLib.Grouping;
 public interface IChecksumPipeline
 {
     Task ComputeAsync(FolderNode scope,
-        Func<FileNode, bool> shouldHash,
-        Action<int, string>? onProgress,
-        CancellationToken ct);
+        Func<FileNode, bool> predicate,
+        Action<FileNode> onFileHashed,
+        CancellationToken token);
 }
 
 public sealed class ChecksumPipeline : IChecksumPipeline
 {
     public async Task ComputeAsync(FolderNode scope,
-        Func<FileNode, bool> shouldHash,
-        Action<int, string>? onProgress,
-        CancellationToken ct)
+        Func<FileNode, bool> predicate,
+        Action<FileNode>? onFileHashed,
+        CancellationToken token)
     {
         var timer = Stopwatch.StartNew();
         var ch = Channel.CreateBounded<FileNode>(4000);
@@ -30,26 +31,27 @@ public sealed class ChecksumPipeline : IChecksumPipeline
         for (var i = 0; i < workers.Length; i++)
             workers[i] = Task.Run(async () =>
             {
-                while (await ch.Reader.WaitToReadAsync(ct))
+                while (await ch.Reader.WaitToReadAsync(token))
                 while (ch.Reader.TryRead(out var file))
                 {
-                    ct.ThrowIfCancellationRequested();
-                    await file.ComputeChecksum(ct);
+                    token.ThrowIfCancellationRequested();
+                    await file.ComputeChecksum(token);
                     
+                    TimingLog.Counter("AggregateSize", file.Size);
                     Interlocked.Increment(ref processed);
-                    onProgress?.Invoke(processed, file.Path);
+                    onFileHashed?.Invoke(file);
                 }
-            }, ct);
+            }, token);
 
         // producer + progress
         await scope.TraverseFolders(async folder =>
         {
             foreach (var f in folder.Files)
             {
-                ct.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
 
-                if (shouldHash(f))
-                    await ch.Writer.WriteAsync(f, ct);
+                if (predicate(f))
+                    await ch.Writer.WriteAsync(f, token);
             }
         });
 
@@ -59,10 +61,10 @@ public sealed class ChecksumPipeline : IChecksumPipeline
         // compute folder checksums upward
         await scope.TraverseFolders(up: f =>
         {
-            ct.ThrowIfCancellationRequested();
-            if (f.ChecksumBytes == null) f.ComputeChecksum(ct);
+            token.ThrowIfCancellationRequested();
+            if (f.ChecksumBytes == null) f.ComputeChecksum(token);
             return Task.CompletedTask;
-        }).WaitAsync(ct);
+        }).WaitAsync(token);
 
         timer.Stop();
     }

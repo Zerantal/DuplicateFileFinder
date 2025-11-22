@@ -1,0 +1,135 @@
+<!-- Views/DuplicatesView.axaml -->
+<UserControl
+    x:Class="DuplicateFileFinder.Gui.Views.DuplicatesView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:dgrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
+    xmlns:vm="using:DuplicateFileFinder.Gui.ViewModels"
+    xmlns:models="using:DuplicateFileFinder.Gui.Models"
+    xmlns:controls="clr-namespace:DuplicateFileFinder.Gui.Controls"
+    mc:Ignorable="d"
+    x:DataType="vm:DuplicatesViewModel">
+
+    <UserControl.Styles>
+        <StyleInclude Source="DuplicatesViewStyles.axaml" />
+    </UserControl.Styles>
+
+    <!-- Row0: filters; Row1/2: tree + grids -->
+    <Grid RowDefinitions="Auto,2*,*"
+          ColumnDefinitions="2*,5*">
+
+
+        <!-- LEFT: folder tree, spans both grids vertically -->
+        <TreeView Grid.Row="1"
+                  Grid.RowSpan="2"
+                  Grid.Column="0"
+                  ItemsSource="{Binding FolderRoots}"
+                  SelectionChanged="OnFolderSelected"
+                  SelectionMode="Single">
+            <TreeView.ItemTemplate>
+                <TreeDataTemplate DataType="vm:FolderNodeViewModel"
+                                  ItemsSource="{Binding Children}">
+                    <TextBlock Text="{Binding DisplayName}" />
+                </TreeDataTemplate>
+            </TreeView.ItemTemplate>
+        </TreeView>
+
+        <!-- RIGHT (top): duplicate sets (VIRTUALIZED via ItemsRepeater) -->
+        <Border Grid.Row="1"
+                Grid.Column="1"
+                BorderBrush="Gray"
+                BorderThickness="1">
+            <DockPanel>
+
+                <!-- Header row -->
+                <Border DockPanel.Dock="Top" Background="#333" Padding="4">
+                    <Grid ColumnDefinitions="2*,80,140">
+                        <TextBlock Text="Name"
+                                   Grid.Column="0"
+                                   FontWeight="Bold"
+                                   Foreground="White" />
+                        <TextBlock Text="Files"
+                                   Grid.Column="1"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Right"
+                                   Foreground="White" />
+                        <TextBlock Text="Total Size"
+                                   Grid.Column="2"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Right"
+                                   Foreground="White" />
+                    </Grid>
+                </Border>
+
+                <!-- Virtualized rows -->
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsRepeater ItemsSource="{Binding FilteredSets}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Orientation="Vertical"
+                                         DisableVirtualization="False" />
+                        </ItemsRepeater.Layout>
+
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="models:DuplicateSetRow" x:CompileBindings="True">
+                                <controls:SelectableBorder Padding="4,0"
+                                                           BorderBrush="#444"
+                                                           BorderThickness="0,0,0,1"
+                                                           IsSelected="{Binding IsSelected}"
+                                                           PointerPressed="OnDuplicateSetPointerPressed">
+
+                                    <controls:SelectableBorder.Styles>
+                                        <!-- default background -->
+                                        <Style Selector="controls|SelectableBorder">
+                                            <Setter Property="Background" Value="Transparent" />
+                                        </Style>
+
+                                        <!-- highlighted when selected -->
+                                        <Style Selector="controls|SelectableBorder[IsSelected=True]">
+                                            <Setter Property="Background" Value="#3D6FB3" />
+                                        </Style>
+                                    </controls:SelectableBorder.Styles>
+
+                                    <Grid ColumnDefinitions="2*,80,140">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding RepresentativeName}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Count}"
+                                                   HorizontalAlignment="Right" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}"
+                                                   HorizontalAlignment="Right" />
+                                    </Grid>
+                                </controls:SelectableBorder>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </ScrollViewer>
+
+            </DockPanel>
+        </Border>
+
+        <!-- RIGHT (bottom): files in selected set -->
+        <dgrid:DataGrid Grid.Row="2"
+                        Grid.Column="1"
+                        ItemsSource="{Binding SelectedItems}"
+                        IsReadOnly="True"
+                        AutoGenerateColumns="False"
+                        HeadersVisibility="Column"
+                        Margin="0,6,0,0">
+            <dgrid:DataGrid.Columns>
+                <dgrid:DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                <dgrid:DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*" />
+                <dgrid:DataGridTextColumn Header="Size"
+                                          Binding="{Binding Size, Converter={StaticResource BytesToHuman}}" Width="120" />
+                <dgrid:DataGridTextColumn Header="Modified"
+                                          Binding="{Binding Modified, StringFormat=g}"
+                                          Width="180" />
+            </dgrid:DataGrid.Columns>
+        </dgrid:DataGrid>
+
+    </Grid>
+</UserControl>

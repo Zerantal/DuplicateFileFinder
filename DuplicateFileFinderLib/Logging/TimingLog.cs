@@ -11,92 +11,94 @@ public sealed class TimingLog : IDisposable
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
-    private static readonly AsyncLocal<PhaseContext?> CurrentPhase = new();
-    private readonly string? _detail;
-
-    private readonly string _operation;
-    private readonly Stopwatch _sw;
-
-    private TimingLog(string operation, string? detail, bool asPhase)
+    // One stack per async flow. Top = current scope.
+    private static readonly AsyncLocal<Stack<PhaseContext>?> ScopeStack = new();
+    
+    // global dictionary of counter formatters
+    private static ConcurrentDictionary<string, Func<long, string>> CounterFormatter { get; } = new();
+    
+    private TimingLog(string operation, string? detail)
     {
-        _operation = operation;
-        _detail = detail;
+        var stack = ScopeStack.Value ??= new Stack<PhaseContext>(4);
+        var ctx = new PhaseContext(operation, detail);
+        stack.Push(ctx);
 
-        if (asPhase)
-        {
-            // New phase scope; nested phases overwrite AsyncLocal for this flow.
-            var ctx = new PhaseContext(operation, detail);
-            CurrentPhase.Value = ctx;
-            _sw = ctx.Sw; // share the stopwatch
-            Log.Debug("Started {operation}{detail}", _operation, FormatDetail(detail));
-        }
+        if (detail is null)
+            Log.Debug("Started {operation}", operation);
+
         else
         {
-            _sw = Stopwatch.StartNew();
-            Log.Debug("Started {operation}{detail}", _operation, FormatDetail(detail));
+            Log.Debug("Started {operation} ({detail})", operation, detail);
         }
     }
 
     public void Dispose()
     {
-        _sw.Stop();
+        var stack = ScopeStack.Value;
+        if (stack is null || stack.Count == 0) return;
 
-        // If this scope owns the phase context, emit counters with the timing.
-        var ctx = CurrentPhase.Value;
-        if (ctx != null && ReferenceEquals(ctx.Sw, _sw))
-        {
-            var sb = new StringBuilder();
-            if (!ctx.Counters.IsEmpty)
-                foreach (var kv in ctx.Counters.OrderBy(k => k.Key))
-                    sb.Append(' ').Append(kv.Key).Append('=').Append(kv.Value);
+        var ctx = stack.Pop();
+        ctx.Sw.Stop();
 
-            Log.Info("Completed {operation}{detail} in {elapsedMs:N0} ms{counters}",
-                _operation,
-                FormatDetail(_detail),
-                _sw.Elapsed.TotalMilliseconds,
-                sb.Length == 0 ? "" : sb.ToString());
-
-            // Clear the phase for this async flow
-            CurrentPhase.Value = null;
-        }
+        var counters = BuildCounters(ctx.Counters);
+        if (ctx.Detail is null)
+            Log.Info("Completed {operation} in {elapsedMs:N0} ms{counters}",
+                ctx.Operation, ctx.Sw.Elapsed.TotalMilliseconds, counters);
         else
-        {
-            Log.Info("Completed {operation}{detail} in {elapsedMs:N0} ms",
-                _operation,
-                FormatDetail(_detail),
-                _sw.Elapsed.TotalMilliseconds);
-        }
-    }
+            Log.Info("Completed {operation} ({detail}) in {elapsedMs:N0} ms{counters}",
+                ctx.Operation, ctx.Detail, ctx.Sw.Elapsed.TotalMilliseconds, counters);
 
-    private static string FormatDetail(string? d)
-    {
-        return string.IsNullOrEmpty(d) ? "" : $" ({d})";
+        // If the stack is empty, clear it so downstream awaits don’t hold onto objects.
+        if (stack.Count == 0) ScopeStack.Value = null;
     }
+        
 
     /// <summary>Starts timing for an arbitrary operation. Use in a using-block.</summary>
     public static TimingLog Start(string operation, string? detail = null)
-    {
-        return new TimingLog(operation, detail, false);
-    }
+        => new(operation, Normalize(detail));
 
     /// <summary>Starts a "phase" timing scope that can collect counters via TimingLog.Counter(...).</summary>
     public static TimingLog StartPhase(string phaseName, string? detail = null)
-    {
-        return new TimingLog(phaseName, detail, true);
-    }
+        => new(phaseName, Normalize(detail));
+    
 
     /// <summary>Convenience for enum phases.</summary>
     public static TimingLog StartPhase(Enum phase, string? detail = null)
-    {
-        return StartPhase(phase.ToString(), detail);
-    }
+        => StartPhase(phase.ToString(), detail);
 
     /// <summary>Increment a named counter in the current phase.</summary>
     public static void Counter(string name, long delta = 1)
     {
-        var ctx = CurrentPhase.Value;
-        if (ctx is null) return; // no active phase
+        var stack = ScopeStack.Value;
+        if (stack is null || stack.Count == 0) return;
+        var ctx = stack.Peek();
         ctx.Counters.AddOrUpdate(name, delta, (_, v) => v + delta);
+    }
+
+    public static void AddCounterFormatter(string name, Func<long, string> formatter)
+    {
+        CounterFormatter[name] = formatter;
+    }
+    
+    // ---- helpers ----
+
+    private static string? Normalize(string? d) => string.IsNullOrWhiteSpace(d) ? null : d;
+
+    private static string BuildCounters(ConcurrentDictionary<string, long> counters)
+    {
+        if (counters.IsEmpty) return string.Empty;
+        var sb = new StringBuilder();
+        foreach (var kv in counters.OrderBy(k => k.Key))
+        {
+            string value;
+            if (CounterFormatter.TryGetValue(kv.Key, out var formatter))
+                value =  formatter(kv.Value);
+            else
+                value = kv.Value.ToString();
+            sb.Append(' ').Append(kv.Key).Append('=').Append(value);
+        }
+            
+        return sb.ToString();
     }
 
     // Holds per-async-flow phase context (name + counters)
