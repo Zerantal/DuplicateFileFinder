@@ -182,7 +182,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
                 LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed,
+                Status = ScanEntryStatus.Hashed,
                 ErrorMessage = null
             };
 
@@ -578,7 +578,7 @@ namespace DuplicateFileFinderLibTests.Repository
                     Modified = DateTimeOffset.UtcNow,
                     Created = DateTimeOffset.UtcNow,
                     LastSeenScanSequence = 1,
-                    Status = ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed,
+                    Status = ScanEntryStatus.Hashed,
                     ErrorMessage = null
                 };
 

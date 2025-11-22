@@ -70,7 +70,7 @@ public sealed class RepoDeltaTests
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
                 LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed,
+                Status = ScanEntryStatus.Hashed,
                 ErrorMessage = "err"
             };
 

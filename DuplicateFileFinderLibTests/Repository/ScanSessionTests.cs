@@ -105,7 +105,7 @@ public sealed class ScanSessionTests : IDisposable
             hashKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+             ScanEntryStatus.Hashed);
 
         await session.FlushProgressAsync();
 
@@ -220,7 +220,7 @@ public sealed class ScanSessionTests : IDisposable
             hash,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+            ScanEntryStatus.Hashed);
 
         // Progressive flush + completion
         await session.FlushProgressAsync();
@@ -415,7 +415,7 @@ public sealed class ScanSessionTests : IDisposable
             hashKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+            ScanEntryStatus.Hashed);
 
         // Below threshold: nothing should have been flushed yet.
         repo.SaveSnapshot();
@@ -467,7 +467,7 @@ public sealed class ScanSessionTests : IDisposable
             hashKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+             ScanEntryStatus.Hashed);
 
         // Second file: exceeds threshold, should trigger auto FlushProgressAsync internally
         session.ObserveFile(
@@ -476,7 +476,7 @@ public sealed class ScanSessionTests : IDisposable
             hashKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+             ScanEntryStatus.Hashed);
 
         // Wait until snapshot sees both files (or timeout)
         var snapshot = await WaitForSnapshotAsync(
@@ -564,7 +564,7 @@ public sealed class ScanSessionTests : IDisposable
             hashKey,
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow,
-            ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+            ScanEntryStatus.Hashed);
 
         // Thresholds not reached -> no auto flush expected
         repo.SaveSnapshot();
@@ -625,7 +625,7 @@ public sealed class ScanSessionTests : IDisposable
                 hashKey,
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow,
-                ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
+                ScanEntryStatus.Hashed);
             // Auto-flush should fire at i=1,3, and then we explicitly flush at the end.
         }
 
