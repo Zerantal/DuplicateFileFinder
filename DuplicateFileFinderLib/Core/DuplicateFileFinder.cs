@@ -51,10 +51,6 @@ public sealed class DuplicateFileFinder
     }
 
     [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
-    public IReadOnlyList<string> SearchPaths
-        => _root.SubFolders.Select(f => PathUtils.NormalizePath(f.Path)).ToArray();
-
-    [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
     public int TotalFilesScanned => _root.SubFolders.Sum(l => l.AggregateFileCount);
 
     [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]
@@ -346,42 +342,7 @@ public sealed class DuplicateFileFinder
             IsRunning = running
         });
     }
-
-    private (RootNode workRoot, FolderNode scope) PrepareWorkspace(string location)
-    {
-        var existingAncestor = _root.SubFolders.FirstOrDefault(r =>
-            PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
-
-        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
-
-        if (existingAncestor is not null)
-        {
-            // Clone only the affected subtree
-            var workRoot = new RootNode();
-            var scope = existingAncestor.DeepCloneSubtree();
-            workRoot.AddFileSystemNode(scope);
-            return (workRoot, scope);
-        }
-
-        if (hasDescendants)
-        {
-            // Clone roots, then promote inside workspace
-            var workRoot = new RootNode();
-            foreach (var r in _root.SubFolders)
-                workRoot.AddFileSystemNode(r.DeepCloneSubtree());
-
-            workRoot = TreePromoter.PromoteAncestor(workRoot, location);
-            var scope = workRoot.SubFolders.First(r => PathUtils.IsSamePath(r.Path, location));
-            return (workRoot, scope);
-        }
-
-        // Independent new root
-        var wr = new RootNode();
-        var sc = new FolderNode(location);
-        wr.AddFileSystemNode(sc);
-        return (wr, sc);
-    }
-
+    
     // ------------ CSV I/O ---------------
 
     [System.Obsolete("Legacy RootNode-based API. Use repo-based queries instead.")]

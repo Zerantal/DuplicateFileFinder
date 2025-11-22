@@ -38,7 +38,7 @@ internal class ScanCommand : ICommand
         await using StreamWriter writer = new(OutputFilename);
         try
         {
-            dupFileFinder.ExportToCsv(writer);
+            // dupFileFinder.ExportToCsv(writer);
         }
         catch (Exception e)
         {
