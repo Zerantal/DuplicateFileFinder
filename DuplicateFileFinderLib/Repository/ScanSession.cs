@@ -16,8 +16,12 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     // Session-local view of all directories (both from repo snapshot and created during this scan)
     private readonly Dictionary<Guid, DirRecord> _dirsById;
     
-    // Normalized full path -> DirId
+    // Normalized full dir path -> DirId
     private readonly Dictionary<string, Guid> _dirPathIndex;
+
+    // Normalized full file path -> FileRecord (latest state within this session)
+    private readonly Dictionary<string, FileRecord> _filesByPath;
+
     private readonly StringComparer _pathComparer;
     
     // Buffered records for the next RepoDelta
@@ -30,12 +34,11 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
         Repo repo,
         ScanRun run,
         IReadOnlyDictionary<Guid, DirRecord> existingDirsInRepo,
-        int maxFilesBeforeFlush = 10_000,
+        int maxFilesBeforeFlush = 50_000,
         int maxDirsBeforeFlush  = 1_000)
     {
         _repo = repo;
         Run = run;
-
         _maxFilesBeforeFlush = maxFilesBeforeFlush;
         _maxDirsBeforeFlush = maxDirsBeforeFlush;
 
@@ -45,17 +48,18 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
         _dirsById      = new Dictionary<Guid, DirRecord>(existingDirsInRepo.Count);
         _dirPathIndex = new Dictionary<string, Guid>(_pathComparer);
+        _filesByPath   = new Dictionary<string, FileRecord>(_pathComparer);
 
         // Seed session dirs and path index from repo snapshot
         foreach (var (id, dir) in existingDirsInRepo)
-    {
+        {
             _dirsById[id] = dir;
 
             var fullPath   = _repo.GetFullDirPath(id);
             var normalized = NormalizePath(fullPath);
             _dirPathIndex[normalized] = id;
-    }
         }
+    }
     
     public ScanRun Run { get; }
 
@@ -92,128 +96,135 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     }
 
     // ---------------------------------------------------------------------
-    // Directory observation (path-based)
+    // Directory upsert (path-based)
     // ---------------------------------------------------------------------
 
     /// <summary>
     /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.Id.
     /// Creates any missing parents as dummy dirs (Status=None), and the leaf with the
-    /// requested <paramref name="status"/>.
-    /// Returns the DirId.
+    /// requested <paramref name="status"/> (or a default if null). Returns the DirId.
     /// </summary>
- public Guid ObserveDirectory(
-    string fullPath,
-    ScanEntryStatus status,
-    string? errorMessage = null)
-{
-    if (string.IsNullOrWhiteSpace(fullPath))
-        throw new ArgumentException("Path is null or empty", nameof(fullPath));
+    public Guid AddOrUpdateDirectory(
+        string fullPath,
+        ScanEntryStatus? status       = null,
+        string? errorMessage = null)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+            throw new ArgumentException("Path is null or empty", nameof(fullPath));
 
-    fullPath = NormalizePath(fullPath);
+        fullPath = NormalizePath(fullPath);
 
         var shouldFlush = false;
 
         // Fast path: we already know this path (from repo or this session)
-    if (_dirPathIndex.TryGetValue(fullPath, out var existingId))
-    {
-        UpdateExistingDir(existingId, status, errorMessage, ref shouldFlush);
+        if (_dirPathIndex.TryGetValue(fullPath, out var existingId))
+        {
+            UpdateExistingDir(existingId, status, errorMessage, ref shouldFlush);
+
+            if (shouldFlush)
+                _ = FlushProgressAsync();
+
+            return existingId;
+        }
+
+        // Build the chain of unknown paths from leaf up to the first known ancestor
+        var toCreate = new Stack<string>();
+        var current  = fullPath;
+
+        while (true)
+        {
+            if (_dirPathIndex.ContainsKey(current))
+                break;
+
+            toCreate.Push(current);
+
+            var parentPath = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parentPath) || _pathComparer.Equals(parentPath, current))
+                break;
+
+            current = NormalizePath(parentPath);
+        }
+
+        Guid? parentId = null;
+
+        // If we stopped because we hit a known parent, remember its Id
+        if (_dirPathIndex.TryGetValue(current, out var knownParentId))
+            parentId = knownParentId;
+
+        // Create missing parents and the leaf
+        while (toCreate.Count > 0)
+        {
+            var path = toCreate.Pop();
+            var name = Path.GetFileName(path);
+            if (string.IsNullOrEmpty(name))
+            {
+                // Root cases like "C:\" or "/"
+                name = path;
+            }
+
+            var isLeaf = _pathComparer.Equals(path, fullPath);
+
+            // For new leaf: default status is Enumerated if not provided.
+            // For parents: Status.None and no error message.
+            var effectiveStatus = isLeaf
+                ? (status ?? ScanEntryStatus.Enumerated)
+                : ScanEntryStatus.None;
+
+            var effectiveError = isLeaf ? errorMessage : null;
+
+            var id = Guid.NewGuid();
+
+            var dir = new DirRecord
+            {
+                Id               = id,
+                ParentId         = parentId,
+                Name             = name,
+                LastSeenSequence = ScanSequence,
+                Status           = effectiveStatus,
+                ErrorMessage     = effectiveError
+            };
+
+            parentId = id;
+
+            _dirsById[id] = dir;
+
+            lock (_bufferLock)
+            {
+                _pendingDirs.Add(dir);
+                _dirPathIndex[path] = id;
+
+                if (_pendingDirs.Count >= _maxDirsBeforeFlush)
+                    shouldFlush = true;
+            }
+        }
+
+        var leafId = parentId!.Value;
 
         if (shouldFlush)
             _ = FlushProgressAsync();
 
-        return existingId;
+        return leafId;
     }
 
-        // Build the chain of unknown paths from leaf up to the first known ancestor
-    var toCreate = new Stack<string>();
-    var current  = fullPath;
-
-    while (true)
-    {
-        if (_dirPathIndex.ContainsKey(current))
-            break;
-
-        toCreate.Push(current);
-
-        var parentPath = Path.GetDirectoryName(current);
-        if (string.IsNullOrEmpty(parentPath) || _pathComparer.Equals(parentPath, current))
-            break;
-
-        current = NormalizePath(parentPath);
-    }
-
-    Guid? parentId = null;
-
-    // If we stopped because we hit a known parent, remember its Id
-    if (_dirPathIndex.TryGetValue(current, out var knownParentId))
-        parentId = knownParentId;
-
-        // Create missing parents and the leaf
-    while (toCreate.Count > 0)
-    {
-        var path = toCreate.Pop();
-        var name = Path.GetFileName(path);
-        if (string.IsNullOrEmpty(name))
-        {
-            // Root cases like "C:\" or "/"
-            name = path;
-        }
-
-        var isLeaf = _pathComparer.Equals(path, fullPath);
-        var dirStatus = isLeaf ? status : ScanEntryStatus.None;
-        var dirError  = isLeaf ? errorMessage : null;
-
-        var id = Guid.NewGuid();
-
-        var dir = new DirRecord
-        {
-            Id               = id,
-            ParentId         = parentId,
-            Name             = name,
-            LastSeenSequence = ScanSequence,
-            Status           = dirStatus,
-            ErrorMessage     = dirError
-        };
-
-        parentId = id;
-
-            _dirsById[id] = dir;
-
-        lock (_bufferLock)
-        {
-            _pendingDirs.Add(dir);
-            _dirPathIndex[path] = id;
-
-            if (_pendingDirs.Count >= _maxDirsBeforeFlush)
-                shouldFlush = true;
-        }
-    }
-
-    var leafId = parentId!.Value;
-
-    if (shouldFlush)
-        _ = FlushProgressAsync();
-
-    return leafId;
-}
-
-    private void UpdateExistingDir(Guid id, ScanEntryStatus status, string? errorMessage, ref bool shouldFlush)
+    private void UpdateExistingDir(
+        Guid             id,
+        ScanEntryStatus? status,
+        string?          errorMessage,
+        ref bool         shouldFlush)
     {
         if (!_dirsById.TryGetValue(id, out var existing))
             return;
-
-        var newStatus = status == ScanEntryStatus.None
-            ? existing.Status
-            : existing.Status | status;
+        
+        var newStatus = status ?? existing.Status;
+        var newError  = errorMessage ?? existing.ErrorMessage;
 
         var updated = existing with
         {
             LastSeenSequence = ScanSequence,
             Status           = newStatus,
-            ErrorMessage     = errorMessage ?? existing.ErrorMessage
+            ErrorMessage     = newError
         };
 
-        // Always update LastSeenSequence even if status didn't change
         _dirsById[id] = updated;
 
         lock (_bufferLock)
@@ -226,16 +237,16 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     }
 
     // ---------------------------------------------------------------------
-    // File observation (path-based)
+    // File upsert (path-based)
     // ---------------------------------------------------------------------
 
-    public void ObserveFile(
+    public void AddOrUpdateFile(
         string fullFilePath,
-        long size,
-        HashKey hash,
-        DateTimeOffset modified,
-        DateTimeOffset created,
-        ScanEntryStatus status,
+        long?            size         = null,
+        HashKey?         hash         = null,
+        DateTimeOffset?  modified     = null,
+        DateTimeOffset?  created      = null,
+        ScanEntryStatus? status       = null,
         string? errorMessage = null)
     {
         if (string.IsNullOrWhiteSpace(fullFilePath))
@@ -248,34 +259,97 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
             dirPath = RootPath;
 
         // Ensure directory chain exists and leaf dir is at least Enumerated
-        var dirId = ObserveDirectory(dirPath, ScanEntryStatus.Enumerated);
+        var dirId = AddOrUpdateDirectory(dirPath, ScanEntryStatus.Enumerated);
         var name  = Path.GetFileName(fullFilePath);
-
-        var file = new FileRecord
-        {
-            Id                  = Guid.NewGuid(),
-            DirId               = dirId,
-            Name                = name,
-            Size                = size,
-            Hash                = hash,
-            Modified            = modified,
-            Created             = created,
-            LastSeenScanSequence = ScanSequence,
-            Status              = status,
-            ErrorMessage        = errorMessage
-        };
+        if (string.IsNullOrEmpty(name))
+            name = fullFilePath;
 
         var shouldFlush = false;
 
         lock (_bufferLock)
         {
+            FileRecord file;
+
+            if (_filesByPath.TryGetValue(fullFilePath, out var existing))
+            {
+                var newSize    = size    ?? existing.Size;
+                var newHash    = hash    ?? existing.Hash;
+                var newMod     = modified ?? existing.Modified;
+                var newCreated = created  ?? existing.Created;
+                var newStatus  = status   ?? existing.Status;
+                var newError   = errorMessage ?? existing.ErrorMessage;
+
+                file = existing with
+                {
+                    DirId               = dirId,
+                    Name                = name,
+                    Size                 = newSize,
+                    Hash                 = newHash,
+                    Modified             = newMod,
+                    Created              = newCreated,
+                    LastSeenScanSequence = ScanSequence,
+                    Status               = newStatus,
+                    ErrorMessage         = newError
+                };
+            }
+            else
+            {
+                var effectiveSize    = size    ?? 0L;
+                var effectiveHash    = hash    ?? default(HashKey);
+                var effectiveMod     = modified ?? default(DateTimeOffset);
+                var effectiveCreated = created  ?? default(DateTimeOffset);
+                var effectiveStatus  = status   ?? ScanEntryStatus.Enumerated;
+
+                file = new FileRecord
+        {
+            Id                  = Guid.NewGuid(),
+            DirId               = dirId,
+            Name                = name,
+                    Size                 = effectiveSize,
+                    Hash                 = effectiveHash,
+                    Modified             = effectiveMod,
+                    Created              = effectiveCreated,
+            LastSeenScanSequence = ScanSequence,
+                    Status               = effectiveStatus,
+            ErrorMessage        = errorMessage
+        };
+            }
+
+            _filesByPath[fullFilePath] = file;
             _pendingFiles.Add(file);
+
             if (_pendingFiles.Count >= _maxFilesBeforeFlush)
                 shouldFlush = true;
         }
 
         if (shouldFlush)
             _ = FlushProgressAsync();
+    }
+
+    // ---------------------------------------------------------------------
+    // Legacy APIs (wrappers)
+    // ---------------------------------------------------------------------
+
+    [Obsolete("Use AddOrUpdateDirectory instead.")]
+    public Guid ObserveDirectory(
+        string          fullPath,
+        ScanEntryStatus status,
+        string?         errorMessage = null)
+    {
+        return AddOrUpdateDirectory(fullPath, status, errorMessage);
+    }
+
+    [Obsolete("Use AddOrUpdateFile instead.")]
+    public void ObserveFile(
+        string          fullFilePath,
+        long            size,
+        HashKey         hash,
+        DateTimeOffset  modified,
+        DateTimeOffset  created,
+        ScanEntryStatus status,
+        string?         errorMessage = null)
+    {
+        AddOrUpdateFile(fullFilePath, size, hash, modified, created, status, errorMessage);
     }
 
     // ---------------------------------------------------------------------

@@ -1,53 +1,55 @@
 // DuplicateFileFinderLib/Core/DuplicateFileFinder.cs
 
 using DuplicateFileFinderLib.FileSystem;
-using DuplicateFileFinderLib.Grouping;
-using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
-using DuplicateFileFinderLib.Tree;
 using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
 
-public enum ImportMode
-{
-    Merge,
-    Replace
-}
-
 public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
-    private readonly Dictionary<long, int> _fileSizes = new(); // filesize => count
     private readonly IFileEnumerator _fs;
-    private readonly IGroupingService _grouping;
-    private readonly IScanSerializer _serializer;
-
-    private RootNode _root = new();
 
     private readonly IRepo _repo;
+    
+    private readonly bool _throttleProgress = true;
+    private readonly int _hashDegreeOfParallelism;
 
-    public DuplicateFileFinder(IRepo repo,
+
+    /// <summary>
+    /// Internal representation of a file that needs hashing.
+    /// </summary>
+    private readonly record struct FileToHash(
+        string         Path,
+        long           Size,
+        DateTimeOffset CreatedUtc,
+        DateTimeOffset ModifiedUtc);
+
+    public DuplicateFileFinder(
+        IRepo repo,
         IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null,
-        IGroupingService? grouping = null,
-        IScanSerializer? serializer = null)
+        int? hashDegreeOfParallelism  = null)
     {
         _fs = fs ?? new FileEnumerator();
-        _checksums = checksums ?? new ChecksumPipeline();
-        _grouping = grouping ?? new FileSystemGroupsAdapter();
-        _serializer = serializer ?? new CsvScanSerializer();
+        _checksums = checksums ?? new ChecksumPipelineMD5();
         _repo = repo;
+        
+        var dop = hashDegreeOfParallelism ?? Environment.ProcessorCount;
+        if (dop < 1) dop = 1;
+        _hashDegreeOfParallelism = dop;
+
     }
-
-    public IReadOnlyList<string> SearchPaths
-        => _root.SubFolders.Select(f => PathUtils.NormalizePath(f.Path)).ToArray();
-
-    public int TotalFilesScanned => _root.SubFolders.Sum(l => l.AggregateFileCount);
-    public long DuplicateSpaceBytes => ComputeDuplicateSpaceBytes();
-    public int DuplicateFilesWastedCount => ComputeDuplicateWastedFileCount();
+    
+    internal DuplicateFileFinder(IRepo repo, bool throttleProgress)
+        : this(repo)
+    {
+        _throttleProgress = throttleProgress;
+    }
 
     // ------------ Public scanning API ----------------
 
@@ -57,64 +59,38 @@ public sealed class DuplicateFileFinder
     {
         location = PathUtils.NormalizePath(location);
 
-        var throttledProgress = progressIndicator is null ? null : new ThrottledProgress(progressIndicator);
-
+        IProgress<DuplicateFileFinderProgressReport>? progress = progressIndicator;
+        if (_throttleProgress)
+            progress = progress is null ? null : new ThrottledProgress(progress);
+        
         var session = _repo.BeginScan(location);
 
         try
         {
-            // 1) Build workspace (transactional)
-            FolderNode scope;
-            RootNode workRoot;
-            using (PhaseScope.Begin(ScanPhase.Preparing))
-            using (TimingLog.Start(nameof(ScanPhase.Preparing)))
+            // 0.5) Bail on error reading scan location
+            if (!Directory.Exists(location))
             {
-                (workRoot, scope) = PrepareWorkspace(location);
+                string msg = $"Root scan path does not exist: {location}";
+                throw new DirectoryNotFoundException(msg);
             }
-
-            // 2) Enumerate
-            var tempSizes = new Dictionary<long, int>();
+            
+            // 1) Enumerate filesystem and record into repo
+            List<FileToHash> filesToHash;
             using (PhaseScope.Begin(ScanPhase.Enumerating))
             using (TimingLog.StartPhase(ScanPhase.Enumerating))
             {
-                await EnumeratePhaseAsync(scope, tempSizes, throttledProgress, session, token);
-                TimingLog.Counter("folders", scope.AggregateFolderCount);
-                TimingLog.Counter("files", scope.AggregateFileCount);
+                filesToHash = await EnumeratePhaseAsync(location, progress, session, token);
             }
 
-            // 3) Hashing
+            // 2) Hash all non-zero files
             using (PhaseScope.Begin(ScanPhase.Hashing))
             using (TimingLog.StartPhase(ScanPhase.Hashing))
             {
-                var totalToHash = CountHashTargets(scope, tempSizes);
-                TimingLog.Counter("targets", totalToHash);
-                await RunHashingAsync(scope, tempSizes, totalToHash, throttledProgress, session, token);
+                await RunHashingAsync(filesToHash, progress, session, token);
             }
-
-            // 4) Grouping (unchanged – still works on FolderNode tree)
-            using (PhaseScope.Begin(ScanPhase.Grouping))
-            using (TimingLog.StartPhase(ScanPhase.Grouping))
-            {
-                await RunGroupingAsync(scope, throttledProgress, token);
-            }
-
-            // 5) Commit in-memory workspace (legacy representation)
-            using (PhaseScope.Begin(ScanPhase.Committing))
-            using (TimingLog.StartPhase(ScanPhase.Committing))
-            {
-                CommitWorkspace(workRoot, scope, location);
-            }
-
-            // 6) Aggregates + file size index (legacy representation)
-            using (PhaseScope.Begin(ScanPhase.RecomputingAggregates))
-            using (TimingLog.StartPhase(ScanPhase.RecomputingAggregates))
-            {
-                await _root.RecomputeSubtreeAggregatesAsync();
-                RebuildFileSizesFromRoot();
-            }
-
+            
             await session.CompleteAsync(token);
-            Report(throttledProgress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
+            Report(progress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
             _repo.CompactIfNeeded();
         }
         catch (OperationCanceledException)
@@ -133,203 +109,248 @@ public sealed class DuplicateFileFinder
         }
     }
 
-    private void RebuildFileSizesFromRoot()
-    {
-        _fileSizes.Clear();
-        foreach (var top in _root.SubFolders)
-            top.TraverseFolders(f =>
-            {
-                foreach (var file in f.Files)
-                    _fileSizes[file.Size] = _fileSizes.TryGetValue(file.Size, out var n) ? n + 1 : 1;
-                return Task.CompletedTask;
-            }).Wait();
-    }
+    // ------------ Enumeration phase ----------------
 
-    private void CommitWorkspace(RootNode workRoot, FolderNode scope, string location)
-    {
-        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
-        var sameOrAncestor = _root.SubFolders.FirstOrDefault(r =>
-            PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
-
-        if (sameOrAncestor is not null)
-        {
-            // Replace that subtree with scanned clone
-            var existing = _root.SubFolders.First(f => PathUtils.IsSamePath(f.Path, scope.Path));
-            _root.RemoveChild(existing);
-            _root.AddFileSystemNode(scope);
-        }
-        else if (hasDescendants)
-        {
-            // Whole promoted layout becomes new truth
-            _root = workRoot;
-        }
-        else
-        {
-            // Independent new root
-            _root.AddFileSystemNode(scope);
-        }
-    }
-
-    private async Task RunGroupingAsync(
-        FolderNode scope,
+    private async Task<List<FileToHash>> EnumeratePhaseAsync(
+        string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress,
+        IScanSession session,
         CancellationToken token)
     {
-        // Pre-count work units for a determinate bar (folders + files)
-        long total = 0;
-        await scope.TraverseFolders(f =>
+        var filesToHash   = new List<FileToHash>();
+        var dirsToVisit   = new Stack<string>();
+        long foldersVisited = 0;
+
+        dirsToVisit.Push(rootPath);
+
+        while (dirsToVisit.Count > 0)
         {
             token.ThrowIfCancellationRequested();
-            total += 1; // folder
-            total += f.Files.Count; // files
-            return Task.CompletedTask;
-        });
 
-        // Initial report (0% or 100% if empty)
-        Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-            processed: 0,
-            percent: total == 0 ? 1.0 : 0.0,
-            total: total);
+            var dir = dirsToVisit.Pop();
+            foldersVisited++;
 
-        await _grouping.AssignGroupsAsync(
-            scope,
-            processed =>
+            Report(progress,
+                ScanPhase.Enumerating,
+                $"Scanning {dir}",
+                indeterminate: true,
+                processed: foldersVisited);
+
+            session.AddOrUpdateDirectory(dir);
+            TimingLog.Counter("folders");
+
+            foreach (var e in _fs.EnumerateChildren(dir, token))
             {
-                var done = Math.Min(processed, total);
-                var pct = total == 0 ? 1.0 : Math.Min(1.0, (double)done / total);
+                if (e.IsDirectory)
+                {
+                    dirsToVisit.Push(e.FullPath);
+                }
+                else
+                {
+                    // Record file in repo as "enumerated, hash not computed yet"
+                    session.AddOrUpdateFile(
+                        fullFilePath: e.FullPath,
+                        size: e.Length,
+                        hash: HashKey.NotComputed,
+                        modified: e.ModifiedTimeUtc,
+                        created: e.CreationTimeUtc,
+                        status: ScanEntryStatus.Enumerated);
 
-                Report(progress, ScanPhase.Grouping, "Grouping duplicates...",
-                    processed: done,
-                    percent: pct,
-                    total: total);
-            },
-            token);
+                    TimingLog.Counter("files");
+
+                    // Only non-zero files are hashed
+                    if (e.Length > 0)
+                    {
+                        filesToHash.Add(new FileToHash(
+                            e.FullPath,
+                            e.Length,
+                            e.CreationTimeUtc,
+                            e.ModifiedTimeUtc));
+                    }
+                }
+            }
+
+            // Give the scheduler a chance occasionally in large trees
+            if ((foldersVisited & 0xFF) == 0)
+                await Task.Yield();
+        }
+
+        return filesToHash;
     }
 
+    // ------------ Hashing phase ----------------
+    
+    // Inside DuplicateFileFinder
+
     private async Task RunHashingAsync(
-        FolderNode scope,
-        Dictionary<long, int> tempSizes,
-        int totalToHash,
+        IReadOnlyList<FileToHash> filesToHash,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
         CancellationToken token)
     {
         Report(progress, ScanPhase.Hashing, "Computing checksums...");
 
-        bool TargetPredicate(FileNode f)
+        var total = filesToHash.Count;
+        if (total == 0)
         {
-            return tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null;
+            Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
+            return;
         }
 
-        long processed = 0;
+        var result = await HashingRunner.HashFilesAsync(
+            filesToHash,
+            _checksums,
+            _hashDegreeOfParallelism,
+            progress,
+            token).ConfigureAwait(false);
 
-        await _checksums.ComputeAsync(
-            scope,
-            TargetPredicate,
-            fileNode =>
-            {
-                processed++;
+        HashingRunner.ApplyHashResults(filesToHash, result, session);
+        HashingRunner.RecordHashingStats(filesToHash, result);
 
-                // Progress reporting
-                var pct = totalToHash == 0
-                    ? 1.0
-                    : Math.Min(1.0, (double)processed / totalToHash);
-
-                Report(progress, ScanPhase.Hashing,
-                    $"File hashed: {fileNode.Path}",
-                    pct,
-                    processed: processed,
-                    total: totalToHash);
-
-                var hashBytes = fileNode.ChecksumBytes;
-                if (hashBytes is { Length: > 0 })
-                {
-                    var hashKey = new HashKey(hashBytes);
-
-                    session.ObserveFile(
-                        fullFilePath: fileNode.Path,
-                        size: fileNode.Size,
-                        hash: hashKey,
-                        modified: fileNode.ModifiedTimeUtc,
-                        created: fileNode.CreationTimeUtc,
-                        status: ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed);
-                }
-            },
-            token);
+        Report(
+            progress,
+            ScanPhase.Hashing,
+            "Hashing complete.",
+            percent: 1.0,
+            processed: total,
+            total: total);
     }
 
-    private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
-    {
-        var totalToHash = 0;
-        scope.TraverseFolders(f =>
-        {
-            foreach (var file in f.Files)
-                if (tempSizes.TryGetValue(file.Size, out var cnt) && cnt > 1 && file.ChecksumBytes == null)
-                    totalToHash++;
-            return Task.CompletedTask;
-        }).Wait();
-        return totalToHash;
-    }
-
-    private async Task EnumeratePhaseAsync(
-        FolderNode scope,
-        Dictionary<long, int> tempSizes,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        IScanSession session,
-        CancellationToken token)
-    {
-        long foldersVisited = 0;
-
-        await scope.TraverseFolders(
-            async folder =>
-            {
-                token.ThrowIfCancellationRequested();
-
-                foldersVisited++;
-                Report(progress, ScanPhase.Enumerating,
-                    $"Scanning {folder.Path}",
-                    indeterminate: true,
-                    processed: foldersVisited);
-                await Task.CompletedTask;
-
-                // Register this folder in the repo via path-based API.
-                // ScanSession will ensure path→DirId is unique and will
-                // handle parent creation if needed.
-                session.ObserveDirectory(folder.Path, ScanEntryStatus.Enumerated);
-
-                // 1) Seed tempSizes from existing files in this folder
-                foreach (var existingFile in folder.Files)
-                    tempSizes[existingFile.Size] = tempSizes.TryGetValue(existingFile.Size, out var n) ? n + 1 : 1;
-
-                // 2) Merge live FS enumeration with existing children (no re-adds)
-                var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var f in folder.Files) existingFiles.Add(f.Path);
-                foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
-
-                foreach (var e in _fs.EnumerateChildren(folder.Path, token))
-                    if (e.IsDirectory)
-                    {
-                        if (existingDirs.Add(e.FullPath))
-                            folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc, e.ModifiedTimeUtc));
-                    }
-                    else
-                    {
-                        if (existingFiles.Add(e.FullPath))
-                        {
-                            var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc, e.ModifiedTimeUtc);
-                            folder.AddFileSystemNode(fn);
-                            tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
-                        }
-                    }
-            },
-            f =>
-            {
-                f.UpdateFolderStats();
-                return Task.CompletedTask;
-            });
-    }
+    
+    // private async Task RunHashingAsync(
+    //     IReadOnlyList<FileToHash> filesToHash,
+    //     IProgress<DuplicateFileFinderProgressReport>? progress,
+    //     IScanSession session,
+    //     CancellationToken token)
+    // {
+    //     Report(progress, ScanPhase.Hashing, "Computing checksums...");
+    //
+    //     var totalToHash = filesToHash.Count;
+    //     
+    //     if (totalToHash == 0)
+    //     {
+    //         Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
+    //         return;
+    //     }
+    //
+    //     // Parallel hash results, session updates will be done serially afterwards.
+    //     var hashes = new HashKey[totalToHash];
+    //     var errors = new string?[totalToHash];
+    //     var ok     = new bool[totalToHash];
+    //
+    //     var semaphore = new SemaphoreSlim(_hashDegreeOfParallelism);
+    //     var tasks     = new List<Task>(totalToHash);
+    //     long processed = 0;
+    //
+    //     for (int i = 0; i < totalToHash; i++)
+    //     {
+    //         var idx  = i;
+    //         var file = filesToHash[idx];
+    //
+    //         await semaphore.WaitAsync(token).ConfigureAwait(false);
+    //
+    //         var task = Task.Run(async () =>
+    //         {
+    //             try
+    //             {
+    //                 token.ThrowIfCancellationRequested();
+    //
+    //                 // Compute hash for this file
+    //                 var hashKey = await _checksums
+    //                     .ComputeFileHashAsync(file.Path, token)
+    //                     .ConfigureAwait(false);
+    //
+    //                 hashes[idx] = hashKey;
+    //                 ok[idx]     = true;
+    //             }
+    //             catch (OperationCanceledException)
+    //             {
+    //                 // Let cancellation propagate; do not mark as error.
+    //                 throw;
+    //             }
+    //             catch (Exception ex)
+    //             {
+    //                 // Hash failed for this file: mark CannotCompute + capture error string.
+    //                 hashes[idx] = HashKey.CannotCompute;
+    //                 errors[idx] = ex.Message;
+    //                 ok[idx]     = false;
+    //             }
+    //             finally
+    //             {
+    //                 var done = Interlocked.Increment(ref processed);
+    //         
+    //                 var pct = Math.Min(1.0,
+    //                     totalToHash == 0 ? 1.0 : (double)done / totalToHash);
+    //
+    //                 // Progress reporting can safely be done from multiple threads
+    //                 Report(
+    //                     progress,
+    //                     ScanPhase.Hashing,
+    //                     done == totalToHash
+    //                         ? "Finished hashing."
+    //                         : $"Hashing files... ({done}/{totalToHash})",
+    //                     pct,
+    //                     processed: done,
+    //                     total: totalToHash);
+    //
+    //                 semaphore.Release();
+    //             }
+    //         }, token);
+    //
+    //         tasks.Add(task);
+    //     }
+    //
+    //     await Task.WhenAll(tasks).ConfigureAwait(false);
+    //
+    //     // Now update the repo / session serially to avoid threading issues inside ScanSession.
+    //     for (int i = 0; i < totalToHash; i++)
+    //     {
+    //         var file  = filesToHash[i];
+    //         var hash  = hashes[i];
+    //         var error = errors[i];
+    //
+    //         if (ok[i])
+    //         {
+    //             session.AddOrUpdateFile(
+    //                 fullFilePath: file.Path,
+    //                 hash: hash,
+    //                 status: ScanEntryStatus.Hashed);
+    //         }
+    //         else
+    //         {
+    //             // Hash failed: mark in session with CannotCompute + Error status/message.
+    //             session.AddOrUpdateFile(
+    //                 fullFilePath: file.Path,
+    //                 hash: hash,
+    //                 status: ScanEntryStatus.Error,
+    //                 errorMessage: error);
+    //         }
+    //     }
+    //     
+    //     // Final progress report (100%)
+    //     Report(
+    //         progress,
+    //         ScanPhase.Hashing,
+    //         "Hashing complete.",
+    //         percent: 1.0,
+    //         processed: totalToHash,
+    //         total: totalToHash);
+    //
+    //     long bytesHashed = 0;
+    //     int filesHashed = 0;
+    //     for (var i = 0; i < totalToHash; i++)
+    //     {
+    //         if (!ok[i]) continue;
+    //         filesHashed++;
+    //         bytesHashed += filesToHash[i].Size;
+    //     }
+    //
+    //     TimingLog.Counter("files_hashed", filesHashed );
+    //     TimingLog.Counter("bytes_hashed", bytesHashed );
+    // }
+    
+    
+    // ------------ Progress helper ----------------
 
     private static void Report(
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -352,162 +373,145 @@ public sealed class DuplicateFileFinder
             IsRunning = running
         });
     }
-
-    private (RootNode workRoot, FolderNode scope) PrepareWorkspace(string location)
+    
+    // ---------- HashingHelper -----------
+    private static class HashingRunner
     {
-        var existingAncestor = _root.SubFolders.FirstOrDefault(r =>
-            PathUtils.IsSamePath(r.Path, location) || PathUtils.IsAncestorOfPath(r.Path, location));
-
-        var hasDescendants = _root.SubFolders.Any(r => PathUtils.IsAncestorOfPath(location, r.Path));
-
-        if (existingAncestor is not null)
+        internal sealed class Result
         {
-            // Clone only the affected subtree
-            var workRoot = new RootNode();
-            var scope = existingAncestor.DeepCloneSubtree();
-            workRoot.AddFileSystemNode(scope);
-            return (workRoot, scope);
+            public Result(HashKey[] hashes, string?[] errors, bool[] ok)
+            {
+                Hashes = hashes;
+                Errors = errors;
+                Ok     = ok;
+            }
+
+            public HashKey[] Hashes { get; }
+            public string?[] Errors { get; }
+            public bool[]    Ok     { get; }
+
+            // ReSharper disable once UnusedMember.Local
+            public int Total => Hashes.Length;
         }
 
-        if (hasDescendants)
+        public static async Task<Result> HashFilesAsync(
+            IReadOnlyList<FileToHash> files,
+            IChecksumPipeline pipeline,
+            int hashDegreeOfParallelism,
+            IProgress<DuplicateFileFinderProgressReport>? progress,
+            CancellationToken token)
         {
-            // Clone roots, then promote inside workspace
-            var workRoot = new RootNode();
-            foreach (var r in _root.SubFolders)
-                workRoot.AddFileSystemNode(r.DeepCloneSubtree());
+            var total = files.Count;
+            var hashes = new HashKey[total];
+            var errors = new string?[total];
+            var ok     = new bool[total];
 
-            workRoot = TreePromoter.PromoteAncestor(workRoot, location);
-            var scope = workRoot.SubFolders.First(r => PathUtils.IsSamePath(r.Path, location));
-            return (workRoot, scope);
-        }
+            var dop       = Math.Max(1, hashDegreeOfParallelism);
+            var semaphore = new SemaphoreSlim(dop);
+            var tasks     = new Task[total];
+            long processed = 0;
 
-        // Independent new root
-        var wr = new RootNode();
-        var sc = new FolderNode(location);
-        wr.AddFileSystemNode(sc);
-        return (wr, sc);
-    }
+            for (int i = 0; i < total; i++)
+            {
+                int idx  = i;
+                var file = files[idx];
 
-    // ------------ CSV I/O ---------------
+                await semaphore.WaitAsync(token).ConfigureAwait(false);
 
-    public void ClearAllScans()
-    {
-        _root = new RootNode();
-        _fileSizes.Clear();
-        _grouping.Reset();
-    }
-
-    public void ExportToCsv(TextWriter writer)
-    {
-        _serializer.Export(_root, writer);
-    }
-
-    public void ImportFromCsv(TextReader reader, ImportMode mode = ImportMode.Merge)
-    {
-        if (reader == null) throw new ArgumentNullException(nameof(reader));
-        if (mode == ImportMode.Replace) ClearAllScans();
-
-        _serializer.ImportInto(_root, reader);
-
-        // recompute aggregates
-        foreach (var top in _root.SubFolders)
-            top.TraverseFolders(
-                null,
-                f =>
+                tasks[idx] = Task.Run(async () =>
                 {
-                    f.UpdateFolderStats();
-                    return Task.CompletedTask;
-                }
-            ).Wait();
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
 
-        // rebuild _fileSizes
-        _fileSizes.Clear();
-        foreach (var file in EnumerateAllFiles())
-            _fileSizes[file.Size] = _fileSizes.TryGetValue(file.Size, out var n) ? n + 1 : 1;
-    }
+                        var hashKey = await pipeline
+                            .ComputeFileHashAsync(file.Path, token)
+                            .ConfigureAwait(false);
 
-    // ------------ Queries ----------------
+                        hashes[idx] = hashKey;
+                        ok[idx]     = true;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        hashes[idx] = HashKey.CannotCompute;
+                        errors[idx] = ex.Message;
+                        ok[idx]     = false;
+                    }
+                    finally
+                    {
+                        var done = Interlocked.Increment(ref processed);
+                        var pct  = Math.Min(1.0, (double)done / total);
 
-    public async Task<IReadOnlyList<DuplicateFileRow>> GetDuplicateFileRowsAsync()
-    {
-        var results = new List<DuplicateFileRow>();
-        var groups = new Dictionary<int, List<FileNode>>();
+                        DuplicateFileFinder.Report(
+                            progress,
+                            ScanPhase.Hashing,
+                            done == total
+                                ? "Finished hashing."
+                                : $"Hashing files... ({done}/{total})",
+                            pct,
+                            processed: done,
+                            total: total);
 
-        foreach (var top in _root.SubFolders)
-            await top.TraverseFolders(folder =>
+                        semaphore.Release();
+                    }
+                }, token);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            return new Result(hashes, errors, ok);
+        }
+
+        public static void ApplyHashResults(
+            IReadOnlyList<FileToHash> files,
+            Result result,
+            IScanSession session)
+        {
+            for (int i = 0; i < files.Count; i++)
             {
-                foreach (var f in folder.Files)
+                var file  = files[i];
+                var hash  = result.Hashes[i];
+                var error = result.Errors[i];
+
+                if (result.Ok[i])
                 {
-                    if (f.Group < 0) continue;
-                    if (!groups.TryGetValue(f.Group, out var list))
-                        groups[f.Group] = list = new List<FileNode>();
-                    list.Add(f);
+                    session.AddOrUpdateFile(
+                        fullFilePath: file.Path,
+                        hash: hash,
+                        status: ScanEntryStatus.Hashed);
                 }
+                else
+                {
+                    session.AddOrUpdateFile(
+                        fullFilePath: file.Path,
+                        hash: hash,
+                        status: ScanEntryStatus.Error,
+                        errorMessage: error);
+                }
+            }
+        }
 
-                return Task.CompletedTask;
-            });
+        public static void RecordHashingStats(
+            IReadOnlyList<FileToHash> files,
+            Result result)
+        {
+            long bytes = 0;
+            int count  = 0;
 
-        foreach (var kv in groups.Where(kv => kv.Value.Count > 1))
-        foreach (var f in kv.Value)
-            results.Add(new DuplicateFileRow
+            for (int i = 0; i < files.Count; i++)
             {
-                Path = f.Path,
-                Size = f.Size,
-                CreationTimeUtc = f.CreationTimeUtc,
-                Checksum = f.ChecksumHex,
-                Group = f.Group
-            });
+                if (!result.Ok[i]) continue;
+                count++;
+                bytes += files[i].Size;
+            }
 
-        return results;
-    }
-
-    private long ComputeDuplicateSpaceBytes()
-    {
-        var groups = new Dictionary<int, (long total, long rep, int count)>();
-        foreach (var f in EnumerateAllFiles())
-        {
-            if (f.Group < 0) continue;
-            var acc = groups.GetValueOrDefault(f.Group);
-            acc.total += f.Size;
-            acc.count++;
-            if (acc.rep == 0) acc.rep = f.Size;
-            groups[f.Group] = acc;
-        }
-
-        long wasted = 0;
-        foreach (var a in groups.Values)
-            if (a.count > 1)
-                wasted += a.total - a.rep;
-        return wasted;
-    }
-
-    private int ComputeDuplicateWastedFileCount()
-    {
-        var counts = new Dictionary<int, int>();
-        foreach (var f in EnumerateAllFiles())
-        {
-            if (f.Group < 0) continue;
-            counts[f.Group] = counts.TryGetValue(f.Group, out var n) ? n + 1 : 1;
-        }
-
-        var wasted = 0;
-        foreach (var c in counts.Values)
-            if (c > 1)
-                wasted += c - 1;
-        return wasted;
-    }
-
-    private IEnumerable<FileNode> EnumerateAllFiles()
-    {
-        foreach (var loc in _root.SubFolders)
-        {
-            var buf = new List<FileNode>();
-            loc.TraverseFolders(f =>
-            {
-                buf.AddRange(f.Files);
-                return Task.CompletedTask;
-            }).Wait();
-            foreach (var f in buf) yield return f;
+            TimingLog.Counter("files_hashed",  count);
+            TimingLog.Counter("bytes_hashed",  bytes);
         }
     }
+
 }

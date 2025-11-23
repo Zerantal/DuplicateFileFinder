@@ -44,9 +44,6 @@ public partial class ScanProgressViewModel : ObservableObject
         ScanPhase.Preparing            => "Preparing",
         ScanPhase.Enumerating          => "Enumerating files",
         ScanPhase.Hashing              => "Hashing files",
-        ScanPhase.Grouping             => "Grouping duplicates",
-        ScanPhase.Committing           => "Committing changes",
-        ScanPhase.RecomputingAggregates => "Recomputing aggregates",
         ScanPhase.Completed            => "Completed",
         _                              => phase.ToString()
     };

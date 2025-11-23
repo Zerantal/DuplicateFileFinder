@@ -19,7 +19,7 @@ public sealed class DirRecordTests
             ParentId = parentId,
             Name = "subdir",
             LastSeenSequence = 123,
-            Status = ScanEntryStatus.Enumerated | ScanEntryStatus.Error,
+            Status = ScanEntryStatus.Error,
             ErrorMessage = "oops"
         };
 
@@ -32,18 +32,5 @@ public sealed class DirRecordTests
         Assert.Equal(original.LastSeenSequence, roundTripped.LastSeenSequence);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
-    }
-
-    [Fact]
-    public void DirRecord_StatusFlags_WorkForDeletedAndError()
-    {
-        var status = ScanEntryStatus.Enumerated | ScanEntryStatus.Error | ScanEntryStatus.Deleted;
-
-        Assert.True(status.HasFlag(ScanEntryStatus.Enumerated));
-        Assert.True(status.HasFlag(ScanEntryStatus.Error));
-        Assert.True(status.HasFlag(ScanEntryStatus.Deleted));
-
-        Assert.False(status.HasFlag(ScanEntryStatus.Hashed));
-        Assert.False(status.HasFlag(ScanEntryStatus.SkippedByFilter));
     }
 }

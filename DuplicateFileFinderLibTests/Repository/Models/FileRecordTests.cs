@@ -27,7 +27,7 @@ public sealed class FileRecordTests
                 Modified = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero),
                 Created = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
                 LastSeenScanSequence = 99,
-                Status = ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed,
+                Status = ScanEntryStatus.Hashed,
                 ErrorMessage = "some error"
             };
 
@@ -44,17 +44,5 @@ public sealed class FileRecordTests
             Assert.Equal(original.LastSeenScanSequence, roundTripped.LastSeenScanSequence);
             Assert.Equal(original.Status, roundTripped.Status);
             Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
-        }
-
-        [Fact]
-        public void FileRecord_StatusFlags_ComposeAsExpected()
-        {
-            var status = ScanEntryStatus.Enumerated | ScanEntryStatus.Hashed | ScanEntryStatus.SkippedByFilter;
-
-            Assert.True(status.HasFlag(ScanEntryStatus.Enumerated));
-            Assert.True(status.HasFlag(ScanEntryStatus.Hashed));
-            Assert.True(status.HasFlag(ScanEntryStatus.SkippedByFilter));
-            Assert.False(status.HasFlag(ScanEntryStatus.Error));
-            Assert.False(status.HasFlag(ScanEntryStatus.Deleted));
         }
     }

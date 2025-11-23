@@ -11,6 +11,34 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     [MemoryPackOrder(0)] public readonly ulong A; // first 8 bytes
     [MemoryPackOrder(1)] public readonly ulong B; // next 8 bytes
 
+    /// <summary>
+    /// Sentinel: hash has not been computed yet. This is also the default(HashKey) value.
+    /// </summary>
+    public static readonly HashKey NotComputed = new();
+
+    /// <summary>
+    /// Sentinel: hash could not be computed (I/O error, permission issue, etc.).
+    /// </summary>
+    public static readonly HashKey CannotCompute = new(ulong.MaxValue, ulong.MaxValue);
+
+    /// <summary>
+    /// True if this value is the <see cref="NotComputed"/> sentinel.
+    /// </summary>
+    public bool IsNotComputed => A == 0 && B == 0;
+
+    /// <summary>
+    /// True if this value is the <see cref="CannotCompute"/> sentinel.
+    /// </summary>
+    public bool IsCannotCompute => A == ulong.MaxValue && B == ulong.MaxValue;
+
+    /// <summary>
+    /// True if this represents a real hash value (neither NotComputed nor CannotCompute).
+    /// </summary>
+    public bool IsComputed => !IsNotComputed && !IsCannotCompute;
+
+    /// <summary>
+    /// Construct from a 16-byte hash. This is intended for real content hashes.
+    /// </summary>
     public HashKey(ReadOnlySpan<byte> hashBytes)
     {
         if (hashBytes.Length != 16) throw new ArgumentException("16 byte span required");
@@ -18,6 +46,9 @@ public readonly partial struct HashKey : IEquatable<HashKey>
         B = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes.Slice(8, 8));
     }
 
+    /// <summary>
+    /// Construct from raw 64-bit halves. Use this for sentinels or custom values.
+    /// </summary>
     public HashKey(ulong a = 0, ulong b = 0)
     {
         A = a;
@@ -54,5 +85,13 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     public static bool operator !=(HashKey left, HashKey right)
     {
         return !(left == right);
+    }
+
+    public override string ToString()
+    {
+        // 32-hex-character canonical representation with sentinel hints.
+        if (IsNotComputed) return "<NotComputed>";
+        if (IsCannotCompute) return "<CannotCompute>";
+        return $"{A:X16}{B:X16}";
     }
 }

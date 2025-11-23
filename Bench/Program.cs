@@ -9,7 +9,7 @@ var root = args.Length > 1 && args[0] == "--root" ? args[1] : args.FirstOrDefaul
 
 root = Path.GetFullPath(root);
 
-TimingLog.AddCounterFormatter("AggregateSize", n => n.ToSizeString());
+TimingLog.AddCounterFormatter("bytes_hashed", n => n.ToSizeString());
 
 var repoDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Bench", "repo");
 
