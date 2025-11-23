@@ -9,12 +9,6 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
 
-public enum ImportMode
-{
-    Merge,
-    Replace
-}
-
 public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
@@ -186,6 +180,8 @@ public sealed class DuplicateFileFinder
 
     // ------------ Hashing phase ----------------
     
+    // Inside DuplicateFileFinder
+
     private async Task RunHashingAsync(
         IReadOnlyList<FileToHash> filesToHash,
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -194,130 +190,164 @@ public sealed class DuplicateFileFinder
     {
         Report(progress, ScanPhase.Hashing, "Computing checksums...");
 
-        var totalToHash = filesToHash.Count;
-        
-        if (totalToHash == 0)
+        var total = filesToHash.Count;
+        if (total == 0)
         {
             Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
             return;
         }
 
-        // Parallel hash results, session updates will be done serially afterwards.
-        var hashes = new HashKey[totalToHash];
-        var errors = new string?[totalToHash];
-        var ok     = new bool[totalToHash];
+        var result = await HashingRunner.HashFilesAsync(
+            filesToHash,
+            _checksums,
+            _hashDegreeOfParallelism,
+            progress,
+            token).ConfigureAwait(false);
 
-        var semaphore = new SemaphoreSlim(_hashDegreeOfParallelism);
-        var tasks     = new List<Task>(totalToHash);
-        long processed = 0;
+        HashingRunner.ApplyHashResults(filesToHash, result, session);
+        HashingRunner.RecordHashingStats(filesToHash, result);
 
-        for (int i = 0; i < totalToHash; i++)
-        {
-            var idx  = i;
-            var file = filesToHash[idx];
-
-            await semaphore.WaitAsync(token).ConfigureAwait(false);
-
-            var task = Task.Run(async () =>
-            {
-                try
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    // Compute hash for this file
-                    var hashKey = await _checksums
-                        .ComputeFileHashAsync(file.Path, token)
-                        .ConfigureAwait(false);
-
-                    hashes[idx] = hashKey;
-                    ok[idx]     = true;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Let cancellation propagate; do not mark as error.
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // Hash failed for this file: mark CannotCompute + capture error string.
-                    hashes[idx] = HashKey.CannotCompute;
-                    errors[idx] = ex.Message;
-                    ok[idx]     = false;
-                }
-                finally
-                {
-                    var done = Interlocked.Increment(ref processed);
-            
-                    var pct = Math.Min(1.0,
-                        totalToHash == 0 ? 1.0 : (double)done / totalToHash);
-
-                    // Progress reporting can safely be done from multiple threads
-                    Report(
-                        progress,
-                        ScanPhase.Hashing,
-                        done == totalToHash
-                            ? "Finished hashing."
-                            : $"Hashing files... ({done}/{totalToHash})",
-                        pct,
-                        processed: done,
-                        total: totalToHash);
-
-                    semaphore.Release();
-                }
-            }, token);
-
-            tasks.Add(task);
-        }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-
-        // Now update the repo / session serially to avoid threading issues inside ScanSession.
-        for (int i = 0; i < totalToHash; i++)
-        {
-            var file  = filesToHash[i];
-            var hash  = hashes[i];
-            var error = errors[i];
-
-            if (ok[i])
-            {
-                session.AddOrUpdateFile(
-                    fullFilePath: file.Path,
-                    hash: hash,
-                    status: ScanEntryStatus.Hashed);
-            }
-            else
-            {
-                // Hash failed: mark in session with CannotCompute + Error status/message.
-                session.AddOrUpdateFile(
-                    fullFilePath: file.Path,
-                    hash: hash,
-                    status: ScanEntryStatus.Error,
-                    errorMessage: error);
-            }
-        }
-        
-        // Final progress report (100%)
         Report(
             progress,
             ScanPhase.Hashing,
             "Hashing complete.",
             percent: 1.0,
-            processed: totalToHash,
-            total: totalToHash);
-
-        long bytesHashed = 0;
-        int filesHashed = 0;
-        for (var i = 0; i < totalToHash; i++)
-        {
-            if (!ok[i]) continue;
-            filesHashed++;
-            bytesHashed += filesToHash[i].Size;
-        }
-
-        TimingLog.Counter("files_hashed", filesHashed );
-        TimingLog.Counter("bytes_hashed", bytesHashed );
-    
+            processed: total,
+            total: total);
     }
+
+    
+    // private async Task RunHashingAsync(
+    //     IReadOnlyList<FileToHash> filesToHash,
+    //     IProgress<DuplicateFileFinderProgressReport>? progress,
+    //     IScanSession session,
+    //     CancellationToken token)
+    // {
+    //     Report(progress, ScanPhase.Hashing, "Computing checksums...");
+    //
+    //     var totalToHash = filesToHash.Count;
+    //     
+    //     if (totalToHash == 0)
+    //     {
+    //         Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
+    //         return;
+    //     }
+    //
+    //     // Parallel hash results, session updates will be done serially afterwards.
+    //     var hashes = new HashKey[totalToHash];
+    //     var errors = new string?[totalToHash];
+    //     var ok     = new bool[totalToHash];
+    //
+    //     var semaphore = new SemaphoreSlim(_hashDegreeOfParallelism);
+    //     var tasks     = new List<Task>(totalToHash);
+    //     long processed = 0;
+    //
+    //     for (int i = 0; i < totalToHash; i++)
+    //     {
+    //         var idx  = i;
+    //         var file = filesToHash[idx];
+    //
+    //         await semaphore.WaitAsync(token).ConfigureAwait(false);
+    //
+    //         var task = Task.Run(async () =>
+    //         {
+    //             try
+    //             {
+    //                 token.ThrowIfCancellationRequested();
+    //
+    //                 // Compute hash for this file
+    //                 var hashKey = await _checksums
+    //                     .ComputeFileHashAsync(file.Path, token)
+    //                     .ConfigureAwait(false);
+    //
+    //                 hashes[idx] = hashKey;
+    //                 ok[idx]     = true;
+    //             }
+    //             catch (OperationCanceledException)
+    //             {
+    //                 // Let cancellation propagate; do not mark as error.
+    //                 throw;
+    //             }
+    //             catch (Exception ex)
+    //             {
+    //                 // Hash failed for this file: mark CannotCompute + capture error string.
+    //                 hashes[idx] = HashKey.CannotCompute;
+    //                 errors[idx] = ex.Message;
+    //                 ok[idx]     = false;
+    //             }
+    //             finally
+    //             {
+    //                 var done = Interlocked.Increment(ref processed);
+    //         
+    //                 var pct = Math.Min(1.0,
+    //                     totalToHash == 0 ? 1.0 : (double)done / totalToHash);
+    //
+    //                 // Progress reporting can safely be done from multiple threads
+    //                 Report(
+    //                     progress,
+    //                     ScanPhase.Hashing,
+    //                     done == totalToHash
+    //                         ? "Finished hashing."
+    //                         : $"Hashing files... ({done}/{totalToHash})",
+    //                     pct,
+    //                     processed: done,
+    //                     total: totalToHash);
+    //
+    //                 semaphore.Release();
+    //             }
+    //         }, token);
+    //
+    //         tasks.Add(task);
+    //     }
+    //
+    //     await Task.WhenAll(tasks).ConfigureAwait(false);
+    //
+    //     // Now update the repo / session serially to avoid threading issues inside ScanSession.
+    //     for (int i = 0; i < totalToHash; i++)
+    //     {
+    //         var file  = filesToHash[i];
+    //         var hash  = hashes[i];
+    //         var error = errors[i];
+    //
+    //         if (ok[i])
+    //         {
+    //             session.AddOrUpdateFile(
+    //                 fullFilePath: file.Path,
+    //                 hash: hash,
+    //                 status: ScanEntryStatus.Hashed);
+    //         }
+    //         else
+    //         {
+    //             // Hash failed: mark in session with CannotCompute + Error status/message.
+    //             session.AddOrUpdateFile(
+    //                 fullFilePath: file.Path,
+    //                 hash: hash,
+    //                 status: ScanEntryStatus.Error,
+    //                 errorMessage: error);
+    //         }
+    //     }
+    //     
+    //     // Final progress report (100%)
+    //     Report(
+    //         progress,
+    //         ScanPhase.Hashing,
+    //         "Hashing complete.",
+    //         percent: 1.0,
+    //         processed: totalToHash,
+    //         total: totalToHash);
+    //
+    //     long bytesHashed = 0;
+    //     int filesHashed = 0;
+    //     for (var i = 0; i < totalToHash; i++)
+    //     {
+    //         if (!ok[i]) continue;
+    //         filesHashed++;
+    //         bytesHashed += filesToHash[i].Size;
+    //     }
+    //
+    //     TimingLog.Counter("files_hashed", filesHashed );
+    //     TimingLog.Counter("bytes_hashed", bytesHashed );
+    // }
     
     
     // ------------ Progress helper ----------------
@@ -343,4 +373,145 @@ public sealed class DuplicateFileFinder
             IsRunning = running
         });
     }
+    
+    // ---------- HashingHelper -----------
+    private static class HashingRunner
+    {
+        internal sealed class Result
+        {
+            public Result(HashKey[] hashes, string?[] errors, bool[] ok)
+            {
+                Hashes = hashes;
+                Errors = errors;
+                Ok     = ok;
+            }
+
+            public HashKey[] Hashes { get; }
+            public string?[] Errors { get; }
+            public bool[]    Ok     { get; }
+
+            // ReSharper disable once UnusedMember.Local
+            public int Total => Hashes.Length;
+        }
+
+        public static async Task<Result> HashFilesAsync(
+            IReadOnlyList<FileToHash> files,
+            IChecksumPipeline pipeline,
+            int hashDegreeOfParallelism,
+            IProgress<DuplicateFileFinderProgressReport>? progress,
+            CancellationToken token)
+        {
+            var total = files.Count;
+            var hashes = new HashKey[total];
+            var errors = new string?[total];
+            var ok     = new bool[total];
+
+            var dop       = Math.Max(1, hashDegreeOfParallelism);
+            var semaphore = new SemaphoreSlim(dop);
+            var tasks     = new Task[total];
+            long processed = 0;
+
+            for (int i = 0; i < total; i++)
+            {
+                int idx  = i;
+                var file = files[idx];
+
+                await semaphore.WaitAsync(token).ConfigureAwait(false);
+
+                tasks[idx] = Task.Run(async () =>
+                {
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        var hashKey = await pipeline
+                            .ComputeFileHashAsync(file.Path, token)
+                            .ConfigureAwait(false);
+
+                        hashes[idx] = hashKey;
+                        ok[idx]     = true;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        hashes[idx] = HashKey.CannotCompute;
+                        errors[idx] = ex.Message;
+                        ok[idx]     = false;
+                    }
+                    finally
+                    {
+                        var done = Interlocked.Increment(ref processed);
+                        var pct  = Math.Min(1.0, (double)done / total);
+
+                        DuplicateFileFinder.Report(
+                            progress,
+                            ScanPhase.Hashing,
+                            done == total
+                                ? "Finished hashing."
+                                : $"Hashing files... ({done}/{total})",
+                            pct,
+                            processed: done,
+                            total: total);
+
+                        semaphore.Release();
+                    }
+                }, token);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            return new Result(hashes, errors, ok);
+        }
+
+        public static void ApplyHashResults(
+            IReadOnlyList<FileToHash> files,
+            Result result,
+            IScanSession session)
+        {
+            for (int i = 0; i < files.Count; i++)
+            {
+                var file  = files[i];
+                var hash  = result.Hashes[i];
+                var error = result.Errors[i];
+
+                if (result.Ok[i])
+                {
+                    session.AddOrUpdateFile(
+                        fullFilePath: file.Path,
+                        hash: hash,
+                        status: ScanEntryStatus.Hashed);
+                }
+                else
+                {
+                    session.AddOrUpdateFile(
+                        fullFilePath: file.Path,
+                        hash: hash,
+                        status: ScanEntryStatus.Error,
+                        errorMessage: error);
+                }
+            }
+        }
+
+        public static void RecordHashingStats(
+            IReadOnlyList<FileToHash> files,
+            Result result)
+        {
+            long bytes = 0;
+            int count  = 0;
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                if (!result.Ok[i]) continue;
+                count++;
+                bytes += files[i].Size;
+            }
+
+            TimingLog.Counter("files_hashed",  count);
+            TimingLog.Counter("bytes_hashed",  bytes);
+        }
+    }
+
 }
