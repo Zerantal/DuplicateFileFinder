@@ -82,7 +82,6 @@ public sealed class FileEnumerator : IFileEnumerator
                         if (string.IsNullOrEmpty(full) || IsVirtualOrEphemeralRoot(full))
                             return false;
                     }
-
                     if (fe.IsDirectory) return true; // dirs always included (we decide traversal elsewhere)
 
                     if (fe.Length > 0) return true; // fast-path for regular files

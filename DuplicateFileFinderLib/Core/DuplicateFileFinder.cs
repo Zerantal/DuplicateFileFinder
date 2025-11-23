@@ -74,22 +74,22 @@ public sealed class DuplicateFileFinder
             }
 
             // 2) Enumerate
-            var tempSizes = new Dictionary<long, int>();
+            // var tempSizes = new Dictionary<long, int>();
             using (PhaseScope.Begin(ScanPhase.Enumerating))
             using (TimingLog.StartPhase(ScanPhase.Enumerating))
             {
-                await EnumeratePhaseAsync(scope, tempSizes, progress, session, token);
-                TimingLog.Counter("folders", scope.AggregateFolderCount);
-                TimingLog.Counter("files", scope.AggregateFileCount);
+                await EnumeratePhaseAsync(scope, progress, session, token);
+                // TimingLog.Counter("folders", scope.AggregateFolderCount);
+                // TimingLog.Counter("files", scope.AggregateFileCount);
             }
 
             // 3) Hashing
             using (PhaseScope.Begin(ScanPhase.Hashing))
             using (TimingLog.StartPhase(ScanPhase.Hashing))
             {
-                var totalToHash = CountHashTargets(scope, tempSizes);
+                var totalToHash = CountHashTargets(scope);
                 TimingLog.Counter("targets", totalToHash);
-                await RunHashingAsync(scope, tempSizes, totalToHash, progress, session, token);
+                await RunHashingAsync(scope, totalToHash, progress, session, token);
             }
 
             // No legacy commit/aggregate phases: repo is the source of truth now.
@@ -117,83 +117,73 @@ public sealed class DuplicateFileFinder
 
     private async Task EnumeratePhaseAsync(
         FolderNode scope,
-        Dictionary<long, int> tempSizes,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
         CancellationToken token)
     {
         long foldersVisited = 0;
 
-        await scope.TraverseFolders(
-            async folder =>
-            {
-                token.ThrowIfCancellationRequested();
+        await scope.TraverseFolders(async folder =>
+        {
+            token.ThrowIfCancellationRequested();
 
-                foldersVisited++;
-                Report(progress, ScanPhase.Enumerating,
-                    $"Scanning {folder.Path}",
-                    indeterminate: true,
-                    processed: foldersVisited);
-                await Task.CompletedTask;
+            foldersVisited++;
+            Report(progress, ScanPhase.Enumerating,
+                $"Scanning {folder.Path}",
+                indeterminate: true,
+                processed: foldersVisited);
+            await Task.CompletedTask;
 
-                // Register this folder in the repo via path-based API.
-                // ScanSession will ensure path→DirId is unique and will
-                // handle parent creation if needed.
-                session.AddOrUpdateDirectory(folder.Path);
-                
-                // session.ObserveDirectory(folder.Path, ScanEntryStatus.Enumerated);
+            session.AddOrUpdateDirectory(folder.Path);
+            TimingLog.Counter("folders");
 
-                // 1) Seed tempSizes from existing files in this folder
-                foreach (var existingFile in folder.Files)
-                    tempSizes[existingFile.Size] = tempSizes.TryGetValue(existingFile.Size, out var n) ? n + 1 : 1;
+            // 2) Merge live FS enumeration with existing children (no re-adds)
+            var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                // 2) Merge live FS enumeration with existing children (no re-adds)
-                var existingFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var existingDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in folder.Files) existingFiles.Add(f.Path);
+            foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
 
-                foreach (var f in folder.Files) existingFiles.Add(f.Path);
-                foreach (var d in folder.SubFolders) existingDirs.Add(d.Path);
-
-                foreach (var e in _fs.EnumerateChildren(folder.Path, token))
-                    if (e.IsDirectory)
+            foreach (var e in _fs.EnumerateChildren(folder.Path, token))
+                if (e.IsDirectory)
+                {
+                    if (existingDirs.Add(e.FullPath))
+                        folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc, e.ModifiedTimeUtc));
+                }
+                else
+                {
+                    if (existingFiles.Add(e.FullPath))
                     {
-                        if (existingDirs.Add(e.FullPath))
-                            folder.AddFileSystemNode(new FolderNode(e.FullPath, e.CreationTimeUtc, e.ModifiedTimeUtc));
+                        var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc, e.ModifiedTimeUtc);
+                        folder.AddFileSystemNode(fn);
                     }
-                    else
-                    {
-                        if (existingFiles.Add(e.FullPath))
-                        {
-                            var fn = new FileNode(e.FullPath, e.Length, e.CreationTimeUtc, e.ModifiedTimeUtc);
-                            folder.AddFileSystemNode(fn);
-                            tempSizes[fn.Size] = tempSizes.TryGetValue(fn.Size, out var n) ? n + 1 : 1;
-                        }
-                        session.AddOrUpdateFile(
-                            fullFilePath: e.FullPath,
-                            size: e.Length,
-                            hash: HashKey.NotComputed, 
-                            modified: e.ModifiedTimeUtc,
-                            created: e.CreationTimeUtc,
-                            status: ScanEntryStatus.Enumerated);
-                    }
-            },
-            f =>
-            {
-                f.UpdateFolderStats();
-                return Task.CompletedTask;
-            });
+
+                    session.AddOrUpdateFile(
+                        fullFilePath: e.FullPath,
+                        size: e.Length,
+                        hash: HashKey.NotComputed,
+                        modified: e.ModifiedTimeUtc,
+                        created: e.CreationTimeUtc,
+                        status: ScanEntryStatus.Enumerated);
+                    TimingLog.Counter("files");
+                }
+        });
+        // ,
+        // f =>
+        // {
+        //     f.UpdateFolderStats();
+        //     return Task.CompletedTask;
+        // });
     }
 
     // ------------ Hashing phase ----------------
     
-    private static int CountHashTargets(FolderNode scope, Dictionary<long, int> tempSizes)
+    private static int CountHashTargets(FolderNode scope)
     {
         var totalToHash = 0;
         scope.TraverseFolders(f =>
         {
-            foreach (var file in f.Files)
-                if (tempSizes.TryGetValue(file.Size, out var cnt) && cnt > 1 && file.ChecksumBytes == null)
-                    totalToHash++;
+            totalToHash += f.Files.Count(file => file.ChecksumBytes == null);
             return Task.CompletedTask;
         }).Wait();
         return totalToHash;
@@ -201,7 +191,6 @@ public sealed class DuplicateFileFinder
     
     private async Task RunHashingAsync(
         FolderNode scope,
-        Dictionary<long, int> tempSizes,
         int totalToHash,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
@@ -211,7 +200,7 @@ public sealed class DuplicateFileFinder
 
         bool TargetPredicate(FileNode f)
         {
-            return tempSizes.TryGetValue(f.Size, out var cnt) && cnt > 1 && f.ChecksumBytes == null;
+            return f is { Size: > 0, ChecksumBytes: null };
         }
 
         long processed = 0;
