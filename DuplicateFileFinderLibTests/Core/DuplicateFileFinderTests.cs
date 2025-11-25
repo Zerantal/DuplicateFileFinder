@@ -67,6 +67,26 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         public string GetFullDirPath(Guid dirId)
             => throw new NotImplementedException();
+
+        public void RemoveScanRoot(string rootPath)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IReadOnlyList<DirRecord> GetChildDirs(Guid parentDirId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IReadOnlyList<FileRecord> GetChildFiles(Guid parentDirId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public IReadOnlyList<IReadOnlyList<FileRecord>> GetDuplicateGroups()
+        {
+            throw new NotImplementedException();
+        }
     }
 
     private sealed class CapturingSession(string rootPath) : IScanSession
@@ -124,7 +144,17 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
                     status ?? ScanEntryStatus.Enumerated,
                     errorMessage));
         }
-        
+
+        public void MarkDirectoryDeleted(Guid dirId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void MarkFileDeleted(Guid fileId)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task FlushProgressAsync(CancellationToken cancellationToken = default)
         {
             FlushCallCount++;
@@ -194,7 +224,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         // Act
         var progress = new Progress<DuplicateFileFinderProgressReport>();
-        await finder.ScanLocationAsync(_fs.Root, progress);
+        await finder.ScanLocationAsync(_fs.Root, progressIndicator: progress);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -256,7 +286,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var repo = new CapturingRepo();
         var finder = new DuplicateFileFinder(repo);
 
-        await finder.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>());
+        await finder.ScanLocationAsync(root);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -287,7 +317,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var reports = new List<DuplicateFileFinderProgressReport>();
         var progress = new Progress<DuplicateFileFinderProgressReport>(r => reports.Add(r));
 
-        await finder.ScanLocationAsync(root, progress);
+        await finder.ScanLocationAsync(root, progressIndicator: progress);
 
         Assert.NotEmpty(reports);
 
@@ -313,8 +343,8 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var finder = new DuplicateFileFinder(repo);
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocationAsync(root1, progress);
-        await finder.ScanLocationAsync(root2, progress);
+        await finder.ScanLocationAsync(root1, progressIndicator: progress);
+        await finder.ScanLocationAsync(root2, progressIndicator: progress);
 
         Assert.Equal(2, repo.BeginScanRoots.Count);
 
@@ -349,7 +379,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         // Act + Assert
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>(), cts.Token));
+            await finder.ScanLocationAsync(root, token: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -373,7 +403,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         // Act: expect some exception (e.g. DirectoryNotFoundException)
         await Assert.ThrowsAsync<DirectoryNotFoundException>(async () =>
-            await finder.ScanLocationAsync(missingRoot, null, CancellationToken.None));
+            await finder.ScanLocationAsync(missingRoot, token: CancellationToken.None));
 
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
@@ -416,7 +446,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, progress, cts.Token));
+            await finder.ScanLocationAsync(root, progressIndicator: progress, token: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -454,7 +484,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, progress, cts.Token));
+            await finder.ScanLocationAsync(root, progressIndicator: progress, token: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -478,7 +508,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         var repo1 = new CapturingRepo();
         var finder1 = new DuplicateFileFinder(repo1);
-        await finder1.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>());
+        await finder1.ScanLocationAsync(root);
 
         var session1 = Assert.IsType<CapturingSession>(repo1.LastSession);
         var hashesRun1 = session1.FinalFiles.ToDictionary(
@@ -487,7 +517,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         var repo2 = new CapturingRepo();
         var finder2 = new DuplicateFileFinder(repo2);
-        await finder2.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>());
+        await finder2.ScanLocationAsync(root);
 
         var session2 = Assert.IsType<CapturingSession>(repo2.LastSession);
         var hashesRun2 = session2.FinalFiles.ToDictionary(
@@ -511,7 +541,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var repo = new CapturingRepo();
         var finder = new DuplicateFileFinder(repo);
 
-        await finder.ScanLocationAsync(root, new Progress<DuplicateFileFinderProgressReport>());
+        await finder.ScanLocationAsync(root);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -539,8 +569,8 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var repo = new CapturingRepo();
         var finder = new DuplicateFileFinder(repo);
 
-        await finder.ScanLocationAsync(root1, new Progress<DuplicateFileFinderProgressReport>());
-        await finder.ScanLocationAsync(root2, new Progress<DuplicateFileFinderProgressReport>());
+        await finder.ScanLocationAsync(root1);
+        await finder.ScanLocationAsync(root2);
 
         Assert.Equal(2, repo.Sessions.Count);
     
@@ -554,4 +584,434 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     
         Assert.Equal(f1Obs.Hash, f2Obs.Hash);
     }
+    
+    private static Repo CreateRepo(string root)
+    {
+        var repoDir = Path.Combine(root, ".repo");
+        Directory.CreateDirectory(repoDir);
+        return Repo.Open(repoDir);
+    }
+
+    private static Dictionary<string, FileRecord> MapFilesByFullPath(Repo repo, RepoViewSnapshot snapshot)
+    {
+        var result = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in snapshot.Files)
+        {
+            var file = kv.Value;
+            var dirPath = PathUtils.NormalizePath(repo.GetFullDirPath(file.DirId));
+            var fullPath = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
+            result[fullPath] = file;
+        }
+
+        return result;
+    }
+
+    private static HashSet<string> MapDirsByFullPath(Repo repo, RepoViewSnapshot snapshot)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in snapshot.Dirs)
+        {
+            var dirPath = PathUtils.NormalizePath(repo.GetFullDirPath(kv.Key));
+            result.Add(dirPath);
+        }
+
+        return result;
+    }
+    
+    [Fact]
+    public async Task FullScanThenRescan_WithDeletedFile_RemovesFileFromRepoAndHashIndex()
+    {
+        // Arrange: root/
+        //   keep.bin   (kept across rescan)
+        //   delete.bin (deleted before second scan)
+        var root = _fs.Dir("root");
+        var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
+        var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
+
+        var repo    = CreateRepo(_fs.Root);
+        var finder  = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1        = repo.GetSnapshot();
+        var filesByPath1 = MapFilesByFullPath(repo, snap1);
+
+        // Sanity: both files are present after first scan
+        Assert.Contains(
+            filesByPath1.Keys,
+            p => PathUtils.IsSamePath(p, keepPath));
+        Assert.Contains(
+            filesByPath1.Keys,
+            p => PathUtils.IsSamePath(p, deletePath));
+
+        var deleteRecord1 = filesByPath1.Single(kv => PathUtils.IsSamePath(kv.Key, deletePath)).Value;
+        var deleteHash    = deleteRecord1.Hash;
+
+        // Hash index should include the deleted file's hash initially
+        Assert.True(
+            snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore)
+            && idsBefore.Contains(deleteRecord1.Id));
+
+        // Act: delete the file on disk and rescan the same root
+        File.Delete(deletePath);
+
+        await finder.ScanLocationAsync(root);
+
+        var snap2        = repo.GetSnapshot();
+        var filesByPath2 = MapFilesByFullPath(repo, snap2);
+
+        // Assert: kept file is still present, deleted file is gone
+        Assert.Contains(
+            filesByPath2.Keys,
+            p => PathUtils.IsSamePath(p, keepPath));
+        Assert.DoesNotContain(
+            filesByPath2.Keys,
+            p => PathUtils.IsSamePath(p, deletePath));
+
+        // Hash index should no longer reference the deleted file's hash
+        Assert.False(
+            snap2.HashIndex.TryGetValue(deleteHash, out var idsAfter)
+            && idsAfter.Count > 0);
+    }
+    
+    [Fact]
+    public async Task FullScanThenRescan_WithDeletedDirectory_RemovesDirectoryAndChildrenFromRepo()
+    {
+        // Arrange: root/
+        //   keep.bin              (kept across rescan)
+        //   sub/child.bin         (directory and file both deleted)
+        var root = _fs.Dir("root");
+        var keepPath = _fs.File("root/keep.bin", "AAAA"u8.ToArray());
+        _fs.Dir("root/sub");
+        var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
+
+        var repo    = CreateRepo(_fs.Root);
+        var finder  = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1        = repo.GetSnapshot();
+        var filesByPath1 = MapFilesByFullPath(repo, snap1);
+        var dirs1        = MapDirsByFullPath(repo, snap1);
+
+        var normRoot = PathUtils.NormalizePath(root);
+        var normSub  = PathUtils.NormalizePath(Path.Combine(root, "sub"));
+
+        // Sanity: root dir, sub dir, and both files exist in repo
+        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normRoot));
+        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normSub));
+
+        Assert.Contains(filesByPath1.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.Contains(filesByPath1.Keys, p => PathUtils.IsSamePath(p, childPath));
+
+        // Act: delete the sub directory (and its child) and rescan the same root
+        Directory.Delete(normSub, recursive: true);
+
+        await finder.ScanLocationAsync(root);
+
+        var snap2        = repo.GetSnapshot();
+        var filesByPath2 = MapFilesByFullPath(repo, snap2);
+        var dirs2        = MapDirsByFullPath(repo, snap2);
+
+        // Assert: root directory still present, sub directory removed
+        Assert.Contains(dirs2, p => PathUtils.IsSamePath(p, normRoot));
+        Assert.DoesNotContain(dirs2, p => PathUtils.IsSamePath(p, normSub));
+
+        // Kept file still present, child file removed
+        Assert.Contains(filesByPath2.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.DoesNotContain(filesByPath2.Keys, p => PathUtils.IsSamePath(p, childPath));
+    }
+    
+    [Fact]
+    public async Task FullRescan_WithoutChanges_DoesNotDeleteOrChangeFilesOrDirs()
+    {
+        // Arrange
+        var root = _fs.Dir("root");
+        _fs.File("root/a.bin", "AAAA"u8.ToArray());
+        _fs.File("root/b.bin", "BBBB"u8.ToArray());
+        _fs.Dir("root/sub");
+        _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
+
+        var repo     = CreateRepo(_fs.Root);
+        var finder   = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1  = repo.GetSnapshot();
+        var files1 = MapFilesByFullPath(repo, snap1);
+        var dirs1  = MapDirsByFullPath(repo, snap1);
+
+        // Second scan (full rescan, no changes on disk)
+        await finder.ScanLocationAsync(root);
+
+        var snap2  = repo.GetSnapshot();
+        var files2 = MapFilesByFullPath(repo, snap2);
+        var dirs2  = MapDirsByFullPath(repo, snap2);
+
+        // Assert: same dirs, no deletions
+        Assert.Equal(dirs1.Count, dirs2.Count);
+        Assert.True(dirs1.SetEquals(dirs2));
+
+        // Assert: same files by path
+        Assert.Equal(files1.Count, files2.Count);
+        Assert.True(files1.Keys.SequenceEqual(files2.Keys));
+
+        foreach (var path in files1.Keys)
+        {
+            var a = files1[path];
+            var b = files2[path];
+
+            Assert.Equal(a.Size, b.Size);
+            Assert.Equal(a.Hash, b.Hash);
+            Assert.False(a.Status.HasFlag(ScanEntryStatus.Deleted));
+            Assert.False(b.Status.HasFlag(ScanEntryStatus.Deleted));
+            Assert.Equal(a.ErrorMessage, b.ErrorMessage);
+        }
+    }
+
+    [Fact]
+    public async Task QuickRescan_WithoutChanges_DoesNotDeleteOrChangeFilesOrDirs()
+    {
+        // Arrange
+        var root = _fs.Dir("root");
+        _fs.File("root/a.bin", "AAAA"u8.ToArray());
+        _fs.File("root/b.bin", "BBBB"u8.ToArray());
+        _fs.Dir("root/sub");
+        _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
+
+        var repo     = CreateRepo(_fs.Root);
+        var finder   = new DuplicateFileFinder(repo);
+
+        // First scan (full)
+        await finder.ScanLocationAsync(root);
+
+        var snap1  = repo.GetSnapshot();
+        var files1 = MapFilesByFullPath(repo, snap1);
+        var dirs1  = MapDirsByFullPath(repo, snap1);
+
+        // Quick rescan (no changes on disk)
+        await finder.ScanLocationAsync(root, ScanMode.Quick);
+
+        var snap2  = repo.GetSnapshot();
+        var files2 = MapFilesByFullPath(repo, snap2);
+        var dirs2  = MapDirsByFullPath(repo, snap2);
+
+        // Assert: same dirs, no deletions
+        Assert.Equal(dirs1.Count, dirs2.Count);
+        Assert.True(dirs1.SetEquals(dirs2));
+
+        // Assert: same files by path
+        Assert.Equal(files1.Count, files2.Count);
+        Assert.True(files1.Keys.SequenceEqual(files2.Keys));
+
+        foreach (var path in files1.Keys)
+        {
+            var a = files1[path];
+            var b = files2[path];
+
+            Assert.Equal(a.Size, b.Size);
+            Assert.Equal(a.Hash, b.Hash);
+            Assert.False(a.Status.HasFlag(ScanEntryStatus.Deleted));
+            Assert.False(b.Status.HasFlag(ScanEntryStatus.Deleted));
+            Assert.Equal(a.ErrorMessage, b.ErrorMessage);
+        }
+    }
+
+    [Fact]
+    public async Task QuickRescan_WithDeletedFile_RemovesFileAndHashIndexEntry()
+    {
+        // Arrange
+        var root       = _fs.Dir("root");
+        var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
+        var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
+
+        var repo     = CreateRepo(_fs.Root);
+        var finder   = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1  = repo.GetSnapshot();
+        var files1 = MapFilesByFullPath(repo, snap1);
+
+        // Sanity: both files present
+        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, deletePath));
+
+        var deleteRecord1 = files1.Single(kv => PathUtils.IsSamePath(kv.Key, deletePath)).Value;
+        var deleteHash    = deleteRecord1.Hash;
+
+        // Hash index contains deleted file initially
+        Assert.True(
+            snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore) &&
+            idsBefore.Contains(deleteRecord1.Id));
+
+        // Delete file on disk
+        File.Delete(deletePath);
+
+        // Act: quick rescan
+        await finder.ScanLocationAsync(root, ScanMode.Quick);
+
+        var snap2  = repo.GetSnapshot();
+        var files2 = MapFilesByFullPath(repo, snap2);
+
+        // Assert: kept file remains, deleted file gone
+        Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, deletePath));
+
+        // Hash index no longer references deleted file's hash
+        Assert.False(
+            snap2.HashIndex.TryGetValue(deleteHash, out var idsAfter) &&
+            idsAfter.Count > 0);
+    }
+
+    [Fact]
+    public async Task QuickRescan_WithDeletedDirectory_RemovesDirectoryAndChildren()
+    {
+        // Arrange
+        var root     = _fs.Dir("root");
+        var keepPath = _fs.File("root/keep.bin", "AAAA"u8.ToArray());
+        _fs.Dir("root/sub");
+        var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
+
+        var repo     = CreateRepo(_fs.Root);
+        var finder   = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1  = repo.GetSnapshot();
+        var files1 = MapFilesByFullPath(repo, snap1);
+        var dirs1  = MapDirsByFullPath(repo, snap1);
+
+        var normRoot = PathUtils.NormalizePath(root);
+        var normSub  = PathUtils.NormalizePath(Path.Combine(root, "sub"));
+
+        // Sanity: root dir, sub dir, and both files exist
+        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normRoot));
+        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normSub));
+        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, childPath));
+
+        // Delete sub directory on disk
+        Directory.Delete(normSub, recursive: true);
+
+        // Act: quick rescan
+        await finder.ScanLocationAsync(root, ScanMode.Quick);
+
+        var snap2  = repo.GetSnapshot();
+        var files2 = MapFilesByFullPath(repo, snap2);
+        var dirs2  = MapDirsByFullPath(repo, snap2);
+
+        // Assert: root dir remains, sub dir removed
+        Assert.Contains(dirs2, p => PathUtils.IsSamePath(p, normRoot));
+        Assert.DoesNotContain(dirs2, p => PathUtils.IsSamePath(p, normSub));
+
+        // Kept file remains, child file removed
+        Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
+        Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, childPath));
+    }
+
+    [Fact]
+    public async Task QuickRescan_WithModifiedFile_UpdatesHashOnlyForChangedFile()
+    {
+        // Arrange
+        var root       = _fs.Dir("root");
+        var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
+        var changePath = _fs.File("root/change.bin", "BBBB"u8.ToArray());
+
+        var repo     = CreateRepo(_fs.Root);
+        var finder   = new DuplicateFileFinder(repo);
+
+        // First scan
+        await finder.ScanLocationAsync(root);
+
+        var snap1  = repo.GetSnapshot();
+        var files1 = MapFilesByFullPath(repo, snap1);
+
+        var keep1   = files1.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
+        var change1 = files1.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
+
+        // Modify one file on disk
+        await File.WriteAllBytesAsync(changePath, "CCCC"u8.ToArray());
+
+        // Act: quick rescan
+        await finder.ScanLocationAsync(root);
+
+        var snap2  = repo.GetSnapshot();
+        var files2 = MapFilesByFullPath(repo, snap2);
+
+        var keep2   = files2.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
+        var change2 = files2.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
+
+        // Kept file: unchanged
+        Assert.Equal(keep1.Hash, keep2.Hash);
+        Assert.Equal(keep1.Size, keep2.Size);
+        Assert.Equal(keep1.Status, keep2.Status);
+
+        // Changed file: hash and modified time updated, still hashed
+        Assert.NotEqual(change1.Hash, change2.Hash);
+        Assert.NotEqual(change1.Modified, change2.Modified);
+        Assert.Equal(ScanEntryStatus.Hashed, change2.Status);
+    }
+    
+    [Fact]
+public async Task FileNameWithBackslash_IsNotSplitIntoDirectory_OnUnix()
+{
+    // This edge case only applies on Unix-like systems where '\' is allowed in file names.
+    if (Path.DirectorySeparatorChar == '\\')
+        return; // On Windows paths with '\' in the file name cannot exist; nothing to test.
+
+    // Arrange
+    var root = _fs.Dir("root");
+    var netDir = _fs.Dir("root/net9.0");
+
+    // Create a file whose name contains a backslash. On Unix this is legal and should
+    // NOT be split into a "TestData" directory + file.
+    const string fileNameWithBackslash = "TestData\\ScanLocationTest_actual.csv";
+    var fullPath = Path.Combine(netDir, fileNameWithBackslash);
+
+    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+    await File.WriteAllBytesAsync(fullPath, "HELLO"u8.ToArray());
+
+    // Repo + scanner
+    var repoDir = Path.Combine(_fs.Root, ".repo");
+    Directory.CreateDirectory(repoDir);
+    var repo   = Repo.Open(repoDir);
+    var finder = new DuplicateFileFinder(repo);
+
+    // Act
+    await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
+
+    var snapshot = repo.GetSnapshot();
+
+    // Find the net9.0 directory in the repo
+    var expectedNetDirPath = PathUtils.NormalizePath(netDir);
+    var netDirRecord = snapshot.Dirs.Values.Single(d =>
+        PathUtils.IsSamePath(repo.GetFullDirPath(d.Id), expectedNetDirPath));
+
+    // Assert 1: no child directory called "TestData" under net9.0
+    var childDirNames = snapshot.Dirs.Values
+        .Where(d => d.ParentId == netDirRecord.Id)
+        .Select(d => d.Name)
+        .ToList();
+
+    Assert.DoesNotContain("TestData", childDirNames);
+
+    // Assert 2: there is a file whose *name* includes the backslash and whose
+    // full path matches the actual file we created, and it lives directly under net9.0.
+    var matchingFile = snapshot.Files.Values.SingleOrDefault(f =>
+    {
+        var dirPath = repo.GetFullDirPath(f.DirId);
+        var repoFullPath = Path.Combine(dirPath, f.Name);
+        return PathUtils.IsSamePath(repoFullPath, fullPath);
+    });
+
+    Assert.NotNull(matchingFile);
+    Assert.Equal(netDirRecord.Id, matchingFile.DirId);
+    Assert.Equal(fileNameWithBackslash, matchingFile.Name);
+}
 }

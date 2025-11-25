@@ -22,7 +22,7 @@ var finder = new DuplicateFileFinder(repo);
 log.Info($"Bench location: {root}", root);
 using (TimingLog.Start("Folder scan", root))
 {
-    await finder.ScanLocationAsync(root, null, CancellationToken.None);
+    await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
 }
 
 repo.CompactNow();

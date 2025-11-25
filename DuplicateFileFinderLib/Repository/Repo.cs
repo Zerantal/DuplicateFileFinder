@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Util;
 using MemoryPack;
 using NLog;
 
@@ -60,6 +61,88 @@ public sealed class Repo : IRepo
 
     // ---------- public ops ----------
 
+    public IReadOnlyList<DirRecord> GetChildDirs(Guid parentDirId)
+    {
+        lock (_sync)
+        {
+            // Typically, child count per dir is small; we avoid exposing the whole _dirs map.
+            var result = new List<DirRecord>();
+
+            foreach (var dir in _dirs.Values)
+            {
+                if (dir.ParentId == parentDirId)
+                    result.Add(dir);
+            }
+
+            return result;
+        }
+    }
+
+    public IReadOnlyList<FileRecord> GetChildFiles(Guid parentDirId)
+    {
+        lock (_sync)
+        {
+            var result = new List<FileRecord>();
+
+            foreach (var file in _files.Values)
+            {
+                if (file.DirId == parentDirId)
+                    result.Add(file);
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Returns all duplicate groups (files that share a hash, with group size >= 2).
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<FileRecord>> GetDuplicateGroups()
+    {
+        // Strategy:
+        // 1. Copy a shallow view of hash -> fileIds under lock (cheap vs full snapshot).
+        // 2. Resolve fileIds to FileRecord outside lock via a local helper, still locking briefly.
+
+        Dictionary<HashKey, List<Guid>> hashToIds;
+        lock (_sync)
+        {
+            hashToIds = new Dictionary<HashKey, List<Guid>>(_hashIndex.Count);
+            foreach (var kv in _hashIndex)
+            {
+                // Only consider candidates with possible duplicates
+                if (kv.Value.Count < 2)
+                    continue;
+
+                hashToIds[kv.Key] = new List<Guid>(kv.Value);
+            }
+        }
+
+        var groups = new List<IReadOnlyList<FileRecord>>();
+
+        foreach (var kv in hashToIds)
+        {
+            var ids = kv.Value;
+            if (ids.Count < 2)
+                continue;
+
+            var files = new List<FileRecord>(ids.Count);
+
+            lock (_sync)
+            {
+                foreach (var id in ids)
+                {
+                    if (_files.TryGetValue(id, out var file))
+                        files.Add(file);
+                }
+            }
+
+            if (files.Count >= 2)
+                groups.Add(files);
+        }
+
+        return groups;
+    }
+    
     public RepoViewSnapshot GetSnapshot()
     {
         lock (_sync)
@@ -80,6 +163,55 @@ public sealed class Repo : IRepo
             };
         }
     }
+    
+    public void RemoveScanRoot(string rootPath)
+    {
+        rootPath = PathUtils.NormalizePath(rootPath);
+        var snap = GetSnapshot();
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        var dirsToDelete  = new List<DirTombstone>();
+        var filesToDelete = new List<FileTombstone>();
+
+        long seq = AllocateScanSequence();
+        foreach (var dir in snap.Dirs.Values)
+        {
+            var dirPath = GetFullDirPath(dir.Id);
+            var normalized = PathUtils.NormalizePath(dirPath);
+            if (normalized.StartsWith(rootPath, comparison))
+            {
+                dirsToDelete.Add(new DirTombstone(dir.Id, seq));
+            }
+        }
+
+        foreach (var file in snap.Files.Values)
+        {
+            var dirPath = GetFullDirPath(file.DirId);
+            var full = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
+            if (full.StartsWith(rootPath, comparison))
+            {
+                filesToDelete.Add(new FileTombstone(file.Id, seq));
+            }
+        }
+
+        if (dirsToDelete.Count == 0 && filesToDelete.Count == 0)
+            return;
+
+        var delta = new RepoDelta
+        {
+            ScanSequence = seq,
+            Dirs         = new List<DirRecord>(),
+            Files        = new List<FileRecord>(),
+            DeletedDirs  = dirsToDelete,
+            DeletedFiles = filesToDelete
+        };
+
+        CommitDelta(delta);
+    }
+
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
 
@@ -145,7 +277,7 @@ public sealed class Repo : IRepo
             SaveSnapshot_NoLock();
         }
     }
-
+    
     // ---------- Compaction ---------
 
     public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
@@ -418,16 +550,26 @@ public sealed class Repo : IRepo
         {
             // If an existing file's hash changed, remove from old hash bucket
             if (_files.TryGetValue(f.Id, out var existing))
+            {
+                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                    continue;
                 if (!existing.Hash.Equals(f.Hash))
+                {
                     if (_hashIndex.TryGetValue(existing.Hash, out var oldList))
                     {
                         oldList.Remove(f.Id);
                         if (oldList.Count == 0)
                             _hashIndex.Remove(existing.Hash);
                     }
+                }
+            }
 
             _files[f.Id] = f;
 
+            // don't add to hash index when hash value hasn't been calculated
+            if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                continue;
+            
             if (!_hashIndex.TryGetValue(f.Hash, out var list))
             {
                 list = new List<Guid>(4);
@@ -453,7 +595,7 @@ public sealed class Repo : IRepo
             {
                 if (!_files.TryGetValue(tomb.Id, out var file))
                     continue;
-
+                
                 // Remove from hash index
                 if (_hashIndex.TryGetValue(file.Hash, out var list))
                 {
@@ -461,7 +603,7 @@ public sealed class Repo : IRepo
                     if (list.Count == 0)
                         _hashIndex.Remove(file.Hash);
                 }
-
+                
                 _files.Remove(tomb.Id);
             }
 

@@ -21,7 +21,7 @@
         <!-- Status message: fixed height, one line, cropped from left, ellipsis at end -->
         <Border Height="60"
                 VerticalAlignment="Center">
-            <TextBlock Text="{Binding DisplayStatusMessage}"
+            <TextBlock Text="{Binding StatusMessage}"
                        VerticalAlignment="Top"
                        TextWrapping="WrapWithOverflow"
                        TextTrimming="CharacterEllipsis" />

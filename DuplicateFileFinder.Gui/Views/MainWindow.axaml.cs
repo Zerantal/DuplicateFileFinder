@@ -19,7 +19,8 @@ public partial class MainWindow : Window
         var repo = Repo.Open(Path.Combine(appDir, "repo"));
         var dialogService = new DialogService();
         var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(repo);
-        var scanCoordinator = new ScanCoordinator(repo, scanEngine);
+        var scanCoordinator = new ScanCoordinator(repo, scanEngine, dialogService);
+        
         DataContext = new MainWindowViewModel(repo, scanCoordinator, dialogService);
 
     }

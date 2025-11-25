@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.ViewModels;
+using FolderNodeViewModel = DuplicateFileFinder.Gui.ViewModels.FolderNodeViewModel;
 
 // using NLog;
 

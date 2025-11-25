@@ -13,4 +13,22 @@ public interface IRepo
     void CompactIfNeeded(RepoCompactionPolicy? policy = null);
     void CompactNow();
     string GetFullDirPath(Guid dirId);
+    
+    void RemoveScanRoot(string rootPath);
+    
+    /// <summary>
+    /// Returns all immediate child directories of the specified parent directory.
+    /// </summary>
+    IReadOnlyList<DirRecord> GetChildDirs(Guid parentDirId);
+
+    /// <summary>
+    /// Returns all immediate child files of the specified directory.
+    /// </summary>
+    IReadOnlyList<FileRecord> GetChildFiles(Guid parentDirId);
+
+    /// <summary>
+    /// Returns all duplicate groups in the repo:
+    /// each group is a list of files that share the same hash and group size >= 2.
+    /// </summary>
+    IReadOnlyList<IReadOnlyList<FileRecord>> GetDuplicateGroups();
 }

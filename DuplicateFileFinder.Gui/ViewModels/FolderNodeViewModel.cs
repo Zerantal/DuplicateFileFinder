@@ -2,21 +2,36 @@
 
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using DuplicateFileFinder.Gui.Services;
+using DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
-public sealed class FolderNodeViewModel : ObservableObject
+public sealed partial class FolderNodeViewModel : ObservableObject
 {
-    public FolderNodeViewModel(Guid dirId, string name, string fullPath)
+    private readonly IScanCoordinator _scanCoordinator;
+
+    private string _fullPath;
+
+    private string _name;
+
+    private bool _showFullPath;
+
+    public FolderNodeViewModel(
+        Guid dirId,
+        string name,
+        string fullPath,
+        IScanCoordinator scanCoordinator)
     {
         DirId = dirId;
         _name = name;
         _fullPath = fullPath;
+        _scanCoordinator = scanCoordinator;
     }
 
     public Guid DirId { get; }
 
-    private string _name;
     public string Name
     {
         get => _name;
@@ -28,7 +43,6 @@ public sealed class FolderNodeViewModel : ObservableObject
         }
     }
 
-    private string _fullPath;
     public string FullPath
     {
         get => _fullPath;
@@ -39,8 +53,6 @@ public sealed class FolderNodeViewModel : ObservableObject
             OnPropertyChanged();
         }
     }
-
-    private bool _showFullPath;
 
     public bool ShowFullPath
     {
@@ -53,10 +65,37 @@ public sealed class FolderNodeViewModel : ObservableObject
     }
 
     public FolderNodeViewModel? Parent { get; set; }
-    
+
     public string DisplayName => ShowFullPath ? FullPath : Name;
-    
+
     public ObservableCollection<FolderNodeViewModel> Children { get; } = new();
+
+    public bool IsScanRoot => Parent == null;
+
+    // A callback that the owning viewmodel can set to remove this node
+    public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
+
+    [RelayCommand]
+    private async Task QuickRescanAsync()
+    {
+        await _scanCoordinator.RunScanWithDialogAsync(FullPath, ScanMode.Quick);
+    }
+
+    [RelayCommand]
+    private async Task FullRescanAsync()
+    {
+        await _scanCoordinator.RunScanWithDialogAsync(FullPath);
+    }
+
+    [RelayCommand]
+    private async Task RemoveRootAsync()
+    {
+        if (!IsScanRoot)
+            return;
+
+        await _scanCoordinator.RemoveScanRootAsync(FullPath);
+        OnRootRemoved?.Invoke(this);
+    }
 
     public override string ToString()
     {

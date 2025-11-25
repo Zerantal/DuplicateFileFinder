@@ -1,77 +1,159 @@
 // Gui/Services/ScanCoordinator.cs
 
-using DuplicateFileFinderLib.Core;
+using Avalonia.Threading;
+using DuplicateFileFinder.Gui.ViewModels;
+using DuplicateFileFinder.Gui.Views;
 using DuplicateFileFinderLib.Repository;
+using NLog;
+using Dff = DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.Services;
 
 public sealed class ScanCoordinator : IScanCoordinator
 {
-    private readonly DuplicateFileFinderLib.Core.DuplicateFileFinder _scanner;
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private readonly IDialogService _dialogService;
+    private readonly Dff.DuplicateFileFinder _finder;
+
     private readonly Repo _repo;
 
     private CancellationTokenSource? _cts;
 
-    public ScanCoordinator(Repo repo, DuplicateFileFinderLib.Core.DuplicateFileFinder scanner)
+    public ScanCoordinator(
+        Repo repo,
+        Dff.DuplicateFileFinder finder,
+        IDialogService dialogService)
     {
         _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+        _finder = finder ?? throw new ArgumentNullException(nameof(finder));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     }
+
+    public event EventHandler<Dff.DuplicateFileFinderProgressReport>? ProgressChanged;
+    public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
 
     public bool IsScanning { get; private set; }
 
-    public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
-
-    public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
-
-    public async Task RunScanAsync(string path)
+    public async Task RunScanWithDialogAsync(
+        string rootPath,
+        Dff.ScanMode mode = Dff.ScanMode.Full,
+        CancellationToken cancellationToken = default)
     {
+        // Ensure we start from UI thread; if not, hop there once.
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => RunScanWithDialogAsync(rootPath, mode, cancellationToken));
+            return;
+        }
+
         if (IsScanning)
             return;
 
         IsScanning = true;
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
+        Log.Info("Starting {mode} scan of {root}", mode, rootPath);
 
-        var progress = new Progress<DuplicateFileFinderProgressReport>(report =>
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // ViewModel + dialog
+        var progressVm = new ScanProgressViewModel(this);
+        var dialog = new ScanProgressWindow
+        {
+            DataContext = progressVm
+        };
+
+        // Progress created on UI thread → callbacks marshalled back to UI thread.
+        void HandleProgress(Dff.DuplicateFileFinderProgressReport report)
         {
             ProgressChanged?.Invoke(this, report);
-        });
+            progressVm.Update(report);
+        }
+
+        var progress = new Progress<Dff.DuplicateFileFinderProgressReport>(HandleProgress);
+
+        var owner = _dialogService.GetOwnerWindow();
+        var dialogTask = dialog.ShowDialog(owner); // modal; returns Task that completes when closed
 
         Exception? error = null;
         var cancelled = false;
 
-        try
-        {
-            await Task.Run(
-                () => _scanner.ScanLocationAsync(path, progress, token),
-                token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            cancelled = true;
-        }
-        catch (Exception ex)
-        {
-            error = ex;
-        }
-        finally
+        // Run the scan body completely off the UI thread.
+        var scanTask = Task.Run(async () =>
         {
             try
             {
-                _repo.SaveSnapshot();
+                await _finder.ScanLocationAsync(
+                        rootPath,
+                        mode,
+                        progress,
+                        _cts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled = true;
+                Log.Info("Scan cancelled for {root}", rootPath);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+                Log.Error(ex, "Scan failed for {root}", rootPath);
+            }
+        }, _cts.Token);
+
+        // Wait for scan to finish (still on background thread for scan body)
+        await scanTask.ConfigureAwait(false);
+
+        // Back to UI thread for dialog + events
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            try
+            {
+                if (dialog.IsVisible)
+                    dialog.Close();
             }
             catch
             {
-                // swallow
+                // ignore close errors
             }
 
             IsScanning = false;
-            _cts?.Dispose();
-            _cts = null;
 
-            ScanCompleted?.Invoke(this, new ScanCompletedEventArgs(path, cancelled, error));
-        }
+            ScanCompleted?.Invoke(
+                this,
+                new ScanCompletedEventArgs(
+                    rootPath,
+                    cancelled,
+                    error));
+        });
+
+        // Ensure the dialog has actually finished closing
+        await dialogTask;
+
+        // Propagate error / cancellation to caller if they care
+        if (error is not null)
+            throw error;
+        if (cancelled)
+            throw new OperationCanceledException();
+    }
+
+    public Task RemoveScanRootAsync(string rootPath)
+    {
+        _repo.RemoveScanRoot(rootPath);
+
+        // Raise completion on UI thread so handlers can touch UI safely.
+        if (Dispatcher.UIThread.CheckAccess())
+            ScanCompleted?.Invoke(
+                this,
+                new ScanCompletedEventArgs(rootPath, false, null));
+        else
+            Dispatcher.UIThread.Post(() =>
+            {
+                ScanCompleted?.Invoke(
+                    this,
+                    new ScanCompletedEventArgs(rootPath, false, null));
+            });
+
+        return Task.CompletedTask;
     }
 
     public void CancelScan()
@@ -85,23 +167,7 @@ public sealed class ScanCoordinator : IScanCoordinator
         }
         catch
         {
-            // no-op; cancellation is best-effort
+            // best-effort
         }
     }
-}
-
-public sealed class ScanCompletedEventArgs : EventArgs
-{
-    public ScanCompletedEventArgs(string path, bool cancelled, Exception? error)
-    {
-        Path = path;
-        Cancelled = cancelled;
-        Error = error;
-    }
-
-    public string Path { get; }
-    public bool Cancelled { get; }
-    public Exception? Error { get; }
-
-    public bool Succeeded => !Cancelled && Error is null;
 }
