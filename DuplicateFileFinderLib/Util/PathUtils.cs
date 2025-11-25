@@ -16,25 +16,34 @@ public static class PathUtils
         if (string.IsNullOrWhiteSpace(path))
             throw new ArgumentNullException(nameof(path));
 
-        // 1. Unify separators
-        var unified = path.Replace('\\', '/');
+        bool isWindows = Path.DirectorySeparatorChar == '\\';
 
-        // 2. Handle Windows drive roots (e.g. "C:/...") specially.
+        // 1. Unify separators *only* on Windows
+        // On Unix '\' is NOT a directory separator and must be preserved.
+        string unified = isWindows
+            ? path.Replace('\\', '/')
+            : path;
+
+        // 2. Handle Windows drive roots like "C:"
         var rootPrefix = "";
-        if (unified.Length >= 2 && char.IsLetter(unified[0]) && unified[1] == ':')
+        if (isWindows &&
+            unified.Length >= 2 &&
+            char.IsLetter(unified[0]) &&
+            unified[1] == ':')
         {
             rootPrefix = unified[..2]; // "C:"
             unified = unified[2..];
         }
 
-        // 3. Split and collapse "." and ".."
-        var parts = unified.Split(['/'], StringSplitOptions.RemoveEmptyEntries);
+        // 3. Collapse "." and ".." using *only* '/' as a separator
+        var parts = unified.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var stack = new Stack<string>();
 
         foreach (var part in parts)
         {
             if (part == ".")
                 continue;
+
             if (part == "..")
             {
                 if (stack.Count > 0)
@@ -47,8 +56,9 @@ public static class PathUtils
 
         var collapsed = string.Join("/", stack.Reverse());
 
-        // 4. Reattach root prefix and leading slash if it started with / or a drive
-        var startedWithSlash = path.StartsWith('/') || path.StartsWith('\\');
+        // 4. ReAttach root notation
+        var startedWithSlash = path.StartsWith('/') ||
+                               (isWindows && path.StartsWith("\\"));
         string normalized;
 
         if (!string.IsNullOrEmpty(rootPrefix))
@@ -58,16 +68,21 @@ public static class PathUtils
         else
             normalized = collapsed;
 
-        // 5. Remove duplicate slashes
+        // 5. Remove accidental double slashes
         while (normalized.Contains("//"))
             normalized = normalized.Replace("//", "/");
 
-        // 6. Optionally ensure trailing slash for folder paths
-        if (forceTrailingSlash && !string.IsNullOrEmpty(normalized) && !normalized.EndsWith('/'))
+        // 6. Optional trailing slash for directories
+        if (forceTrailingSlash &&
+            !string.IsNullOrEmpty(normalized) &&
+            !normalized.EndsWith('/'))
+        {
             normalized += "/";
+        }
 
         return normalized;
     }
+
 
     public static string? GetParentPath(string path)
     {

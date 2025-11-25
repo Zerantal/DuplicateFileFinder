@@ -31,7 +31,19 @@
             <TreeView.ItemTemplate>
                 <TreeDataTemplate DataType="vm:FolderNodeViewModel"
                                   ItemsSource="{Binding Children}">
-                    <TextBlock Text="{Binding DisplayName}" />
+                    <TextBlock Text="{Binding DisplayName}">
+                        <TextBlock.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Quick rescan"
+                                          Command="{Binding QuickRescanCommand}" />
+                                <MenuItem Header="Full rescan"
+                                          Command="{Binding FullRescanCommand}" />
+                                <MenuItem Header="Remove scan root"
+                                          Command="{Binding RemoveRootCommand}"
+                                          IsVisible="{Binding IsScanRoot}" />
+                            </ContextMenu>
+                        </TextBlock.ContextMenu>
+                    </TextBlock>
                 </TreeDataTemplate>
             </TreeView.ItemTemplate>
         </TreeView>

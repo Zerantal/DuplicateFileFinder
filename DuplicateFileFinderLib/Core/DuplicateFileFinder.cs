@@ -9,6 +9,12 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
 
+public enum ScanMode
+{
+    Full,   // Enumerate & compute hashes of all files/dirs in scan root           
+    Quick   // Enumerate & compute hashes of files where a change has been detected
+}
+
 public sealed class DuplicateFileFinder
 {
     private readonly IChecksumPipeline _checksums;
@@ -53,15 +59,17 @@ public sealed class DuplicateFileFinder
 
     // ------------ Public scanning API ----------------
 
-    public async Task ScanLocationAsync(string location,
+    public async Task ScanLocationAsync(
+        string location,
+        ScanMode mode = ScanMode.Full,
         IProgress<DuplicateFileFinderProgressReport>? progressIndicator = null,
         CancellationToken token = default)
     {
         location = PathUtils.NormalizePath(location);
 
-        IProgress<DuplicateFileFinderProgressReport>? progress = progressIndicator;
-        if (_throttleProgress)
-            progress = progress is null ? null : new ThrottledProgress(progress);
+        var progress = _throttleProgress && progressIndicator is not null
+            ? new ThrottledProgress(progressIndicator)
+            : progressIndicator;
         
         var session = _repo.BeginScan(location);
 
@@ -75,11 +83,23 @@ public sealed class DuplicateFileFinder
             }
             
             // 1) Enumerate filesystem and record into repo
+            QuickRescanState? quickState = null;
+            if (mode == ScanMode.Quick)
+            {
+                var snapshot = _repo.GetSnapshot();
+                quickState = BuildQuickRescanState(snapshot, location);
+            }
+
             List<FileToHash> filesToHash;
             using (PhaseScope.Begin(ScanPhase.Enumerating))
             using (TimingLog.StartPhase(ScanPhase.Enumerating))
             {
-                filesToHash = await EnumeratePhaseAsync(location, progress, session, token);
+                filesToHash = await EnumeratePhaseAsync(
+                    rootPath: location,
+                    progress: progress,
+                    session: session,
+                    quickState: quickState,
+                    token: token);
             }
 
             // 2) Hash all non-zero files
@@ -89,6 +109,12 @@ public sealed class DuplicateFileFinder
                 await RunHashingAsync(filesToHash, progress, session, token);
             }
             
+            // Deletion detection (quick rescan only)
+            if (quickState is not null)
+            {
+                ApplyQuickRescanDeletions(quickState, session);
+            }
+
             await session.CompleteAsync(token);
             Report(progress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
             _repo.CompactIfNeeded();
@@ -109,17 +135,22 @@ public sealed class DuplicateFileFinder
         }
     }
 
-    // ------------ Enumeration phase ----------------
 
+    // ------------ Enumeration phase ----------------
+    
     private async Task<List<FileToHash>> EnumeratePhaseAsync(
         string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         IScanSession session,
+        QuickRescanState? quickState,
         CancellationToken token)
     {
         var filesToHash   = new List<FileToHash>();
         var dirsToVisit   = new Stack<string>();
         long foldersVisited = 0;
+
+        var prevFiles = quickState?.PreviousFiles;
+        var prevDirs  = quickState?.PreviousDirs;
 
         dirsToVisit.Push(rootPath);
 
@@ -128,46 +159,66 @@ public sealed class DuplicateFileFinder
             token.ThrowIfCancellationRequested();
 
             var dir = dirsToVisit.Pop();
+            var normDir = PathUtils.NormalizePath(dir);
+
             foldersVisited++;
 
-            Report(progress,
+            Report(
+                progress,
                 ScanPhase.Enumerating,
-                $"Scanning {dir}",
+                $"Scanning {normDir}",
                 indeterminate: true,
                 processed: foldersVisited);
+            
+            // Mark this directory as seen, if it existed previously
+            prevDirs?.Remove(normDir);
 
-            session.AddOrUpdateDirectory(dir);
+            session.AddOrUpdateDirectory(normDir);
             TimingLog.Counter("folders");
 
-            foreach (var e in _fs.EnumerateChildren(dir, token))
+            foreach (var e in _fs.EnumerateChildren(normDir, token))
             {
                 if (e.IsDirectory)
                 {
                     dirsToVisit.Push(e.FullPath);
+                    continue;
                 }
-                else
+
+                var fullPath = PathUtils.NormalizePath(e.FullPath);
+                
+                // Quick-rescan: try to reuse existing hash
+                if (TryReuseExistingFile(
+                        fullPath,
+                        e.Length,
+                        e.CreationTimeUtc,
+                        e.ModifiedTimeUtc,
+                        prevFiles,
+                        session))
                 {
-                    // Record file in repo as "enumerated, hash not computed yet"
-                    session.AddOrUpdateFile(
-                        fullFilePath: e.FullPath,
-                        size: e.Length,
-                        hash: HashKey.NotComputed,
-                        modified: e.ModifiedTimeUtc,
-                        created: e.CreationTimeUtc,
-                        status: ScanEntryStatus.Enumerated);
-
-                    TimingLog.Counter("files");
-
-                    // Only non-zero files are hashed
-                    if (e.Length > 0)
-                    {
-                        filesToHash.Add(new FileToHash(
-                            e.FullPath,
-                            e.Length,
-                            e.CreationTimeUtc,
-                            e.ModifiedTimeUtc));
-                    }
+                    prevFiles?.Remove(fullPath);
+                    continue;
                 }
+
+                // Normal path: record as enumerated, hash not computed yet.
+                session.AddOrUpdateFile(
+                    fullFilePath: fullPath,
+                    size: e.Length,
+                    hash: HashKey.NotComputed,
+                    modified: e.ModifiedTimeUtc,
+                    created: e.CreationTimeUtc,
+                    status: ScanEntryStatus.Enumerated);
+
+                // Only non-zero files are hashed
+                if (e.Length > 0)
+                {
+                    filesToHash.Add(new FileToHash(
+                        fullPath,
+                        e.Length,
+                        e.CreationTimeUtc,
+                        e.ModifiedTimeUtc));
+                }
+                
+                TimingLog.Counter("files");
             }
 
             // Give the scheduler a chance occasionally in large trees
@@ -178,6 +229,114 @@ public sealed class DuplicateFileFinder
         return filesToHash;
     }
 
+    private static bool TryReuseExistingFile(
+        string fullPath,
+        long size,
+        DateTimeOffset createdUtc,
+        DateTimeOffset modifiedUtc,
+        Dictionary<string, FileRecord>? previousFilesByPath,
+        IScanSession session)
+    {
+        if (previousFilesByPath is null)
+            return false;
+
+        if (!previousFilesByPath.TryGetValue(fullPath, out var prev))
+            return false;
+
+        // Must be a previously hashed, error-free file
+        if (prev.Status != ScanEntryStatus.Hashed)
+            return false;
+        if (!prev.Hash.IsComputed)
+            return false;
+        if (!string.IsNullOrEmpty(prev.ErrorMessage))
+            return false;
+
+        // Size and modified timestamp must match
+        if (prev.Size != size)
+            return false;
+        if (prev.Modified != modifiedUtc)
+            return false;
+
+        // ignore creation time mismatch
+
+        // Reuse the hash, mark as hashed in the new scan
+        session.AddOrUpdateFile(
+            fullFilePath: fullPath,
+            size: size,
+            hash: prev.Hash,
+            modified: modifiedUtc,
+            created: createdUtc,
+            status: ScanEntryStatus.Hashed);
+
+        return true;
+    }
+
+    private sealed class QuickRescanState
+    {
+        public Dictionary<string, FileRecord> PreviousFiles { get; }
+        public Dictionary<string, DirRecord>  PreviousDirs  { get; }
+
+        public QuickRescanState(
+            Dictionary<string, FileRecord> previousFiles,
+            Dictionary<string, DirRecord>  previousDirs)
+        {
+            PreviousFiles = previousFiles;
+            PreviousDirs  = previousDirs;
+        }
+    }
+
+    private QuickRescanState BuildQuickRescanState(RepoViewSnapshot snapshot, string rootPath)
+    {
+        var rootNormalized = PathUtils.NormalizePath(rootPath);
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        var files = new Dictionary<string, FileRecord>(StringComparer.FromComparison(comparison));
+        var dirs  = new Dictionary<string, DirRecord>(StringComparer.FromComparison(comparison));
+
+        foreach (var dir in snapshot.Dirs.Values)
+        {
+            var dirPath = _repo.GetFullDirPath(dir.Id);
+            var norm    = PathUtils.NormalizePath(dirPath);
+
+            if (!norm.StartsWith(rootNormalized,comparison))
+                continue;
+
+            dirs[norm] = dir;
+        }
+
+        foreach (var file in snapshot.Files.Values)
+        {
+            var dirPath = _repo.GetFullDirPath(file.DirId);
+            var full    = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
+
+            if (!full.StartsWith(rootNormalized, comparison))
+                continue;
+
+            files[full] = file;
+        }
+
+        return new QuickRescanState(files, dirs);
+    }
+
+    private void ApplyQuickRescanDeletions(QuickRescanState quickState, IScanSession session)
+    {
+        // Files that remained in the map are now missing on disk
+        foreach (var file in quickState.PreviousFiles.Values)
+        {
+            session.MarkFileDeleted(file.Id);
+        }
+
+        // Directories that remained are missing; this naturally includes whole subtrees.
+        foreach (var dir in quickState.PreviousDirs.Values)
+        {
+            session.MarkDirectoryDeleted(dir.Id);
+        }
+    }
+
+
+    
     // ------------ Hashing phase ----------------
     
     // Inside DuplicateFileFinder
@@ -215,139 +374,6 @@ public sealed class DuplicateFileFinder
             processed: total,
             total: total);
     }
-
-    
-    // private async Task RunHashingAsync(
-    //     IReadOnlyList<FileToHash> filesToHash,
-    //     IProgress<DuplicateFileFinderProgressReport>? progress,
-    //     IScanSession session,
-    //     CancellationToken token)
-    // {
-    //     Report(progress, ScanPhase.Hashing, "Computing checksums...");
-    //
-    //     var totalToHash = filesToHash.Count;
-    //     
-    //     if (totalToHash == 0)
-    //     {
-    //         Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
-    //         return;
-    //     }
-    //
-    //     // Parallel hash results, session updates will be done serially afterwards.
-    //     var hashes = new HashKey[totalToHash];
-    //     var errors = new string?[totalToHash];
-    //     var ok     = new bool[totalToHash];
-    //
-    //     var semaphore = new SemaphoreSlim(_hashDegreeOfParallelism);
-    //     var tasks     = new List<Task>(totalToHash);
-    //     long processed = 0;
-    //
-    //     for (int i = 0; i < totalToHash; i++)
-    //     {
-    //         var idx  = i;
-    //         var file = filesToHash[idx];
-    //
-    //         await semaphore.WaitAsync(token).ConfigureAwait(false);
-    //
-    //         var task = Task.Run(async () =>
-    //         {
-    //             try
-    //             {
-    //                 token.ThrowIfCancellationRequested();
-    //
-    //                 // Compute hash for this file
-    //                 var hashKey = await _checksums
-    //                     .ComputeFileHashAsync(file.Path, token)
-    //                     .ConfigureAwait(false);
-    //
-    //                 hashes[idx] = hashKey;
-    //                 ok[idx]     = true;
-    //             }
-    //             catch (OperationCanceledException)
-    //             {
-    //                 // Let cancellation propagate; do not mark as error.
-    //                 throw;
-    //             }
-    //             catch (Exception ex)
-    //             {
-    //                 // Hash failed for this file: mark CannotCompute + capture error string.
-    //                 hashes[idx] = HashKey.CannotCompute;
-    //                 errors[idx] = ex.Message;
-    //                 ok[idx]     = false;
-    //             }
-    //             finally
-    //             {
-    //                 var done = Interlocked.Increment(ref processed);
-    //         
-    //                 var pct = Math.Min(1.0,
-    //                     totalToHash == 0 ? 1.0 : (double)done / totalToHash);
-    //
-    //                 // Progress reporting can safely be done from multiple threads
-    //                 Report(
-    //                     progress,
-    //                     ScanPhase.Hashing,
-    //                     done == totalToHash
-    //                         ? "Finished hashing."
-    //                         : $"Hashing files... ({done}/{totalToHash})",
-    //                     pct,
-    //                     processed: done,
-    //                     total: totalToHash);
-    //
-    //                 semaphore.Release();
-    //             }
-    //         }, token);
-    //
-    //         tasks.Add(task);
-    //     }
-    //
-    //     await Task.WhenAll(tasks).ConfigureAwait(false);
-    //
-    //     // Now update the repo / session serially to avoid threading issues inside ScanSession.
-    //     for (int i = 0; i < totalToHash; i++)
-    //     {
-    //         var file  = filesToHash[i];
-    //         var hash  = hashes[i];
-    //         var error = errors[i];
-    //
-    //         if (ok[i])
-    //         {
-    //             session.AddOrUpdateFile(
-    //                 fullFilePath: file.Path,
-    //                 hash: hash,
-    //                 status: ScanEntryStatus.Hashed);
-    //         }
-    //         else
-    //         {
-    //             // Hash failed: mark in session with CannotCompute + Error status/message.
-    //             session.AddOrUpdateFile(
-    //                 fullFilePath: file.Path,
-    //                 hash: hash,
-    //                 status: ScanEntryStatus.Error,
-    //                 errorMessage: error);
-    //         }
-    //     }
-    //     
-    //     // Final progress report (100%)
-    //     Report(
-    //         progress,
-    //         ScanPhase.Hashing,
-    //         "Hashing complete.",
-    //         percent: 1.0,
-    //         processed: totalToHash,
-    //         total: totalToHash);
-    //
-    //     long bytesHashed = 0;
-    //     int filesHashed = 0;
-    //     for (var i = 0; i < totalToHash; i++)
-    //     {
-    //         if (!ok[i]) continue;
-    //         filesHashed++;
-    //         bytesHashed += filesToHash[i].Size;
-    //     }
-    //
-    //     TimingLog.Counter("files_hashed", filesHashed );
-    //     TimingLog.Counter("bytes_hashed", bytesHashed );
-    // }
     
     
     // ------------ Progress helper ----------------

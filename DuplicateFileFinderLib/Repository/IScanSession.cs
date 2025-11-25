@@ -46,6 +46,20 @@ public interface IScanSession
         ScanEntryStatus?  status       = null,
         string?          errorMessage = null);
 
+    /// <summary>
+    /// Mark an existing directory as deleted in this scan.
+    /// The implementation is responsible for emitting appropriate tombstones
+    /// in its RepoDelta.
+    /// </summary>
+    void MarkDirectoryDeleted(Guid dirId);
+
+    /// <summary>
+    /// Mark an existing file as deleted in this scan.
+    /// The implementation is responsible for emitting appropriate tombstones
+    /// in its RepoDelta.
+    /// </summary>
+    void MarkFileDeleted(Guid fileId);
+
     Task FlushProgressAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);
     Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default);

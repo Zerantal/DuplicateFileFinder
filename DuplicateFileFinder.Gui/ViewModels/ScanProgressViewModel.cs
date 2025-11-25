@@ -9,27 +9,26 @@ namespace DuplicateFileFinder.Gui.ViewModels;
 
 public partial class ScanProgressViewModel : ObservableObject
 {
-    private readonly IScanCoordinator _scanCoordinator;
-
-    [ObservableProperty] private string _phaseText = string.Empty;
-    [ObservableProperty] private string _statusMessage = string.Empty;
-    [ObservableProperty] private string _displayStatusMessage = string.Empty;
-
-    [ObservableProperty] private int _scanProgress;
+    private readonly IScanCoordinator _coordinator;
+    
+    [ObservableProperty] private bool _isCancelEnabled = true;
     [ObservableProperty] private bool _isIndeterminate = true;
+    [ObservableProperty] private string _phaseText = string.Empty;
+    [ObservableProperty] private int _scanProgress;
+    [ObservableProperty] private string _statusMessage = string.Empty;
 
-    public ScanProgressViewModel(IScanCoordinator scanCoordinator)
+
+    public ScanProgressViewModel(IScanCoordinator coordinator)
     {
-        _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
+        _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
     }
+
+    public bool CanCancel => IsCancelEnabled;
 
     public void Update(DuplicateFileFinderProgressReport report)
     {
         PhaseText = MapPhase(report.Phase);
-
         StatusMessage = report.StatusMessage;
-        DisplayStatusMessage = StatusMessage;
-
         IsIndeterminate = report.IsIndeterminate;
 
         if (!report.IsIndeterminate)
@@ -39,18 +38,22 @@ public partial class ScanProgressViewModel : ObservableObject
         }
     }
 
-    private static string MapPhase(ScanPhase phase) => phase switch
+    private static string MapPhase(ScanPhase phase)
     {
-        ScanPhase.Preparing            => "Preparing",
-        ScanPhase.Enumerating          => "Enumerating files",
-        ScanPhase.Hashing              => "Hashing files",
-        ScanPhase.Completed            => "Completed",
-        _                              => phase.ToString()
-    };
-    
-    [RelayCommand]
+        return phase switch
+        {
+            ScanPhase.Preparing => "Preparing",
+            ScanPhase.Enumerating => "Enumerating files",
+            ScanPhase.Hashing => "Hashing files",
+            ScanPhase.Completed => "Completed",
+            _ => phase.ToString()
+        };
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancel))]
     private void Cancel()
     {
-        _scanCoordinator.CancelScan();
+        IsCancelEnabled = false;
+        _coordinator.CancelScan();
     }
 }

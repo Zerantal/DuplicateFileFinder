@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Models;
+using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
@@ -12,20 +13,17 @@ namespace DuplicateFileFinder.Gui.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
-    // Full universe of sets keyed by hash
+    // Full universe of duplicate sets keyed by hash
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
-    // Guid DirId -> full path cache
-    // private readonly Dictionary<Guid, string> _dirPathCache = new();
+    // Guid DirId -> DirRecord (for folder tree construction)
     private readonly Dictionary<Guid, DirRecord> _dirs = new();
 
-    // VM-local copies
-    private readonly Dictionary<Guid, FileRecord> _files = new();
-
     private readonly Dictionary<Guid, FolderNodeViewModel> _folderNodes = new();
-    private readonly Dictionary<HashKey, List<Guid>> _hashIndex = new();
+    // private readonly Dictionary<HashKey, List<Guid>> _hashIndex = new();
 
     private readonly IRepo _repo;
+    private readonly IScanCoordinator _scanner;
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;
 
@@ -35,9 +33,10 @@ public partial class DuplicatesViewModel : ObservableObject
     private DuplicateSetRow? _selectedSet;
     [ObservableProperty] private long _wastedBytes;
 
-    public DuplicatesViewModel(Repo repo)
+    public DuplicatesViewModel(Repo repo, IScanCoordinator scanner)
     {
         _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        _scanner = scanner;
 
         LoadFromRepo();
     }
@@ -87,53 +86,43 @@ public partial class DuplicatesViewModel : ObservableObject
 
     private void InitializeFromSnapshot(RepoViewSnapshot snapshot)
     {
-        _files.Clear();
         _dirs.Clear();
-        _hashIndex.Clear();
+        _folderNodes.Clear();
         _allSets.Clear();
         FolderRoots.Clear();
-
-        foreach (var (id, file) in snapshot.Files)
-            _files[id] = file;
 
         foreach (var (id, dir) in snapshot.Dirs)
             _dirs[id] = dir;
 
-        foreach (var (hash, ids) in snapshot.HashIndex)
-        {
-            var idList = ids.ToList(); // local copy
-            _hashIndex[hash] = idList;
-
-            if (ids.Count >= 2)
-            {
-                var filesForHash = ids.Select(id => _files[id]).ToList();
-                var row = BuildRow(hash, filesForHash);
-                _allSets[hash] = row;
-            }
-        }
-
-        CalculateScanStats();
         BuildFolderTree();
+        RebuildDuplicatesAndStats(snapshot);
         ApplyFilters();
     }
 
-    private void CalculateScanStats()
+    private void RebuildDuplicatesAndStats(RepoViewSnapshot snapshot)
     {
         DuplicatesFound = 0;
         WastedBytes = 0;
-        FilesScanned = _files.Count;
+        FilesScanned = snapshot.Files.Count;
 
-        foreach (var (_, ids) in _hashIndex)
+        // Ask the repo for duplicate groups instead of walking HashIndex here.
+        var duplicateGroups = _repo.GetDuplicateGroups();
+
+        foreach (var group in duplicateGroups)
         {
-            if (ids.Count < 2)
+            if (group.Count < 2)
                 continue;
 
-            var size = _files[ids[0]].Size;
-            var wasted = (ids.Count - 1) * size;
-            var stat = new HashStats(1, wasted);
+            // All files in a group share the same hash and size by definition
+            var hash = group[0].Hash;
+            var row = BuildRow(hash, group);
+            _allSets[hash] = row;
 
-            DuplicatesFound += stat.Groups;
-            WastedBytes += stat.WastedBytes;
+            var size = group[0].Size;
+            var wasted = (group.Count - 1) * size;
+
+            DuplicatesFound += 1;
+            WastedBytes += wasted;
         }
     }
 
@@ -146,7 +135,7 @@ public partial class DuplicatesViewModel : ObservableObject
         foreach (var dir in _dirs.Values)
         {
             var fullPath = _repo.GetFullDirPath(dir.Id);
-            var node = new FolderNodeViewModel(dir.Id, dir.Name, fullPath);
+            var node = new FolderNodeViewModel(dir.Id, dir.Name, fullPath, _scanner);
             _folderNodes[dir.Id] = node;
         }
 
@@ -167,6 +156,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
                 node.Parent = null;
                 node.ShowFullPath = true;
+                node.OnRootRemoved = n => FolderRoots.Remove(n);
                 InsertRootSorted(node);
             }
         }
@@ -206,10 +196,8 @@ public partial class DuplicatesViewModel : ObservableObject
     {
         var filteredSets = new List<DuplicateSetRow>();
 
-        foreach (var kv in _allSets)
+        foreach (var row in _allSets.Values)
         {
-            var row = kv.Value;
-
             if (!string.IsNullOrEmpty(SelectedFolderPrefix))
             {
                 var prefix = SelectedFolderPrefix!;
@@ -245,7 +233,4 @@ public partial class DuplicatesViewModel : ObservableObject
         var snap = _repo.GetSnapshot();
         InitializeFromSnapshot(snap);
     }
-
-    // One group per hash, but keeping this explicit makes the math clear
-    private readonly record struct HashStats(int Groups, long WastedBytes);
 }

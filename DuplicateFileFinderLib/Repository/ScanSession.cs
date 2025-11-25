@@ -28,6 +28,10 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     private readonly List<DirRecord> _pendingDirs = new();
     private readonly List<FileRecord> _pendingFiles = new();
     
+    // Buffered tombstones for deletions in this scan
+    private readonly List<DirTombstone>  _pendingDirTombstones  = new();
+    private readonly List<FileTombstone> _pendingFileTombstones = new();
+
     private bool _finished;
     
     public ScanSession(
@@ -327,6 +331,26 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     }
 
     // ---------------------------------------------------------------------
+    // Deletion APIs
+    // ---------------------------------------------------------------------
+
+    public void MarkDirectoryDeleted(Guid dirId)
+    {
+        lock (_bufferLock)
+        {
+            _pendingDirTombstones.Add(new DirTombstone(dirId, ScanSequence));
+        }
+    }
+
+    public void MarkFileDeleted(Guid fileId)
+    {
+        lock (_bufferLock)
+        {
+            _pendingFileTombstones.Add(new FileTombstone(fileId, ScanSequence));
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Legacy APIs (wrappers)
     // ---------------------------------------------------------------------
 
@@ -366,17 +390,28 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
         {
             List<DirRecord>  dirsToFlush;
             List<FileRecord> filesToFlush;
+            List<DirTombstone>   dirTombsToFlush;
+            List<FileTombstone>  fileTombsToFlush;
 
             lock (_bufferLock)
             {
-                if (_pendingDirs.Count == 0 && _pendingFiles.Count == 0)
+                if (_pendingDirs.Count == 0 &&
+                    _pendingFiles.Count == 0 &&
+                    _pendingDirTombstones.Count == 0 &&
+                    _pendingFileTombstones.Count == 0)
+                {
                     return;
+                }
 
                 dirsToFlush  = new List<DirRecord>(_pendingDirs);
                 filesToFlush = new List<FileRecord>(_pendingFiles);
+                dirTombsToFlush   = new List<DirTombstone>(_pendingDirTombstones);
+                fileTombsToFlush  = new List<FileTombstone>(_pendingFileTombstones);
 
                 _pendingDirs.Clear();
                 _pendingFiles.Clear();
+                _pendingDirTombstones.Clear();
+                _pendingFileTombstones.Clear();
             }
 
             var delta = new RepoDelta
@@ -384,8 +419,8 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
                 ScanSequence = ScanSequence,
                 Dirs         = dirsToFlush,
                 Files        = filesToFlush,
-                DeletedDirs  = new List<DirTombstone>(),
-                DeletedFiles = new List<FileTombstone>()
+                DeletedDirs  = dirTombsToFlush,
+                DeletedFiles = fileTombsToFlush
             };
 
             await _repo.CommitDeltaAsync(delta, cancellationToken).ConfigureAwait(false);

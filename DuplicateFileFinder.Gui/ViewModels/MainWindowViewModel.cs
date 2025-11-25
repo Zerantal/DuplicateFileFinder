@@ -1,32 +1,45 @@
+// ViewModels/MainWindowViewModel.cs
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinder.Gui.Views;
 using DuplicateFileFinderLib.Repository;
 using NLog;
-using Dff = DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
-public partial class MainWindowViewModel(
-    Repo repo,
-    IScanCoordinator scanCoordinator,
-    IDialogService dialogService)
-    : ObservableObject
+public partial class MainWindowViewModel : ObservableObject
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
 
-    private readonly IScanCoordinator _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
+    private readonly IDialogService _dialogService;
+
+    private readonly IScanCoordinator _scanCoordinator;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
     [NotifyCanExecuteChangedFor(nameof(OptimizeRepoCommand))]
     private bool _isScanning;
 
-    public DuplicatesViewModel Duplicates { get; } = new(repo);
+    /// <inheritdoc/>
+    public MainWindowViewModel(Repo repo,
+        IScanCoordinator scanCoordinator,
+        IDialogService dialogService)
+    {
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
+        Duplicates = new DuplicatesViewModel(repo, scanCoordinator);
+        
+        _scanCoordinator.ScanCompleted += (_, _) =>
+        {
+            IsScanning = false;
+            Duplicates.LoadFromRepo();
+        };
+    }
 
-    public bool CanStartScan => !IsScanning;
+    public DuplicatesViewModel Duplicates { get; }
+
+    public bool CanStartScan => !IsScanning && !_scanCoordinator.IsScanning;
 
     // ---------------- Commands ----------------
 
@@ -58,47 +71,12 @@ public partial class MainWindowViewModel(
 
     private async Task StartScan(string path)
     {
-        if (IsScanning)
+        if (IsScanning || _scanCoordinator.IsScanning)
             return;
 
         Log.Info("Initialising scan of {path}", path);
         IsScanning = true;
-
-        var progressVm = new ScanProgressViewModel(_scanCoordinator);
-        var dialog = new ScanProgressWindow
-        {
-            DataContext = progressVm
-        };
-
-        void HandleProgress(object? _, Dff.DuplicateFileFinderProgressReport report)
-        {
-            progressVm.Update(report);
-        }
-
-        void HandleCompleted(object? _, ScanCompletedEventArgs e)
-        {
-            Duplicates.LoadFromRepo();
-        }
-
-        _scanCoordinator.ProgressChanged += HandleProgress;
-        _scanCoordinator.ScanCompleted += HandleCompleted;
-
-        var owner = _dialogService.GetOwnerWindow();
-        var dialogTask = dialog.ShowDialog(owner);
-
-        try
-        {
-            await _scanCoordinator.RunScanAsync(path);
-        }
-        finally
-        {
-            _scanCoordinator.ProgressChanged -= HandleProgress;
-            _scanCoordinator.ScanCompleted -= HandleCompleted;
-
-            dialog.Close();
-            await dialogTask;
-
-            IsScanning = false;
-        }
+        
+        await _scanCoordinator.RunScanWithDialogAsync(path);
     }
 }
