@@ -96,7 +96,9 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             ScanSequence = 1,
             RootPath = rootPath,
             StartedAt = DateTimeOffset.UtcNow,
-            Status = ScanRunStatus.InProgress
+            Status = ScanRunStatus.InProgress,
+            ScanRootId = Guid.NewGuid(),
+            Mode = ScanMode.Full
         };
 
         public long ScanSequence => Run.ScanSequence;

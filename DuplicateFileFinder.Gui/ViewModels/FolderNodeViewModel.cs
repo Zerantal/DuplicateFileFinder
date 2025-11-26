@@ -4,7 +4,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 

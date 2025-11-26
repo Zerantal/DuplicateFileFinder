@@ -5,7 +5,7 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record RepoMeta
 {
-    [MemoryPackOrder(0)] public required int SchemaVersion { get; init; } = 4;
+    [MemoryPackOrder(0)] public required int SchemaVersion { get; init; } = 5;
     [MemoryPackOrder(1)] public required long Generation { get; init; } = 1;
     [MemoryPackOrder(2)] public required long NextLogSequence { get; init; }
     [MemoryPackOrder(3)] public required long LastSnapshottedLogSequence { get; init; } = -1;

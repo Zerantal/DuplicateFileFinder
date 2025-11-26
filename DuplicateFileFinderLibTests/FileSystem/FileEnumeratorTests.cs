@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
-using DuplicateFileFinderLib.FileSystem;
+using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 

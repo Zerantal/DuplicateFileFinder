@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using DuplicateFileFinder.Gui.ViewModels;
 using DuplicateFileFinder.Gui.Views;
 using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Models;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
 
@@ -36,7 +37,7 @@ public sealed class ScanCoordinator : IScanCoordinator
 
     public async Task RunScanWithDialogAsync(
         string rootPath,
-        Dff.ScanMode mode = Dff.ScanMode.Full,
+        ScanMode mode = ScanMode.Full,
         CancellationToken cancellationToken = default)
     {
         // Ensure we start from UI thread; if not, hop there once.

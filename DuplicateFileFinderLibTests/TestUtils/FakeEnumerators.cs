@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using DuplicateFileFinderLib.FileSystem;
+using DuplicateFileFinderLib.IO;
 
 namespace DuplicateFileFinderLibTests.TestUtils;
 

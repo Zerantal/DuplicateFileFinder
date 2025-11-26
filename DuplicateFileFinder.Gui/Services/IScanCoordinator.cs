@@ -1,6 +1,7 @@
 // Gui/Services/IScanCoordinator.cs
 
 using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinder.Gui.Services;
 

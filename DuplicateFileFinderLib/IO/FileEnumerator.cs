@@ -4,7 +4,7 @@ using System.IO.Enumeration;
 using DuplicateFileFinderLib.Util;
 using NLog;
 
-namespace DuplicateFileFinderLib.FileSystem;
+namespace DuplicateFileFinderLib.IO;
 
 public readonly record struct FsEntry(
     bool IsDirectory,

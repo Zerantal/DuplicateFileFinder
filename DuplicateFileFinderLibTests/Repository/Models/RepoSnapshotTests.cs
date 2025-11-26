@@ -63,7 +63,9 @@ public sealed class RepoSnapshotTests
             StartedAt = DateTimeOffset.UtcNow,
             FinishedAt = null,
             Status = ScanRunStatus.InProgress,
-            ErrorMessage = null
+            ErrorMessage = null,
+            ScanRootId = Guid.NewGuid(),
+            Mode = ScanMode.Full
         };
 
         var files = new Dictionary<Guid, FileRecord> { [fileId] = file };
