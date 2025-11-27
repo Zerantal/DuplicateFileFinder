@@ -63,13 +63,23 @@ public sealed class RepoSnapshotTests
             StartedAt = DateTimeOffset.UtcNow,
             FinishedAt = null,
             Status = ScanRunStatus.InProgress,
-            ErrorMessage = null
+            ErrorMessage = null,
+            ScanRootId = Guid.NewGuid(),
+            Mode = ScanMode.Full
+        };
+        var scanRoot = new ScanRoot
+        {
+            Id = Guid.NewGuid(),
+            RootPath = "/root",
+            DirId = dirId,
+            CreatedAt = DateTimeOffset.UtcNow
         };
 
         var files = new Dictionary<Guid, FileRecord> { [fileId] = file };
         var dirs = new Dictionary<Guid, DirRecord> { [dirId] = dir };
         var hashIndex = new Dictionary<HashKey, List<Guid>> { [hashKey] = [fileId] };
         var scanRuns = new List<ScanRun> { scanRun };
+        var scanRoots = new List<ScanRoot> { scanRoot };
 
         var snapshot = new RepoSnapshot
         {
@@ -77,7 +87,8 @@ public sealed class RepoSnapshotTests
             Files = files,
             Dirs = dirs,
             HashIndex = hashIndex,
-            ScanRuns = scanRuns
+            ScanRuns = scanRuns,
+            ScanRoots = scanRoots
         };
 
         var bytes = MemoryPackSerializer.Serialize(snapshot);
@@ -102,5 +113,9 @@ public sealed class RepoSnapshotTests
         var rtScanRun = Assert.Single(roundTripped.ScanRuns);
         Assert.Equal(scanRun.ScanSequence, rtScanRun.ScanSequence);
         Assert.Equal(scanRun.RootPath, rtScanRun.RootPath);
+        
+        var rtScanRoot = Assert.Single(roundTripped.ScanRoots);
+        Assert.Equal(scanRoot, rtScanRoot);
+        Assert.Equal(scanRoot.DirId, rtScanRoot.DirId);
     }
 }

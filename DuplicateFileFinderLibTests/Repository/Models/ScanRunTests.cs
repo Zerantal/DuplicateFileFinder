@@ -17,7 +17,9 @@ public sealed class ScanRunTests
             StartedAt = new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.Zero),
             FinishedAt = new DateTimeOffset(2024, 2, 3, 5, 6, 7, TimeSpan.Zero),
             Status = ScanRunStatus.Completed,
-            ErrorMessage = "none"
+            ErrorMessage = "none",
+            Mode = ScanMode.Full,
+            ScanRootId = Guid.NewGuid(),
         };
 
         var bytes = MemoryPackSerializer.Serialize(original);
@@ -29,6 +31,8 @@ public sealed class ScanRunTests
         Assert.Equal(original.FinishedAt, roundTripped.FinishedAt);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
+        Assert.Equal(original.Mode, roundTripped.Mode);
+        Assert.Equal(original.ScanRootId, roundTripped.ScanRootId);
     }
 
     [Fact]
@@ -38,5 +42,9 @@ public sealed class ScanRunTests
         Assert.Equal(1, (byte)ScanRunStatus.Completed);
         Assert.Equal(2, (byte)ScanRunStatus.Failed);
         Assert.Equal(3, (byte)ScanRunStatus.Cancelled);
+        
+        Assert.Equal(0, (byte)ScanMode.Full);
+        Assert.Equal(1, (byte)ScanMode.Quick);
+        
     }
 }

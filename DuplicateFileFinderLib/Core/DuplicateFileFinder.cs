@@ -1,19 +1,14 @@
 // DuplicateFileFinderLib/Core/DuplicateFileFinder.cs
 
-using DuplicateFileFinderLib.FileSystem;
+using System.Runtime.InteropServices;
 using DuplicateFileFinderLib.Hashing;
+using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
-
-public enum ScanMode
-{
-    Full,   // Enumerate & compute hashes of all files/dirs in scan root           
-    Quick   // Enumerate & compute hashes of files where a change has been detected
-}
 
 public sealed class DuplicateFileFinder
 {
@@ -24,7 +19,8 @@ public sealed class DuplicateFileFinder
     
     private readonly bool _throttleProgress = true;
     private readonly int _hashDegreeOfParallelism;
-
+    
+    private readonly IVolumeInfoProvider? _volumeInfoProvider;
 
     /// <summary>
     /// Internal representation of a file that needs hashing.
@@ -37,10 +33,19 @@ public sealed class DuplicateFileFinder
 
     public DuplicateFileFinder(
         IRepo repo,
+        IVolumeInfoProvider? volumeInfoProvider = null,
         IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null,
         int? hashDegreeOfParallelism  = null)
     {
+        if (volumeInfoProvider is not null)
+            _volumeInfoProvider = volumeInfoProvider;
+        else
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                _volumeInfoProvider = new WindowsVolumeInfoProvider();
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                _volumeInfoProvider = new LinuxVolumeInfoProvider();
+        
         _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipelineMD5();
         _repo = repo;
@@ -52,7 +57,7 @@ public sealed class DuplicateFileFinder
     }
     
     internal DuplicateFileFinder(IRepo repo, bool throttleProgress)
-        : this(repo)
+        : this(repo: repo)
     {
         _throttleProgress = throttleProgress;
     }
@@ -70,8 +75,19 @@ public sealed class DuplicateFileFinder
         var progress = _throttleProgress && progressIndicator is not null
             ? new ThrottledProgress(progressIndicator)
             : progressIndicator;
+
+        // Get volume info - best effort
+        VolumeInfo? vInfo = null;
+        try
+        {
+            vInfo = _volumeInfoProvider?.GetVolumeInfoForPath(location);
+        }
+        catch
+        {
+            // ignored
+        }
         
-        var session = _repo.BeginScan(location);
+        var session = _repo.BeginScan(location, mode, vInfo);
 
         try
         {

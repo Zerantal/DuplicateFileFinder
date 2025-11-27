@@ -61,7 +61,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.True(Directory.Exists(LogDir));
 
             var meta = ReadMeta();
-            Assert.Equal(4, meta.SchemaVersion);
+            Assert.Equal(5, meta.SchemaVersion);
             Assert.Equal(1, meta.Generation);
             Assert.Equal(0, meta.NextLogSequence);
             Assert.Equal(-1, meta.LastSnapshottedLogSequence);
