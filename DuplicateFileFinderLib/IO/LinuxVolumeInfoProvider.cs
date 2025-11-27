@@ -103,7 +103,7 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                     //   30 24 8:17 / /mnt/external_vm_storage rw,relatime - ext4 /dev/sdd1 ...
                     // so:  source is field after '-', target is field 4
                     var dashIndex = Array.IndexOf(parts, "-");
-                    if (dashIndex < 0 || dashIndex + 2 >= parts.Length)
+                    if (dashIndex < 0 || dashIndex + 2 >= parts.Length || parts.Length <= 4)
                         continue;
 
                     target = parts[4]; // mountpoint (e.g. /mnt/external_vm_storage)
@@ -154,7 +154,7 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                 CreateNoWindow = true
             };
 
-            // lsblk -J -o NAME,KNAME,TYPE,MODEL,ROTA,FSTYPE,LABEL,UUID,PARTUUID,WWN,SERIAL
+            // lsblk -J -o NAME,KNAME,TYPE,MODEL,ROTA,FSTYPE,LABEL,PARTLABEL,UUID,PARTUUID,WWN,SERIAL
             psi.ArgumentList.Add("-J");
             psi.ArgumentList.Add("-o");
             psi.ArgumentList.Add("NAME,KNAME,TYPE,MODEL,ROTA,FSTYPE,LABEL,PARTLABEL,UUID,PARTUUID,WWN,SERIAL");
@@ -229,7 +229,10 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
         }
 
         foreach (var top in root.Blockdevices)
-            Dfs(top, top.Type?.Equals("disk", StringComparison.OrdinalIgnoreCase) == true ? top : null);
+        {
+            var asDisk = top.Type?.Equals("disk", StringComparison.OrdinalIgnoreCase) == true ? top : null;
+            Dfs(top, asDisk);
+        }
 
         if (partitionNode is null) return volInfo;
 
@@ -245,14 +248,15 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
         var wwn = diskNode?.Wwn ?? partitionNode.Wwn;
         var serial = diskNode?.Serial ?? partitionNode.Serial;
 
-        // VolumeId priority: WWN > SERIAL > PARTUUID > UUID > devicePath
-        var deviceId = "unknown";
+        // DeviceId: WWN or Serial; null if neither is available
+        string? deviceId = null;
         if (!string.IsNullOrWhiteSpace(wwn))
             deviceId = $"wwn:{wwn}";
         else if (!string.IsNullOrWhiteSpace(serial))
             deviceId = $"serial:{serial}";
 
-        var volumeId = "unknown";
+        // VolumeId: PARTUUID or UUID; null if neither is available
+        string? volumeId = null;
         if (!string.IsNullOrWhiteSpace(partUuid))
             volumeId = $"partuuid:{partUuid}";
         else if (!string.IsNullOrWhiteSpace(uuid))
