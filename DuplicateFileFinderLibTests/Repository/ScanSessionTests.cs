@@ -107,7 +107,7 @@ public sealed class ScanSessionTests : IDisposable
             DateTimeOffset.UtcNow,
              ScanEntryStatus.Hashed);
 
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
 
         // Do not call CompleteAsync / FailAsync here.
 
@@ -196,7 +196,7 @@ public sealed class ScanSessionTests : IDisposable
             ScanSequence = scanSeq,
             Dirs = [rootDir, subDir],
             Files = [oldFile]
-        });
+        }, TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot1 = ReadSnapshot();
@@ -223,8 +223,8 @@ public sealed class ScanSessionTests : IDisposable
             ScanEntryStatus.Hashed);
 
         // Progressive flush + completion
-        await session.FlushProgressAsync();
-        await session.CompleteAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
+        await session.CompleteAsync(TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot2 = ReadSnapshot();
@@ -288,7 +288,7 @@ public sealed class ScanSessionTests : IDisposable
             ScanSequence = 1,
             Dirs = [dir],
             Files = [file]
-        });
+        }, TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot1 = ReadSnapshot();
@@ -300,9 +300,9 @@ public sealed class ScanSessionTests : IDisposable
 
         // Optionally observe some stuff, but never complete.
         session.AddOrUpdateDirectory("root", ScanEntryStatus.Enumerated);
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
 
-        await session.FailAsync("cancelled", true);
+        await session.FailAsync("cancelled", true, TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot2 = ReadSnapshot();
@@ -362,7 +362,7 @@ public sealed class ScanSessionTests : IDisposable
             ScanSequence = 1,
             Dirs = [dir],
             Files = [file]
-        });
+        }, TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot1 = ReadSnapshot();
@@ -372,7 +372,7 @@ public sealed class ScanSessionTests : IDisposable
         var session = repo.BeginScan(rootPath);
 
         session.AddOrUpdateDirectory("root", ScanEntryStatus.Enumerated);
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
 
         await session.DisposeAsync(); // should mark run failed/cancelled
 
@@ -427,7 +427,7 @@ public sealed class ScanSessionTests : IDisposable
 
 
         // Now explicitly flush and snapshot again
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
         repo.SaveSnapshot();
         var snapshotAfter = ReadSnapshot();
 
@@ -576,7 +576,7 @@ public sealed class ScanSessionTests : IDisposable
         }
 
         // Explicit async flush
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshotAfter = ReadSnapshot();
@@ -630,7 +630,7 @@ public sealed class ScanSessionTests : IDisposable
         }
 
         // Final explicit drain of any remaining buffered files and in-flight auto flushes
-        await session.FlushProgressAsync();
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
 
         repo.SaveSnapshot();
         var snapshot = ReadSnapshot();

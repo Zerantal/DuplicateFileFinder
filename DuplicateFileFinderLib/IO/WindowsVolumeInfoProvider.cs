@@ -9,6 +9,8 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
 {
     public VolumeInfo GetVolumeInfoForPath(string rootPath)
     {
+        throw new NotSupportedException("Not tested at all");
+        
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentNullException(nameof(rootPath));
 
@@ -19,9 +21,6 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
         var drive = new DriveInfo(root);
 
         var volumeId = $"{drive.Name}|{drive.VolumeLabel}|{drive.DriveFormat}";
-        var display  = string.IsNullOrWhiteSpace(drive.VolumeLabel)
-            ? drive.Name.TrimEnd('\\')
-            : $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
 
         // For now, we don't try to distinguish SSD vs HDD
         bool? isRotational = null;
@@ -29,7 +28,6 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
         return new VolumeInfo
         {
             VolumeId       = volumeId,
-            DisplayName    = display,
             IsRotational   = isRotational,
             FileSystemType = drive.DriveFormat,
             DevicePath     = drive.Name
