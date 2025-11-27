@@ -44,6 +44,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             => throw new NotImplementedException("Snapshot not used in these tests.");
 
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
+        public IReadOnlyList<ScanRoot> ScanRootsView { get; }
 
         public IScanSession BeginScan(string rootPath, ScanMode scanMode = ScanMode.Full, VolumeInfo? volume = null,
             int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)

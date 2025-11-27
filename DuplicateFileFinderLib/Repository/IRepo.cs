@@ -7,6 +7,8 @@ public interface IRepo
 {
     RepoViewSnapshot GetSnapshot();
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
+    public IReadOnlyList<ScanRoot> ScanRootsView { get; }
+
     public IScanSession BeginScan(
         string rootPath,
         ScanMode scanMode = ScanMode.Full,
