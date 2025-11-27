@@ -1,3 +1,4 @@
+using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository;
@@ -125,4 +126,57 @@ public sealed partial class Repo
         var path = GetFullDirPath(dirId);
         return path.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
     }
+    
+    // Find existing ScanRoot by canonical path or create a new one.
+// Caller must hold _sync.
+    private ScanRoot FindOrCreateScanRoot_NoLock(string normalizedRootPath)
+    {
+        // Try to locate existing root by RootPath
+        foreach (var root in _scanRoots.Values)
+        {
+            if (string.Equals(root.RootPath, normalizedRootPath, StringComparison.Ordinal))
+                return root;
+        }
+
+        // No existing root: create a new record
+        var now = DateTimeOffset.UtcNow;
+
+        // DirId may be Guid.Empty until the scan inserts the root directory record.
+        var newRoot = new ScanRoot
+        {
+            Id            = Guid.NewGuid(),
+            RootPath      = normalizedRootPath,
+            DirId         = Guid.Empty,
+            CreatedAt     = now,
+            LastScannedAt = now,
+            VolumeId      = null,
+            VolumeLabel   = null,
+            IsRotational  = null,
+            FileSystemType = null,
+            DevicePath    = null,
+            DeviceModel   = null
+        };
+
+        _scanRoots[newRoot.Id] = newRoot;
+        SaveScanRoots_NoLock();
+
+        return newRoot;
+    }
+
+// Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
+    private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)
+    {
+        // Use new values when provided; otherwise preserve existing ones.
+        return root with
+        {
+            VolumeId       = volume.VolumeId    ?? root.VolumeId,
+            VolumeLabel    = volume.Label       ?? root.VolumeLabel,
+            IsRotational   = volume.IsRotational ?? root.IsRotational,
+            FileSystemType = volume.FileSystemType ?? root.FileSystemType,
+            DevicePath     = volume.DevicePath,
+            DeviceModel    = volume.DeviceModel ?? root.DeviceModel,
+            LastScannedAt  = DateTimeOffset.UtcNow
+        };
+    }
+
 }

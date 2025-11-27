@@ -20,7 +20,7 @@ public sealed class DuplicateFileFinder
     private readonly bool _throttleProgress = true;
     private readonly int _hashDegreeOfParallelism;
     
-    private readonly IVolumeInfoProvider _volumeInfoProvider;
+    private readonly IVolumeInfoProvider? _volumeInfoProvider;
 
     /// <summary>
     /// Internal representation of a file that needs hashing.
@@ -46,8 +46,6 @@ public sealed class DuplicateFileFinder
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 _volumeInfoProvider = new LinuxVolumeInfoProvider();
         
-        
-
         _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipelineMD5();
         _repo = repo;
@@ -77,8 +75,19 @@ public sealed class DuplicateFileFinder
         var progress = _throttleProgress && progressIndicator is not null
             ? new ThrottledProgress(progressIndicator)
             : progressIndicator;
+
+        // Get volume info - best effort
+        VolumeInfo? vInfo = null;
+        try
+        {
+            vInfo = _volumeInfoProvider?.GetVolumeInfoForPath(location);
+        }
+        catch
+        {
+            // ignored
+        }
         
-        var session = _repo.BeginScan(location);
+        var session = _repo.BeginScan(location, mode, vInfo);
 
         try
         {

@@ -19,13 +19,15 @@ public sealed partial class Repo
     private Dictionary<Guid, DirRecord> _dirs = new();
     private Dictionary<Guid, FileRecord> _files = new();
     private Dictionary<HashKey, List<Guid>> _hashIndex = new();
-
-    // RootId -> ScanRoot
-    private Dictionary<Guid, ScanRoot> _scanRoots = new();
     private List<ScanRun> _scanRuns = new();
     
+    // RootId -> ScanRoot
+    private Dictionary<Guid, ScanRoot> _scanRoots = new();
+    
+    
+    // DirId -> full path
     private readonly ConcurrentDictionary<Guid, string> _dirPathCache = new();
-
+    // scan sequence number -> scan run
     private readonly Dictionary<long, ScanRun> _scanRunIndex = new();
 
     // to sync snapshot+meta mutations.

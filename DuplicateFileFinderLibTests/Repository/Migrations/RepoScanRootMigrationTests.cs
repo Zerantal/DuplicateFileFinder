@@ -64,6 +64,25 @@ public sealed class RepoScanRootMigrationTests
                  Mode         = ScanMode.Full
              }
          };
+
+         var scanRoots = new List<ScanRoot>
+         {
+            new()
+            {
+                Id = Guid.NewGuid(),
+                RootPath = "/mnt/data/rootA",
+                DirId = Guid.Empty,
+                CreatedAt = default
+            },
+            new()
+            {
+                Id = Guid.Empty,
+                RootPath = "/mnt/data/rootB",
+                DirId = Guid.Empty,
+                CreatedAt = default
+            }
+         };
+         
              
          File.WriteAllBytes(Path.Combine(repoPath, "snapshot.bin"),
              MemoryPack.MemoryPackSerializer.Serialize(new RepoSnapshot
@@ -72,7 +91,8 @@ public sealed class RepoScanRootMigrationTests
                  Dirs  = new Dictionary<Guid, DirRecord>(),
                  HashIndex = new Dictionary<HashKey, List<Guid>>(),
                  Meta = oldMeta,
-                 ScanRuns = runs
+                 ScanRuns = runs,
+                 ScanRoots = scanRoots
              }));
 
          File.WriteAllText(Path.Combine(repoPath, "meta.json"),

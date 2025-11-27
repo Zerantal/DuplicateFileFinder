@@ -1,3 +1,4 @@
+using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
@@ -208,31 +209,51 @@ public sealed partial class Repo
     
     public IScanSession BeginScan(
         string rootPath,
+        ScanMode scanMode = ScanMode.Full,
+        VolumeInfo? vInfo = null,
         int maxFilesBeforeFlush = 50_000,
         int maxDirsBeforeFlush = 1_000)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException(nameof(rootPath));
 
-        var scanSequence = AllocateScanSequence();
-        var run = new ScanRun
-        {
-            ScanSequence = scanSequence,
-            RootPath = rootPath,
-            StartedAt = DateTimeOffset.UtcNow,
-            Status = ScanRunStatus.InProgress,
-            FinishedAt = null,
-            ErrorMessage = null,
-            ScanRootId = Guid.NewGuid(),
-            Mode = ScanMode.Quick
-        };
+        var normalizedRootPath = PathUtils.NormalizePath(rootPath);
+
+        ScanRun run;
         IReadOnlyDictionary<Guid, DirRecord> dirsCopy;
+
         lock (_sync)
         {
+            // 1) Find or create ScanRoot for this path
+            var scanRoot = FindOrCreateScanRoot_NoLock(normalizedRootPath);
+
+            // 2) If we have volume info for this scan, update ScanRoot
+            if (vInfo is not null)
+            {
+                scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, vInfo);
+                _scanRoots[scanRoot.Id] = scanRoot;
+                SaveScanRoots_NoLock();
+            }
+
+            // 3) Allocate ScanRun
+            var scanSequence = AllocateScanSequence();
+            run = new ScanRun
+            {
+                ScanSequence = scanSequence,
+                RootPath     = normalizedRootPath,
+                StartedAt    = DateTimeOffset.UtcNow,
+                FinishedAt   = null,
+                Status       = ScanRunStatus.InProgress,
+                ErrorMessage = null,
+                ScanRootId   = scanRoot.Id,
+            };
+
+            // 4) Snapshot current dirs to give the session a stable view
             dirsCopy = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
+
             _scanRunIndex[scanSequence] = run;
             _scanRuns.Add(run);
-            SaveScanRuns_NoLock(); 
+            SaveScanRuns_NoLock();
         }
         
         return new ScanSession(this, run, dirsCopy,  maxFilesBeforeFlush, maxDirsBeforeFlush);

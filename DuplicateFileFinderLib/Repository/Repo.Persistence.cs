@@ -61,7 +61,8 @@ public sealed partial class Repo : IRepo
             Files     = _files,
             Dirs      = _dirs,
             HashIndex = _hashIndex,
-            ScanRuns  = _scanRuns
+            ScanRuns  = _scanRuns,
+            ScanRoots =  _scanRoots.Values.ToList(),
         };
 
         var tmp = _snapshotFile + ".tmp";

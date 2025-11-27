@@ -23,6 +23,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                          ?? ProbeDeviceFromMountinfo(fullPath);
 
         if (string.IsNullOrEmpty(devicePath)) return null;
+        
+        devicePath = NormalizeDevicePath(devicePath);
 
         // 2. Call lsblk once and build VolumeInfo from its JSON
         var lsblkJson = RunLsblkJson();
@@ -33,6 +35,22 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
 
     // ---------- Device resolution (findmnt + /proc/*) ----------
 
+    private static string NormalizeDevicePath(string devicePath)
+    {
+        if (string.IsNullOrWhiteSpace(devicePath))
+            return devicePath;
+
+        var trimmed = devicePath.Trim();
+
+        // Handle btrfs-style "/dev/mapper/root[/@home]" etc.
+        var bracketIndex = trimmed.IndexOf('[');
+        if (bracketIndex > 0 && trimmed.EndsWith("]", StringComparison.Ordinal))
+            trimmed = trimmed.Substring(0, bracketIndex);
+
+        return trimmed;
+    }
+
+    
     private static string? ProbeDeviceWithFindmnt(string path)
     {
         try
@@ -157,7 +175,7 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
             // lsblk -J -o NAME,KNAME,TYPE,MODEL,ROTA,FSTYPE,LABEL,PARTLABEL,UUID,PARTUUID,WWN,SERIAL
             psi.ArgumentList.Add("-J");
             psi.ArgumentList.Add("-o");
-            psi.ArgumentList.Add("NAME,KNAME,TYPE,MODEL,ROTA,FSTYPE,LABEL,PARTLABEL,UUID,PARTUUID,WWN,SERIAL");
+            psi.ArgumentList.Add("NAME,KNAME,PATH,TYPE,MODEL,ROTA,FSTYPE,LABEL,PARTLABEL,UUID,PARTUUID,WWN,SERIAL");
 
             using var proc = Process.Start(psi);
             if (proc == null)
@@ -212,10 +230,12 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                 ? node
                 : currentDisk;
 
-            // Match either NAME or KNAME to the leaf device name
-            if (!string.IsNullOrEmpty(devName) &&
-                (string.Equals(node.Name, devName, StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(node.KName, devName, StringComparison.OrdinalIgnoreCase)))
+            bool pathMatches = string.Equals(node.Path, devicePath, StringComparison.OrdinalIgnoreCase);
+            bool nameMatches = !string.IsNullOrEmpty(devName) &&
+                               (string.Equals(node.Name, devName, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(node.KName, devName, StringComparison.OrdinalIgnoreCase));
+            
+            if (pathMatches || nameMatches)
             {
                 partitionNode ??= node;
                 diskNode ??= thisDisk;
@@ -283,6 +303,7 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
     private sealed class LsblkDevice
     {
         [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("path")] public string? Path { get; set; }
         [JsonPropertyName("kname")] public string? KName { get; set; }
         [JsonPropertyName("type")] public string? Type { get; set; }
         [JsonPropertyName("model")] public string? Model { get; set; }

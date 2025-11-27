@@ -399,7 +399,7 @@ public sealed class ScanSessionTests : IDisposable
         var rootPath = RootPathForCurrentOS();
 
         // High thresholds: no auto-flush
-        await using var session = repo.BeginScan(rootPath, 10, 10);
+        await using var session = repo.BeginScan(rootPath,  maxFilesBeforeFlush: 10, maxDirsBeforeFlush: 10);
 
         var hashBytes = new byte[16];
         new Random(456).NextBytes(hashBytes);
@@ -450,7 +450,7 @@ public sealed class ScanSessionTests : IDisposable
         var repo = Repo.Open(_rootDir);
         var rootPath = RootPathForCurrentOS();
 
-        var session = repo.BeginScan(rootPath, 2);
+        var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 2);
 
         session.AddOrUpdateDirectory(
             "root",
@@ -508,7 +508,7 @@ public sealed class ScanSessionTests : IDisposable
         var repo = Repo.Open(_rootDir);
         var rootPath = RootPathForCurrentOS();
 
-        var session = repo.BeginScan(rootPath, 1000, 3);
+        var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 1000, maxDirsBeforeFlush: 3);
 
         session.AddOrUpdateDirectory(
             "/root",
@@ -548,7 +548,7 @@ public sealed class ScanSessionTests : IDisposable
         var repo = Repo.Open(_rootDir);
         var rootPath = RootPathForCurrentOS();
 
-        var session = repo.BeginScan(rootPath, 10, 10);
+        var session = repo.BeginScan(rootPath,  maxFilesBeforeFlush: 10, maxDirsBeforeFlush: 10);
 
         var hashBytes = new byte[16];
         new Random(456).NextBytes(hashBytes);
@@ -603,7 +603,7 @@ public sealed class ScanSessionTests : IDisposable
         var repo = Repo.Open(_rootDir);
         var rootPath = RootPathForCurrentOS();
 
-        var session = repo.BeginScan(rootPath, 2);
+        var session = repo.BeginScan(rootPath, maxFilesBeforeFlush: 2);
 
         session.AddOrUpdateDirectory(
             "/root",

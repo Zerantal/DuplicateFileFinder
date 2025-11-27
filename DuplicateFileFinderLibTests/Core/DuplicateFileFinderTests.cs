@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
@@ -42,9 +43,10 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public RepoViewSnapshot GetSnapshot()
             => throw new NotImplementedException("Snapshot not used in these tests.");
 
-        public IReadOnlyList<ScanRun> ScanRunsView { get; } = Array.Empty<ScanRun>();
+        public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
 
-        public IScanSession BeginScan(string rootPath, int maxFilesBeforeFlush = 10_000, int maxDirsBeforeFlush = 1_000)
+        public IScanSession BeginScan(string rootPath, ScanMode scanMode = ScanMode.Full, VolumeInfo? volume = null,
+            int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
         {
             var session = new CapturingSession(rootPath);
             LastSession = session;

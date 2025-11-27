@@ -21,6 +21,10 @@ public partial record ScanRoot
     /// </summary>
     [MemoryPackOrder(2)] public required Guid DirId               { get; init; }
     
+    [MemoryPackOrder(9)] public required DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    [MemoryPackOrder(10)] public DateTimeOffset? LastScannedAt    { get; init; }
+    
+    
     [MemoryPackOrder(3)] public string? VolumeId                  { get; init; } = null;
     
     [MemoryPackOrder(4)] public string? VolumeLabel               { get; init; } = null;
@@ -30,10 +34,9 @@ public partial record ScanRoot
     [MemoryPackOrder(6)] public bool? IsRotational                { get; init; } = null;
 
     [MemoryPackOrder(7)] public string? FileSystemType            { get; init; } = null;
-    [MemoryPackOrder(9)] public required DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    
     
     // to be updated on each scan (may change for removable media)
-    [MemoryPackOrder(8)] public string? DevicePath                { get; init; } = null; 
-
-    [MemoryPackOrder(10)] public DateTimeOffset? LastScannedAt    { get; init; }
+    [MemoryPackOrder(8)] public string? DevicePath                { get; init; } = null;
+    [MemoryPackOrder(11)] public string? DeviceModel               { get; init; } = null;
 }
