@@ -11,7 +11,12 @@ public sealed partial class Repo
         {
             var seq = _meta.NextScanSequence;
             _meta = _meta with { NextScanSequence = seq + 1 };
+
+            SyncMetaFile_NoLock();
+            // Legacy JSON meta still persisted for now, if you want:
             SaveMeta_NoLock();
+            _ = PersistMetaAsync(); // fire and forget; or make this async if you prefer
+
             return seq;
         }
     }
@@ -22,7 +27,11 @@ public sealed partial class Repo
         {
             var id = _meta.NextLogSequence;
             _meta = _meta with { NextLogSequence = id + 1 };
+
+            SyncMetaFile_NoLock();
             SaveMeta_NoLock();
+            _ = PersistMetaAsync();
+
             return id;
         }
     }
@@ -131,17 +140,14 @@ public sealed partial class Repo
 // Caller must hold _sync.
     private ScanRoot FindOrCreateScanRoot_NoLock(string normalizedRootPath)
     {
-        // Try to locate existing root by RootPath
         foreach (var root in _scanRoots.Values)
         {
             if (string.Equals(root.RootPath, normalizedRootPath, StringComparison.Ordinal))
                 return root;
         }
 
-        // No existing root: create a new record
         var now = DateTimeOffset.UtcNow;
 
-        // DirId may be Guid.Empty until the scan inserts the root directory record.
         var newRoot = new ScanRoot
         {
             Id            = Guid.NewGuid(),
@@ -160,8 +166,15 @@ public sealed partial class Repo
         _scanRoots[newRoot.Id] = newRoot;
         SaveScanRoots_NoLock();
 
+        SyncMetaFile_NoLock();
+        _ = PersistMetaAsync();
+
         return newRoot;
     }
+
+
+
+    
 
 // Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
     private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)

@@ -18,9 +18,10 @@ public sealed class DuplicateFileFinder
     private readonly IRepo _repo;
     
     private readonly bool _throttleProgress = true;
-    private readonly int _hashDegreeOfParallelism;
     
     private readonly IVolumeInfoProvider? _volumeInfoProvider;
+    
+    private int _hashDegreeOfParallelism;
 
     /// <summary>
     /// Internal representation of a file that needs hashing.
@@ -35,8 +36,7 @@ public sealed class DuplicateFileFinder
         IRepo repo,
         IVolumeInfoProvider? volumeInfoProvider = null,
         IFileEnumerator? fs = null,
-        IChecksumPipeline? checksums = null,
-        int? hashDegreeOfParallelism  = null)
+        IChecksumPipeline? checksums = null)
     {
         if (volumeInfoProvider is not null)
             _volumeInfoProvider = volumeInfoProvider;
@@ -49,11 +49,7 @@ public sealed class DuplicateFileFinder
         _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipelineMD5();
         _repo = repo;
-        
-        var dop = hashDegreeOfParallelism ?? Environment.ProcessorCount;
-        if (dop < 1) dop = 1;
-        _hashDegreeOfParallelism = dop;
-
+        _hashDegreeOfParallelism = Environment.ProcessorCount;
     }
     
     internal DuplicateFileFinder(IRepo repo, bool throttleProgress)
@@ -86,6 +82,11 @@ public sealed class DuplicateFileFinder
         {
             // ignored
         }
+
+        if (vInfo is { IsRotational: true })
+            _hashDegreeOfParallelism = 1;
+        else
+            _hashDegreeOfParallelism = Environment.ProcessorCount;
         
         var session = _repo.BeginScan(location, mode, vInfo);
 
@@ -371,7 +372,7 @@ public sealed class DuplicateFileFinder
             Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
             return;
         }
-
+        
         var result = await HashingRunner.HashFilesAsync(
             filesToHash,
             _checksums,

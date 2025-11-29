@@ -10,9 +10,11 @@ namespace DuplicateFileFinderLib.Repository;
 ///     The persistent database of all scanned files across all scan locations.
 ///     Uses a snapshot + append-only delta log for durability.
 /// </summary>
-public sealed partial class Repo
+public sealed partial class Repo : IRepo, IDisposable, IAsyncDisposable
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    
+    private bool _disposed;
     
     // persistence data models
     private RepoMeta _meta = null!;

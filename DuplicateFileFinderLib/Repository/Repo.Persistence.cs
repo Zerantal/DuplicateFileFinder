@@ -1,21 +1,25 @@
 using System.Text.Json;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository;
 
-public sealed partial class Repo : IRepo
+public sealed partial class Repo
 {
     // file/dir names 
-    private readonly string _metaFile;
-    private readonly string _snapshotFile;
-    private readonly string _logDir;
-    private readonly string _scanRunsFile;
-    private readonly string _scanRootsFile;
+    private readonly string _repoPath;
+    private readonly string _metaFilePath;
+    private readonly string _snapshotFilePath;
+    private readonly string _logDirPath;
+    private readonly string _scanRunsFilePath;
+    private readonly string _scanRootsFilePath;
 
-    private void LoadMetaOrCreateFresh(string repoPath)
+    private RepoMetaFile _metaFile;
+
+    private void LoadMetaOrCreateFresh()
     {
-        if (!File.Exists(_metaFile))
+        if (!File.Exists(_metaFilePath))
         {
             // First time creating a repo → initialise everything
             _meta = new RepoMeta
@@ -26,7 +30,7 @@ public sealed partial class Repo : IRepo
                 LastSnapshottedLogSequence = -1,
                 LastCompaction = DateTimeOffset.UtcNow,
                 RepoId = Guid.NewGuid(),
-                RepoPath = repoPath,
+                RepoPath = _repoPath,
                 RepoHostName = Environment.MachineName,
                 NextScanSequence = 0
             };
@@ -36,15 +40,15 @@ public sealed partial class Repo : IRepo
         }
 
         // Load existing
-        _meta = JsonSerializer.Deserialize<RepoMeta>(File.ReadAllText(_metaFile))
+        _meta = JsonSerializer.Deserialize<RepoMeta>(File.ReadAllText(_metaFilePath))
                 ?? throw new InvalidDataException("Failed to load RepoMeta.");
     }
     
     private void SaveMeta_NoLock()
     {
         var json = JsonSerializer.Serialize(_meta, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_metaFile, json);
-        Fsync(_metaFile);
+        File.WriteAllText(_metaFilePath, json);
+        Fsync(_metaFilePath);
     }
     
 // Writes snapshot + indexes and updates meta. Caller must hold _sync.
@@ -65,11 +69,11 @@ public sealed partial class Repo : IRepo
             ScanRoots =  _scanRoots.Values.ToList(),
         };
 
-        var tmp = _snapshotFile + ".tmp";
+        var tmp = _snapshotFilePath + ".tmp";
         var bytes = MemoryPackSerializer.Serialize(snapshot);
         File.WriteAllBytes(tmp, bytes);
         Fsync(tmp);
-        File.Move(tmp, _snapshotFile, true);
+        File.Move(tmp, _snapshotFilePath, true);
 
         SaveMeta_NoLock();
     }
@@ -83,9 +87,9 @@ public sealed partial class Repo : IRepo
         _scanRunIndex.Clear();
         _dirPathCache.Clear();
 
-        if (!File.Exists(_snapshotFile)) return;
+        if (!File.Exists(_snapshotFilePath)) return;
 
-        var bytes = File.ReadAllBytes(_snapshotFile);
+        var bytes = File.ReadAllBytes(_snapshotFilePath);
 
         try
         {
@@ -115,28 +119,28 @@ public sealed partial class Repo : IRepo
     
     private void LoadScanRoots()
     {
-        if (!File.Exists(_scanRootsFile))
+        if (!File.Exists(_scanRootsFilePath))
             return;
 
-        var json = File.ReadAllText(_scanRootsFile);
+        var json = File.ReadAllText(_scanRootsFilePath);
         _scanRoots = JsonSerializer.Deserialize<Dictionary<Guid, ScanRoot>>(json) ?? new Dictionary<Guid, ScanRoot>();
     }
 
     private void SaveScanRoots_NoLock()
     {
         var json = JsonSerializer.Serialize(_scanRoots, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_scanRootsFile, json);
-        Fsync(_scanRootsFile);
+        File.WriteAllText(_scanRootsFilePath, json);
+        Fsync(_scanRootsFilePath);
     }
     
     // Load persisted scan runs from scanruns.json (if present) and
     // overlay them on top of whatever was loaded from the snapshot.
     private void LoadScanRuns()
     {
-        if (!File.Exists(_scanRunsFile))
+        if (!File.Exists(_scanRunsFilePath))
             return; // Keep whatever ScanRuns came from the snapshot
 
-        var json = File.ReadAllText(_scanRunsFile);
+        var json = File.ReadAllText(_scanRunsFilePath);
         var fromFile = JsonSerializer.Deserialize<List<ScanRun>>(json) ?? new List<ScanRun>();
 
         // Merge: snapshot data is baseline; scanruns.json overrides / adds by ScanSequence.
@@ -157,15 +161,15 @@ public sealed partial class Repo : IRepo
     private void SaveScanRuns_NoLock()
     {
         var json = JsonSerializer.Serialize(_scanRuns, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_scanRunsFile, json);
-        Fsync(_scanRunsFile);
+        File.WriteAllText(_scanRunsFilePath, json);
+        Fsync(_scanRunsFilePath);
     }
     
     private void ReplayDeltas()
     {
-        if (!Directory.Exists(_logDir)) return;
+        if (!Directory.Exists(_logDirPath)) return;
 
-        var files = Directory.GetFiles(_logDir, $"{_meta.Generation}-*.delta")
+        var files = Directory.GetFiles(_logDirPath, $"{_meta.Generation}-*.delta")
             .OrderBy(f => f, StringComparer.Ordinal);
 
         foreach (var path in files)
@@ -260,9 +264,9 @@ public sealed partial class Repo : IRepo
     
     private void DeleteObsoleteDeltas_NoLock()
     {
-        if (!Directory.Exists(_logDir)) return;
+        if (!Directory.Exists(_logDirPath)) return;
 
-        foreach (var path in Directory.GetFiles(_logDir, $"{_meta.Generation}-*.delta"))
+        foreach (var path in Directory.GetFiles(_logDirPath, $"{_meta.Generation}-*.delta"))
         {
             var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<seq>"
             var dash = name.IndexOf('-');
@@ -279,6 +283,142 @@ public sealed partial class Repo : IRepo
                 }
         }
     }
+
+    // ------------------ new repo store ------------------------
+    
+    private async Task PersistMetaAsync(CancellationToken ct = default)
+    {
+        await RepoStore.SaveMetaAsync(_repoPath, _metaFile, ct).ConfigureAwait(false);
+    }
+    
+    private void SyncMetaFile_NoLock()
+    {
+        // Ensure _metaFile mirrors the current in-memory state (_meta, _scanRoots, _scanRuns)
+        _metaFile = new RepoMetaFile
+        {
+            Meta      = _meta,
+            ScanRoots = _scanRoots.Values.ToList(),
+            ScanRuns  = _scanRuns.ToList()
+        };
+    }
+
+    
+    private async Task PersistScanRootSnapshotAsync(
+        Guid scanRootId,
+        IReadOnlyDictionary<Guid, DirRecord> allDirs,
+        IReadOnlyDictionary<Guid, FileRecord> allFiles,
+        CancellationToken ct = default)
+    {
+        // Find the ScanRoot
+        var scanRoot = _metaFile.ScanRoots.FirstOrDefault(r => r.Id == scanRootId);
+        if (scanRoot is null)
+            throw new InvalidOperationException($"Unknown ScanRoot {scanRootId}.");
+
+        // Collect all DirIds under this ScanRoot.DirId (subtree)
+        var dirsById = allDirs; // shorthand
+
+        var dirIds = CollectDirSubtree(scanRoot.DirId, dirsById);
+
+        var dirRecords = dirIds.Select(id => dirsById[id]).ToArray();
+
+        // Collect all files whose DirId is in that subtree
+        var filesByDir = allFiles.Values
+            .GroupBy(f => f.DirId)
+            .ToDictionary(g => g.Key, g => g.ToArray());
+
+        var fileList = new List<FileRecord>();
+        foreach (var dirId in dirIds)
+        {
+            if (filesByDir.TryGetValue(dirId, out var filesInDir))
+                fileList.AddRange(filesInDir);
+        }
+
+        var rootSnap = new ScanRootSnapshotOnDisk 
+        {
+            ScanRootId = scanRootId,
+            Dirs  = dirRecords,
+            Files = fileList.ToArray()
+        };
+
+        await RepoStore.SaveScanRootSnapshotAsync(_repoPath, rootSnap, ct).ConfigureAwait(false);
+    }
+
+    // private static HashSet<Guid> CollectDirSubtree(
+    //     Guid rootDirId,
+    //     IReadOnlyDictionary<Guid, DirRecord> allDirs)
+    // {
+    //     var result = new HashSet<Guid> { rootDirId };
+    //     var queue = new Queue<Guid>();
+    //     queue.Enqueue(rootDirId);
+    //
+    //     while (queue.Count > 0)
+    //     {
+    //         var current = queue.Dequeue();
+    //
+    //         foreach (var dir in allDirs.Values)
+    //         {
+    //             if (dir.ParentId is Guid parentId &&
+    //                 parentId == current &&
+    //                 result.Add(dir.Id))
+    //             {
+    //                 queue.Enqueue(dir.Id);
+    //             }
+    //         }
+    //     }
+    //
+    //     return result;
+    // }
+    
+    private static HashSet<Guid> CollectDirSubtree(
+        Guid rootDirId,
+        IReadOnlyDictionary<Guid, DirRecord> allDirs)
+    {
+        var result = new HashSet<Guid>();
+
+        // Root not present? Nothing to do.
+        if (!allDirs.ContainsKey(rootDirId))
+            return result;
+
+        // Build parent -> children index once for this call.
+        // This is O(N) over allDirs and avoids N * N scanning.
+        var childrenByParent = new Dictionary<Guid, List<Guid>>(allDirs.Count);
+
+        foreach (var dir in allDirs.Values)
+        {
+            if (dir.ParentId is Guid parentId)
+            {
+                if (!childrenByParent.TryGetValue(parentId, out var list))
+                {
+                    list = new List<Guid>();
+                    childrenByParent[parentId] = list;
+                }
+
+                list.Add(dir.Id);
+            }
+        }
+
+        var queue = new Queue<Guid>();
+        result.Add(rootDirId);
+        queue.Enqueue(rootDirId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            if (!childrenByParent.TryGetValue(current, out var children))
+                continue;
+
+            for (int i = 0; i < children.Count; i++)
+            {
+                var childId = children[i];
+                if (result.Add(childId))
+                    queue.Enqueue(childId);
+            }
+        }
+
+        return result;
+    }
+
     
     // ---------- util ----------
 
@@ -290,11 +430,11 @@ public sealed partial class Repo : IRepo
 
     private (long logBytes, int count) GetLogSizeAndCount()
     {
-        if (!Directory.Exists(_logDir)) return (0L, 0);
+        if (!Directory.Exists(_logDirPath)) return (0L, 0);
 
         long bytes = 0;
         var count = 0;
-        foreach (var p in Directory.GetFiles(_logDir, $"{_meta.Generation}-*.delta"))
+        foreach (var p in Directory.GetFiles(_logDirPath, $"{_meta.Generation}-*.delta"))
         {
             var fi = new FileInfo(p);
             if (fi.Exists)

@@ -1,7 +1,6 @@
 using Avalonia.Controls;
-using DuplicateFileFinder.Gui.Services;
+using Avalonia.Interactivity;
 using DuplicateFileFinder.Gui.ViewModels;
-using DuplicateFileFinderLib.Repository;
 
 namespace DuplicateFileFinder.Gui.Views;
 
@@ -10,18 +9,17 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        
-        
+
+        Loaded += OnLoaded;
+    }
+
+    private async void OnLoaded(object? sender, RoutedEventArgs e)
+    {
         var appName = "DuplicateFileFinder";
         var appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             appName);
-        
-        var repo = Repo.Open(Path.Combine(appDir, "repo"));
-        var dialogService = new DialogService();
-        var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(repo);
-        var scanCoordinator = new ScanCoordinator(repo, scanEngine, dialogService);
-        
-        DataContext = new MainWindowViewModel(repo, scanCoordinator, dialogService);
+        var repoDir = Path.Combine(appDir, "repo");
 
+        DataContext = await MainWindowViewModel.CreateMainWindowAsync(repoDir);
     }
 }
