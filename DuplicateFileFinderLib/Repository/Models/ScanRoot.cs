@@ -17,7 +17,7 @@ public partial record ScanRoot
     [MemoryPackOrder(1)] public required string RootPath          { get; init; }
 
     /// <summary>
-    /// The DirRecord.Id that corresponds to this root in the repo's directory tree.
+    /// The DirRecord.FileId that corresponds to this root in the repo's directory tree.
     /// </summary>
     [MemoryPackOrder(2)] public required Guid DirId               { get; init; }
     
@@ -25,18 +25,18 @@ public partial record ScanRoot
     [MemoryPackOrder(10)] public DateTimeOffset? LastScannedAt    { get; init; }
     
     
-    [MemoryPackOrder(3)] public string? VolumeId                  { get; init; } = null;
+    [MemoryPackOrder(3)] public string? VolumeId                  { get; init; }
     
-    [MemoryPackOrder(4)] public string? VolumeLabel               { get; init; } = null;
+    [MemoryPackOrder(4)] public string? VolumeLabel               { get; init; }
     
-    [MemoryPackOrder(5)] public string? DisplayName               { get; init; } = null;
+    [MemoryPackOrder(5)] public string? DisplayName               { get; init; }
 
-    [MemoryPackOrder(6)] public bool? IsRotational                { get; init; } = null;
+    [MemoryPackOrder(6)] public bool? IsRotational                { get; init; }
 
-    [MemoryPackOrder(7)] public string? FileSystemType            { get; init; } = null;
+    [MemoryPackOrder(7)] public string? FileSystemType            { get; init; }
     
     
     // to be updated on each scan (may change for removable media)
-    [MemoryPackOrder(8)] public string? DevicePath                { get; init; } = null;
-    [MemoryPackOrder(11)] public string? DeviceModel               { get; init; } = null;
+    [MemoryPackOrder(8)] public string? DevicePath                { get; init; }
+    [MemoryPackOrder(11)] public string? DeviceModel               { get; init; }
 }

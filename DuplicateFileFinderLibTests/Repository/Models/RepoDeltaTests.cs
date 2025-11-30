@@ -38,7 +38,7 @@ public sealed class RepoDeltaTests
 
             var dir = new DirRecord
             {
-                Id = dirId,
+                DirId = dirId,
                 ParentId = null,
                 Name = "root",
                 LastSeenSequence = 1,
@@ -48,7 +48,7 @@ public sealed class RepoDeltaTests
 
             var file1 = new FileRecord
             {
-                Id = fileId1,
+                FileId = fileId1,
                 DirId = dirId,
                 Name = "f1",
                 Size = 10,
@@ -62,7 +62,7 @@ public sealed class RepoDeltaTests
 
             var file2 = new FileRecord
             {
-                Id = fileId2,
+                FileId = fileId2,
                 DirId = dirId,
                 Name = "f2",
                 Size = 20,
@@ -95,10 +95,10 @@ public sealed class RepoDeltaTests
             Assert.Equal(original.DeletedDirs.Count, roundTripped.DeletedDirs.Count);
             Assert.Equal(original.ScanSequence, roundTripped.ScanSequence);
 
-            Assert.Contains(roundTripped.Files, f => f.Id == fileId1);
-            Assert.Contains(roundTripped.Files, f => f.Id == fileId2);
-            Assert.Contains(roundTripped.Dirs, d => d.Id == dirId);
-            Assert.Contains(roundTripped.DeletedFiles, t => t.Id == fileId1);
-            Assert.Contains(roundTripped.DeletedDirs, t => t.Id == dirId);
+            Assert.Contains(roundTripped.Files, f => f.FileId == fileId1);
+            Assert.Contains(roundTripped.Files, f => f.FileId == fileId2);
+            Assert.Contains(roundTripped.Dirs, d => d.DirId == dirId);
+            Assert.Contains(roundTripped.DeletedFiles, t => t.FileId == fileId1);
+            Assert.Contains(roundTripped.DeletedDirs, t => t.DirId == dirId);
         }
     }

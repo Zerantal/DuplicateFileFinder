@@ -1,6 +1,7 @@
 // DuplicateFileFinderLib/Repository/ScanSession.cs
 
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository;
 
@@ -21,8 +22,6 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
     // Normalized full file path -> FileRecord (latest state within this session)
     private readonly Dictionary<string, FileRecord> _filesByPath;
-
-    private readonly StringComparer _pathComparer;
     
     // Buffered records for the next RepoDelta
     private readonly List<DirRecord> _pendingDirs = new();
@@ -31,28 +30,24 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     // Buffered tombstones for deletions in this scan
     private readonly List<DirTombstone>  _pendingDirTombstones  = new();
     private readonly List<FileTombstone> _pendingFileTombstones = new();
-
+    
     private bool _finished;
     
     public ScanSession(
         Repo repo,
         ScanRun run,
         IReadOnlyDictionary<Guid, DirRecord> existingDirsInRepo,
-        int maxFilesBeforeFlush = 50_000,
-        int maxDirsBeforeFlush  = 1_000)
+        int maxFilesBeforeFlush,
+        int maxDirsBeforeFlush)
     {
         _repo = repo;
         Run = run;
         _maxFilesBeforeFlush = maxFilesBeforeFlush;
         _maxDirsBeforeFlush = maxDirsBeforeFlush;
-
-        _pathComparer = OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
-
+        
         _dirsById      = new Dictionary<Guid, DirRecord>(existingDirsInRepo.Count);
-        _dirPathIndex = new Dictionary<string, Guid>(_pathComparer);
-        _filesByPath   = new Dictionary<string, FileRecord>(_pathComparer);
+        _dirPathIndex = new Dictionary<string, Guid>(PathUtils.PathComparer);
+        _filesByPath   = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
 
         // Seed session dirs and path index from repo snapshot
         foreach (var (id, dir) in existingDirsInRepo)
@@ -104,7 +99,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.Id.
+    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.FileId.
     /// Creates any missing parents as dummy dirs (Status=None), and the leaf with the
     /// requested <paramref name="status"/> (or a default if null). Returns the DirId.
     /// </summary>
@@ -117,6 +112,14 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
             throw new ArgumentException("Path is null or empty", nameof(fullPath));
 
         fullPath = NormalizePath(fullPath);
+        
+        var root = RootPath; // Run.RootPath; should already be normalized
+        if (!fullPath.StartsWith(root, PathUtils.PathComparison ))
+        {
+            throw new InvalidOperationException(
+                $"ScanSession received path '{fullPath}' which is outside scan root '{root}'. " +
+                "Scanner must pass absolute paths under the scan root.");
+        }
 
         var shouldFlush = false;
 
@@ -143,7 +146,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
             toCreate.Push(current);
 
             var parentPath = Path.GetDirectoryName(current);
-            if (string.IsNullOrEmpty(parentPath) || _pathComparer.Equals(parentPath, current))
+            if (string.IsNullOrEmpty(parentPath) || PathUtils.PathComparer.Equals(parentPath, current))
                 break;
 
             current = NormalizePath(parentPath);
@@ -151,7 +154,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
         Guid? parentId = null;
 
-        // If we stopped because we hit a known parent, remember its Id
+        // If we stopped because we hit a known parent, remember its FileId
         if (_dirPathIndex.TryGetValue(current, out var knownParentId))
             parentId = knownParentId;
 
@@ -166,7 +169,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
                 name = path;
             }
 
-            var isLeaf = _pathComparer.Equals(path, fullPath);
+            var isLeaf = PathUtils.PathComparer.Equals(path, fullPath);
 
             // For new leaf: default status is Enumerated if not provided.
             // For parents: Status.None and no error message.
@@ -180,7 +183,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
             var dir = new DirRecord
             {
-                Id               = id,
+                DirId               = id,
                 ParentId         = parentId,
                 Name             = name,
                 LastSeenSequence = ScanSequence,
@@ -203,7 +206,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
         }
 
         var leafId = parentId!.Value;
-
+        
         if (shouldFlush)
             _ = FlushProgressAsync();
 
@@ -305,18 +308,18 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
                 var effectiveStatus  = status   ?? ScanEntryStatus.Enumerated;
 
                 file = new FileRecord
-        {
-            Id                  = Guid.NewGuid(),
-            DirId               = dirId,
-            Name                = name,
+                {
+                    FileId                  = Guid.NewGuid(),
+                    DirId               = dirId,
+                    Name                = name,
                     Size                 = effectiveSize,
                     Hash                 = effectiveHash,
                     Modified             = effectiveMod,
                     Created              = effectiveCreated,
-            LastSeenScanSequence = ScanSequence,
+                    LastSeenScanSequence = ScanSequence,
                     Status               = effectiveStatus,
-            ErrorMessage        = errorMessage
-        };
+                    ErrorMessage        = errorMessage
+                };
             }
 
             _filesByPath[fullFilePath] = file;
@@ -349,33 +352,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
             _pendingFileTombstones.Add(new FileTombstone(fileId, ScanSequence));
         }
     }
-
-    // ---------------------------------------------------------------------
-    // Legacy APIs (wrappers)
-    // ---------------------------------------------------------------------
-
-    [Obsolete("Use AddOrUpdateDirectory instead.")]
-    public Guid ObserveDirectory(
-        string          fullPath,
-        ScanEntryStatus status,
-        string?         errorMessage = null)
-    {
-        return AddOrUpdateDirectory(fullPath, status, errorMessage);
-    }
-
-    [Obsolete("Use AddOrUpdateFile instead.")]
-    public void ObserveFile(
-        string          fullFilePath,
-        long            size,
-        HashKey         hash,
-        DateTimeOffset  modified,
-        DateTimeOffset  created,
-        ScanEntryStatus status,
-        string?         errorMessage = null)
-    {
-        AddOrUpdateFile(fullFilePath, size, hash, modified, created, status, errorMessage);
-    }
-
+    
     // ---------------------------------------------------------------------
     // Flush
     // ---------------------------------------------------------------------

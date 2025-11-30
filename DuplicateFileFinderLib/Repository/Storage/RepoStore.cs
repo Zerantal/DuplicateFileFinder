@@ -1,5 +1,5 @@
 // Repository/Storage/RepoStore.cs
-using System.IO;
+
 using MemoryPack;
 using DuplicateFileFinderLib.Repository.Models;
 
@@ -12,7 +12,13 @@ public static class RepoStore
         Directory.CreateDirectory(repoPath);
         var metaPath = GetMetaPath(repoPath);
 
-        await using var fs = new FileStream(metaPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await using var fs = new FileStream(
+            metaPath,
+            FileMode.Create,
+            FileAccess.Write, 
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 4096,
+            useAsync: true);
         await MemoryPackSerializer.SerializeAsync(fs, meta, cancellationToken: ct).ConfigureAwait(false);
     }
 
@@ -37,8 +43,17 @@ public static class RepoStore
 
         var path = GetRootSnapshotPath(repoPath, snapshot.ScanRootId);
 
-        await using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        await using var fs = new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 8192,
+            useAsync: true);
+        
         await MemoryPackSerializer.SerializeAsync(fs, snapshot, cancellationToken: ct).ConfigureAwait(false);
+        
+        await fs.FlushAsync(ct).ConfigureAwait(false);
     }
 
     public static async Task<ScanRootSnapshotOnDisk?> LoadScanRootSnapshotAsync(

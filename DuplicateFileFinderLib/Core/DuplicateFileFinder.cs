@@ -83,10 +83,7 @@ public sealed class DuplicateFileFinder
             // ignored
         }
 
-        if (vInfo is { IsRotational: true })
-            _hashDegreeOfParallelism = 1;
-        else
-            _hashDegreeOfParallelism = Environment.ProcessorCount;
+        _hashDegreeOfParallelism = vInfo is { IsRotational: true } ? 1 : Environment.ProcessorCount;
         
         var session = _repo.BeginScan(location, mode, vInfo);
 
@@ -134,7 +131,7 @@ public sealed class DuplicateFileFinder
 
             await session.CompleteAsync(token);
             Report(progress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
-            _repo.CompactIfNeeded();
+            await _repo.CompactAsync(ct: token);
         }
         catch (OperationCanceledException)
         {
@@ -305,19 +302,16 @@ public sealed class DuplicateFileFinder
     private QuickRescanState BuildQuickRescanState(RepoViewSnapshot snapshot, string rootPath)
     {
         var rootNormalized = PathUtils.NormalizePath(rootPath);
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
 
-        var files = new Dictionary<string, FileRecord>(StringComparer.FromComparison(comparison));
-        var dirs  = new Dictionary<string, DirRecord>(StringComparer.FromComparison(comparison));
+        var files = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
+        var dirs  = new Dictionary<string, DirRecord>(PathUtils.PathComparer);
 
         foreach (var dir in snapshot.Dirs.Values)
         {
-            var dirPath = _repo.GetFullDirPath(dir.Id);
+            var dirPath = _repo.GetFullDirPath(dir.DirId);
             var norm    = PathUtils.NormalizePath(dirPath);
 
-            if (!norm.StartsWith(rootNormalized,comparison))
+            if (!norm.StartsWith(rootNormalized, PathUtils.PathComparison))
                 continue;
 
             dirs[norm] = dir;
@@ -328,7 +322,7 @@ public sealed class DuplicateFileFinder
             var dirPath = _repo.GetFullDirPath(file.DirId);
             var full    = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
 
-            if (!full.StartsWith(rootNormalized, comparison))
+            if (!full.StartsWith(rootNormalized, PathUtils.PathComparison))
                 continue;
 
             files[full] = file;
@@ -342,13 +336,13 @@ public sealed class DuplicateFileFinder
         // Files that remained in the map are now missing on disk
         foreach (var file in quickState.PreviousFiles.Values)
         {
-            session.MarkFileDeleted(file.Id);
+            session.MarkFileDeleted(file.FileId);
         }
 
         // Directories that remained are missing; this naturally includes whole subtrees.
         foreach (var dir in quickState.PreviousDirs.Values)
         {
-            session.MarkDirectoryDeleted(dir.Id);
+            session.MarkDirectoryDeleted(dir.DirId);
         }
     }
 

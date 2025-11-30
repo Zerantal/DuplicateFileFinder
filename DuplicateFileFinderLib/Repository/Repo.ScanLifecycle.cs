@@ -1,5 +1,7 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository;
 
@@ -9,32 +11,79 @@ public sealed partial class Repo
     {
         lock (_sync)
         {
-            var seq = _meta.NextScanSequence;
-            _meta = _meta with { NextScanSequence = seq + 1 };
-
-            SyncMetaFile_NoLock();
-            // Legacy JSON meta still persisted for now, if you want:
-            SaveMeta_NoLock();
-            _ = PersistMetaAsync(); // fire and forget; or make this async if you prefer
-
-            return seq;
+            return AllocateScanSequence_NoLock();
         }
     }
+
+    private long AllocateScanSequence_NoLock()
+    {
+        var seq = Meta.NextScanSequence;
+        Meta = Meta with { NextScanSequence = seq + 1 };
+
+        SyncMetaFile_NoLock();
+        SaveMeta_NoLock();
+
+        return seq;
+    }
+
 
     internal long AllocateLogId()
     {
         lock (_sync)
         {
-            var id = _meta.NextLogSequence;
-            _meta = _meta with { NextLogSequence = id + 1 };
+            var id = Meta.NextLogSequence;
+            Meta = Meta with { NextLogSequence = id + 1 };
 
             SyncMetaFile_NoLock();
             SaveMeta_NoLock();
-            _ = PersistMetaAsync();
 
             return id;
         }
     }
+    
+    // Caller holds _sync
+    private void SaveMeta_NoLock()
+    {
+        _metaFile = new RepoMetaFile
+        {
+            Meta      = Meta,
+            ScanRoots = _scanRoots.Values.ToList(),
+            ScanRuns  = _scanRuns.ToList()
+        };
+
+        RepoStore.SaveMetaAsync(_repoPath, _metaFile, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    private void AddToHashIndex_NoLock(FileRecord f)
+    {
+        if (!f.Hash.IsComputed)
+            return;
+
+        if (!_hashIndex.TryGetValue(f.Hash, out var list))
+        {
+            list = new List<Guid>();
+            _hashIndex[f.Hash] = list;
+        }
+
+        if (!list.Contains(f.FileId))
+            list.Add(f.FileId);
+    }
+
+    private void RemoveFromHashIndex_NoLock(FileRecord f)
+    {
+        if (!f.Hash.IsComputed)
+            return;
+
+        if (_hashIndex.TryGetValue(f.Hash, out var list))
+        {
+            list.Remove(f.FileId);
+            if (list.Count == 0)
+                _hashIndex.Remove(f.Hash);
+        }
+    }
+
     
     internal void MarkScanCompleted(long sequence)
     {
@@ -55,7 +104,8 @@ public sealed partial class Repo
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
-            SaveScanRuns_NoLock(); // persist "completed" status
+            SyncMetaFile_NoLock();
+            _ = PersistMetaAsync();
         }
     }
 
@@ -80,39 +130,42 @@ public sealed partial class Repo
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
-            SaveScanRuns_NoLock(); // persist "failed/cancelled" status
+            SyncMetaFile_NoLock();
+            _ = PersistMetaAsync();
         }
     }
     
     internal void CompleteScanForRoot(long scanSequence, string rootPath)
     {
-        // Compute which files/dirs under root were *not* seen at scanSequence
-        var deletedFiles = new List<FileTombstone>();
-        var deletedDirs = new List<DirTombstone>();
+        List<FileTombstone> deletedFiles;
+        List<DirTombstone>  deletedDirs;
 
-        foreach (var kvp in _files)
+        lock (_sync)
         {
-            var file = kvp.Value;
-            if (!IsUnderRoot(file.DirId, rootPath))
-                continue;
+            deletedFiles = new List<FileTombstone>();
+            deletedDirs  = new List<DirTombstone>();
 
-            if (file.LastSeenScanSequence < scanSequence)
-                deletedFiles.Add(new FileTombstone(file.Id, scanSequence));
-        }
+            foreach (var file in _files.Values)
+            {
+                if (!IsUnderRoot(file.DirId, rootPath))
+                    continue;
 
-        foreach (var kvp in _dirs)
-        {
-            var dir = kvp.Value;
-            if (!IsUnderRoot(dir.Id, rootPath))
-                continue;
+                if (file.LastSeenScanSequence < scanSequence)
+                    deletedFiles.Add(new FileTombstone(file.FileId, scanSequence));
+            }
+            
+            foreach (var dir in _dirs.Values)
+            {
+                if (!IsUnderRoot(dir.DirId, rootPath))
+                    continue;
 
-            if (dir.LastSeenSequence < scanSequence)
-                deletedDirs.Add(new DirTombstone(dir.Id, scanSequence));
+                if (dir.LastSeenSequence < scanSequence)
+                    deletedDirs.Add(new DirTombstone(dir.DirId, scanSequence));
+            }
         }
 
         if (deletedFiles.Count == 0 && deletedDirs.Count == 0)
         {
-            // Nothing to tombstone, just mark completed
             MarkScanCompleted(scanSequence);
             return;
         }
@@ -129,15 +182,15 @@ public sealed partial class Repo
         CommitDelta(tombstoneDelta);
         MarkScanCompleted(scanSequence);
     }
+
     
     private bool IsUnderRoot(Guid dirId, string rootPath)
     {
         var path = GetFullDirPath(dirId);
-        return path.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
+        return path.StartsWith(rootPath, PathUtils.PathComparison);
     }
     
     // Find existing ScanRoot by canonical path or create a new one.
-// Caller must hold _sync.
     private ScanRoot FindOrCreateScanRoot_NoLock(string normalizedRootPath)
     {
         foreach (var root in _scanRoots.Values)
@@ -164,19 +217,40 @@ public sealed partial class Repo
         };
 
         _scanRoots[newRoot.Id] = newRoot;
-        SaveScanRoots_NoLock();
-
+        
         SyncMetaFile_NoLock();
         _ = PersistMetaAsync();
 
         return newRoot;
     }
 
+    internal void BindScanRootDirId(Guid scanRootId, Guid dirId)
+    {
+        lock (_sync)
+        {
+            if (!_scanRoots.TryGetValue(scanRootId, out var root))
+                return;
 
+            // Already bound to this dir: nothing to do
+            if (root.DirId == dirId)
+                return;
+
+            // First-time bind, or rebind if it was Guid.Empty
+            if (root.DirId == Guid.Empty || root.DirId == dirId)
+            {
+                _scanRoots[scanRootId] = root with { DirId = dirId };
+                SyncMetaFile_NoLock();
+                SaveMeta_NoLock();
+            }
+            else
+            {
+                // TODO: Log warning about conflicting DirId?
+            }
+        }
+    }
 
     
-
-// Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
+    // Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
     private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)
     {
         // Use new values when provided; otherwise preserve existing ones.
@@ -191,5 +265,4 @@ public sealed partial class Repo
             LastScannedAt  = DateTimeOffset.UtcNow
         };
     }
-
 }

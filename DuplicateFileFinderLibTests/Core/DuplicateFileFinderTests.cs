@@ -33,18 +33,34 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
     // ----------------- Support Types -----------------
 
+    private sealed class SynchronousProgress<T>(Action<T> action) : IProgress<T>
+    {
+        private readonly List<T> _progressLog = [];
+
+        public IReadOnlyList<T> ProgressLog => _progressLog;
+
+        public void Report(T value)
+        {
+            _progressLog.Add(value);
+            action(value);
+        }
+    }
+
+    
     private sealed class CapturingRepo : IRepo
     {
         public readonly List<string> BeginScanRoots = new();
         public readonly List<CapturingSession> Sessions = new();
         public CapturingSession? LastSession { get; private set; }
         public bool CompactIfNeededCalled { get; private set; }
+        
+        public bool CompactAsyncCalled { get; private set; }
 
         public RepoViewSnapshot GetSnapshot()
             => throw new NotImplementedException("Snapshot not used in these tests.");
 
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
-        public IReadOnlyList<ScanRoot> ScanRootsView { get; }
+        public IReadOnlyList<ScanRoot> ScanRootsView { get; } = [];
 
         public IScanSession BeginScan(string rootPath, ScanMode scanMode = ScanMode.Full, VolumeInfo? volume = null,
             int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
@@ -61,9 +77,19 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public void SaveScanSnapshots()
+        {
+        }
+
+        public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default)
+        {
+            CompactAsyncCalled = true;
+            return Task.CompletedTask;
+        }
+
         public void SaveSnapshot() { }
 
-        public void CompactIfNeeded(RepoCompactionPolicy? policy = null)
+        public void CompactIfNeeded()
             => CompactIfNeededCalled = true;
 
         public void CompactNow() { }
@@ -72,16 +98,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             => throw new NotImplementedException();
 
         public void RemoveScanRoot(string rootPath)
-        {
-            throw new NotImplementedException();
-        }
-
-        public IReadOnlyList<DirRecord> GetChildDirs(Guid parentDirId)
-        {
-            throw new NotImplementedException();
-        }
-
-        public IReadOnlyList<FileRecord> GetChildFiles(Guid parentDirId)
         {
             throw new NotImplementedException();
         }
@@ -275,7 +291,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         Assert.Equal(1, session.CompleteCallCount);
         Assert.Empty(session.FailCalls);
         Assert.Equal(1, session.DisposeCallCount);
-        Assert.True(repo.CompactIfNeededCalled);
+        Assert.True(repo.CompactAsyncCalled);
     }
 
     [Fact]
@@ -318,22 +334,23 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         var repo = new CapturingRepo();
         var finder = new DuplicateFileFinder(repo, false);
-
-        var reports = new List<DuplicateFileFinderProgressReport>();
-        var progress = new Progress<DuplicateFileFinderProgressReport>(r => reports.Add(r));
-
+        
+        var progress = new SynchronousProgress<DuplicateFileFinderProgressReport>(_ => { });
+        
         await finder.ScanLocationAsync(root, progressIndicator: progress, token: TestContext.Current.CancellationToken);
 
-        Assert.NotEmpty(reports);
+        var report = progress.ProgressLog.ToList();
+        
+        Assert.NotEmpty(report);
 
-        var last = reports[^1];
+        var last = report[^1];
         Assert.Equal(ScanPhase.Completed, last.Phase);
         Assert.False(last.IsRunning);
         Assert.Equal(1.0, last.PercentComplete, 5e-3);
 
-        Assert.Contains(reports, r => r.Phase == ScanPhase.Enumerating);
-        var lastEnumIdx = reports.FindLastIndex(r => r.Phase == ScanPhase.Enumerating);
-        Assert.Contains(reports[(lastEnumIdx + 1)..], r => r.Phase == ScanPhase.Hashing);
+        Assert.Contains(report, r => r.Phase == ScanPhase.Enumerating);
+        var lastEnumIdx = report.FindLastIndex(r => r.Phase == ScanPhase.Enumerating);
+        Assert.Contains(report[(lastEnumIdx + 1)..], r => r.Phase == ScanPhase.Hashing);
     }
 
     [Fact]
@@ -437,17 +454,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var finder = new DuplicateFileFinder(repo);
 
         using var cts = new CancellationTokenSource();
-        var reports = new List<DuplicateFileFinderProgressReport>();
-
-        var progress = new Progress<DuplicateFileFinderProgressReport>(r =>
+        
+        var progress = new SynchronousProgress<DuplicateFileFinderProgressReport>(r =>
         {
-            reports.Add(r);
-            if (r.Phase == ScanPhase.Enumerating &&
-                r.Processed >= 1 &&
-                !cts.IsCancellationRequested)
-            {
+            if (r.Phase == ScanPhase.Enumerating && r.Processed >= 1)
                 cts.Cancel();
-            }
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
@@ -461,7 +472,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(session.FailCalls[0].Error));
         Assert.Equal(1, session.DisposeCallCount);
 
-        Assert.Contains(reports, r => r.Phase == ScanPhase.Enumerating);
+        Assert.Contains(progress.ProgressLog, r => r.Phase == ScanPhase.Enumerating);
     }
 
     [Fact]
@@ -560,7 +571,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             f => PathUtils.NormalizePath(f.FullPath) == PathUtils.NormalizePath(f2) && f.Status == ScanEntryStatus.Hashed);
 
         Assert.NotEqual(f1Obs.Hash, f2Obs.Hash);
-}
+    }
 
     [Fact]
     public async Task ScanLocation_SameContentAcrossDifferentRoots_ProducesSameHash()
@@ -590,11 +601,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         Assert.Equal(f1Obs.Hash, f2Obs.Hash);
     }
     
-    private static Repo CreateRepo(string root)
+    private static async Task<Repo> CreateRepo(string root)
     {
-        var repoDir = Path.Combine(root, ".repo");
+        var repoDir = Path.Combine(root, "repo");
         Directory.CreateDirectory(repoDir);
-        return Repo.Open(repoDir);
+        return await Repo.OpenAsync(repoDir);
     }
 
     private static Dictionary<string, FileRecord> MapFilesByFullPath(Repo repo, RepoViewSnapshot snapshot)
@@ -633,7 +644,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
         var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
 
-        var repo    = CreateRepo(_fs.Root);
+        var repo    = await CreateRepo(_fs.Root);
         var finder  = new DuplicateFileFinder(repo);
 
         // First scan
@@ -656,7 +667,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Hash index should include the deleted file's hash initially
         Assert.True(
             snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore)
-            && idsBefore.Contains(deleteRecord1.Id));
+            && idsBefore.Contains(deleteRecord1.FileId));
 
         // Act: delete the file on disk and rescan the same root
         File.Delete(deletePath);
@@ -691,7 +702,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.Dir("root/sub");
         var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
 
-        var repo    = CreateRepo(_fs.Root);
+        var repo    = await CreateRepo(_fs.Root);
         var finder  = new DuplicateFileFinder(repo);
 
         // First scan
@@ -739,7 +750,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.Dir("root/sub");
         _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
 
-        var repo     = CreateRepo(_fs.Root);
+        var repo     = await CreateRepo(_fs.Root);
         var finder   = new DuplicateFileFinder(repo);
 
         // First scan
@@ -787,7 +798,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.Dir("root/sub");
         _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
 
-        var repo     = CreateRepo(_fs.Root);
+        var repo     = await CreateRepo(_fs.Root);
         var finder   = new DuplicateFileFinder(repo);
 
         // First scan (full)
@@ -833,7 +844,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
         var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
 
-        var repo     = CreateRepo(_fs.Root);
+        var repo     = await CreateRepo(_fs.Root);
         var finder   = new DuplicateFileFinder(repo);
 
         // First scan
@@ -852,7 +863,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Hash index contains deleted file initially
         Assert.True(
             snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore) &&
-            idsBefore.Contains(deleteRecord1.Id));
+            idsBefore.Contains(deleteRecord1.FileId));
 
         // Delete file on disk
         File.Delete(deletePath);
@@ -882,7 +893,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.Dir("root/sub");
         var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
 
-        var repo     = CreateRepo(_fs.Root);
+        var repo     = await CreateRepo(_fs.Root);
         var finder   = new DuplicateFileFinder(repo);
 
         // First scan
@@ -928,7 +939,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
         var changePath = _fs.File("root/change.bin", "BBBB"u8.ToArray());
 
-        var repo     = CreateRepo(_fs.Root);
+        var repo     = await CreateRepo(_fs.Root);
         var finder   = new DuplicateFileFinder(repo);
 
         // First scan
@@ -964,59 +975,59 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     }
     
     [Fact]
-public async Task FileNameWithBackslash_IsNotSplitIntoDirectory_OnUnix()
-{
-    // This edge case only applies on Unix-like systems where '\' is allowed in file names.
-    if (Path.DirectorySeparatorChar == '\\')
-        return; // On Windows paths with '\' in the file name cannot exist; nothing to test.
-
-    // Arrange
-    var root = _fs.Dir("root");
-    var netDir = _fs.Dir("root/net9.0");
-
-    // Create a file whose name contains a backslash. On Unix this is legal and should
-    // NOT be split into a "TestData" directory + file.
-    const string fileNameWithBackslash = "TestData\\ScanLocationTest_actual.csv";
-    var fullPath = Path.Combine(netDir, fileNameWithBackslash);
-
-    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-    await File.WriteAllBytesAsync(fullPath, "HELLO"u8.ToArray(), TestContext.Current.CancellationToken);
-
-    // Repo + scanner
-    var repoDir = Path.Combine(_fs.Root, ".repo");
-    Directory.CreateDirectory(repoDir);
-    var repo   = Repo.Open(repoDir);
-    var finder = new DuplicateFileFinder(repo);
-
-    // Act
-    await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
-
-    var snapshot = repo.GetSnapshot();
-
-    // Find the net9.0 directory in the repo
-    var expectedNetDirPath = PathUtils.NormalizePath(netDir);
-    var netDirRecord = snapshot.Dirs.Values.Single(d =>
-        PathUtils.IsSamePath(repo.GetFullDirPath(d.Id), expectedNetDirPath));
-
-    // Assert 1: no child directory called "TestData" under net9.0
-    var childDirNames = snapshot.Dirs.Values
-        .Where(d => d.ParentId == netDirRecord.Id)
-        .Select(d => d.Name)
-        .ToList();
-
-    Assert.DoesNotContain("TestData", childDirNames);
-
-    // Assert 2: there is a file whose *name* includes the backslash and whose
-    // full path matches the actual file we created, and it lives directly under net9.0.
-    var matchingFile = snapshot.Files.Values.SingleOrDefault(f =>
+    public async Task FileNameWithBackslash_IsNotSplitIntoDirectory_OnUnix()
     {
-        var dirPath = repo.GetFullDirPath(f.DirId);
-        var repoFullPath = Path.Combine(dirPath, f.Name);
-        return PathUtils.IsSamePath(repoFullPath, fullPath);
-    });
+        // This edge case only applies on Unix-like systems where '\' is allowed in file names.
+        if (Path.DirectorySeparatorChar == '\\')
+            return; // On Windows paths with '\' in the file name cannot exist; nothing to test.
 
-    Assert.NotNull(matchingFile);
-    Assert.Equal(netDirRecord.Id, matchingFile.DirId);
-    Assert.Equal(fileNameWithBackslash, matchingFile.Name);
-}
+        // Arrange
+        var root = _fs.Dir("root");
+        var netDir = _fs.Dir("root/net9.0");
+
+        // Create a file whose name contains a backslash. On Unix this is legal and should
+        // NOT be split into a "TestData" directory + file.
+        const string fileNameWithBackslash = "TestData\\ScanLocationTest_actual.csv";
+        var fullPath = Path.Combine(netDir, fileNameWithBackslash);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllBytesAsync(fullPath, "HELLO"u8.ToArray(), TestContext.Current.CancellationToken);
+
+        // Repo + scanner
+        var repoDir = Path.Combine(_fs.Root, ".repo");
+        Directory.CreateDirectory(repoDir);
+        var repo   = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
+        var finder = new DuplicateFileFinder(repo);
+
+        // Act
+        await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
+
+        var snapshot = repo.GetSnapshot();
+
+        // Find the net9.0 directory in the repo
+        var expectedNetDirPath = PathUtils.NormalizePath(netDir);
+        var netDirRecord = snapshot.Dirs.Values.Single(d =>
+            PathUtils.IsSamePath(repo.GetFullDirPath(d.DirId), expectedNetDirPath));
+
+        // Assert 1: no child directory called "TestData" under net9.0
+        var childDirNames = snapshot.Dirs.Values
+            .Where(d => d.ParentId == netDirRecord.DirId)
+            .Select(d => d.Name)
+            .ToList();
+
+        Assert.DoesNotContain("TestData", childDirNames);
+
+        // Assert 2: there is a file whose *name* includes the backslash and whose
+        // full path matches the actual file we created, and it lives directly under net9.0.
+        var matchingFile = snapshot.Files.Values.SingleOrDefault(f =>
+        {
+            var dirPath = repo.GetFullDirPath(f.DirId);
+            var repoFullPath = Path.Combine(dirPath, f.Name);
+            return PathUtils.IsSamePath(repoFullPath, fullPath);
+        });
+
+        Assert.NotNull(matchingFile);
+        Assert.Equal(netDirRecord.DirId, matchingFile.DirId);
+        Assert.Equal(fileNameWithBackslash, matchingFile.Name);
+    }
 }

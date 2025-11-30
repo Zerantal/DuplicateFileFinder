@@ -9,8 +9,7 @@ public sealed class RepoCompactionPolicyTests
     public void RepoCompactionPolicy_DefaultValues_AreStable()
     {
         var policy = new RepoCompactionPolicy();
-
-        Assert.Equal(2.0, policy.RatioThreshold);
+        
         Assert.Equal(16 * 1024 * 1024, policy.MinLogBytes);
         Assert.Equal(4, policy.MinDeltaCount);
     }

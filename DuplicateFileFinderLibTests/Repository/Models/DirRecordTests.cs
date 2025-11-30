@@ -15,7 +15,7 @@ public sealed class DirRecordTests
 
         var original = new DirRecord
         {
-            Id = id,
+            DirId = id,
             ParentId = parentId,
             Name = "subdir",
             LastSeenSequence = 123,
@@ -26,7 +26,7 @@ public sealed class DirRecordTests
         var bytes = MemoryPackSerializer.Serialize(original);
         var roundTripped = MemoryPackSerializer.Deserialize<DirRecord>(bytes)!;
 
-        Assert.Equal(original.Id, roundTripped.Id);
+        Assert.Equal(original.DirId, roundTripped.DirId);
         Assert.Equal(original.ParentId, roundTripped.ParentId);
         Assert.Equal(original.Name, roundTripped.Name);
         Assert.Equal(original.LastSeenSequence, roundTripped.LastSeenSequence);

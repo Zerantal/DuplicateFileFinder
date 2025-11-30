@@ -157,12 +157,12 @@ public static class SemanticRepoComparer
     {
         var mapA = snapA.Dirs.Values
             .ToDictionary(
-                d => NormalizePath(repoA.GetFullDirPath(d.Id)),
+                d => NormalizePath(repoA.GetFullDirPath(d.DirId)),
                 d => d);
 
         var mapB = snapB.Dirs.Values
             .ToDictionary(
-                d => NormalizePath(repoB.GetFullDirPath(d.Id)),
+                d => NormalizePath(repoB.GetFullDirPath(d.DirId)),
                 d => d);
 
         var allPaths = mapA.Keys.Union(mapB.Keys).Order().ToArray();
@@ -212,10 +212,10 @@ public static class SemanticRepoComparer
         SemanticComparisonResult diff)
     {
         var dirPathsA = snapA.Dirs.Values
-            .ToDictionary(d => d.Id, d => NormalizePath(repoA.GetFullDirPath(d.Id)));
+            .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetFullDirPath(d.DirId)));
 
         var dirPathsB = snapB.Dirs.Values
-            .ToDictionary(d => d.Id, d => NormalizePath(repoB.GetFullDirPath(d.Id)));
+            .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetFullDirPath(d.DirId)));
 
         var mapA = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in snapA.Files.Values)
@@ -320,10 +320,10 @@ public static class SemanticRepoComparer
         SemanticComparisonResult diff)
     {
         var dirPathsA = snapA.Dirs.Values
-            .ToDictionary(d => d.Id, d => NormalizePath(repoA.GetFullDirPath(d.Id)));
+            .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetFullDirPath(d.DirId)));
 
         var dirPathsB = snapB.Dirs.Values
-            .ToDictionary(d => d.Id, d => NormalizePath(repoB.GetFullDirPath(d.Id)));
+            .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetFullDirPath(d.DirId)));
 
         // Build semantic hash -> paths map for A
         var indexA = snapA.HashIndex

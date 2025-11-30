@@ -3,10 +3,10 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Models;
 
 [MemoryPackable]
-public sealed partial record FileTombstone(Guid Id, long ScanSequence);
+public sealed partial record FileTombstone(Guid FileId, long ScanSequence);
 
 [MemoryPackable]
-public sealed partial record DirTombstone(Guid Id, long ScanSequence);
+public sealed partial record DirTombstone(Guid DirId, long ScanSequence);
 
 [MemoryPackable]
 public sealed partial record RepoDelta

@@ -13,10 +13,10 @@ public interface IScanSession
     ValueTask DisposeAsync();
 
     /// <summary>
-    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.Id
+    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.FileId
     /// for this scan session. Creates any missing parents as dummy dirs (Status=None),
     /// and the leaf with the requested <paramref name="status"/> (or a default if null).
-    /// Returns the directory Id.
+    /// Returns the directory FileId.
     /// </summary>
     Guid AddOrUpdateDirectory(
         string fullPath,
@@ -24,7 +24,7 @@ public interface IScanSession
         string?         errorMessage = null);
 
     /// <summary>
-    /// Ensure that the file at <paramref name="fullFilePath"/> has a stable FileRecord.Id
+    /// Ensure that the file at <paramref name="fullFilePath"/> has a stable FileRecord.FileId
     /// for this scan session. Creates the parent directory (and ancestors) as needed,
     /// and records the latest state for this file path.
     ///

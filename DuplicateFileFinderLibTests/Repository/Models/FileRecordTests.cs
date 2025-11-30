@@ -19,7 +19,7 @@ public sealed class FileRecordTests
 
             var original = new FileRecord
             {
-                Id = id,
+                FileId = id,
                 DirId = dirId,
                 Name = "foo.txt",
                 Size = 1234,
@@ -34,7 +34,7 @@ public sealed class FileRecordTests
             var bytes = MemoryPackSerializer.Serialize(original);
             var roundTripped = MemoryPackSerializer.Deserialize<FileRecord>(bytes)!;
 
-            Assert.Equal(original.Id, roundTripped.Id);
+            Assert.Equal(original.FileId, roundTripped.FileId);
             Assert.Equal(original.DirId, roundTripped.DirId);
             Assert.Equal(original.Name, roundTripped.Name);
             Assert.Equal(original.Size, roundTripped.Size);

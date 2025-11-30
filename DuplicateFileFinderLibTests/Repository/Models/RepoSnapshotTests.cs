@@ -34,7 +34,7 @@ public sealed class RepoSnapshotTests
 
         var dir = new DirRecord
         {
-            Id = dirId,
+            DirId = dirId,
             ParentId = null,
             Name = "root",
             LastSeenSequence = 1,
@@ -44,7 +44,7 @@ public sealed class RepoSnapshotTests
 
         var file = new FileRecord
         {
-            Id = fileId,
+            FileId = fileId,
             DirId = dirId,
             Name = "f",
             Size = 123,

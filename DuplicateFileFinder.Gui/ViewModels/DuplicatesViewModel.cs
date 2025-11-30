@@ -141,7 +141,7 @@ public partial class DuplicatesViewModel : ObservableObject
             if (dir.Status == ScanEntryStatus.None)
                 continue;
 
-            if (dir.ParentId is Guid parentId &&
+            if (dir.ParentId is { } parentId &&
                 _dirs.TryGetValue(parentId, out var parentDir) &&
                 parentDir.Status != ScanEntryStatus.None)
             {
@@ -151,7 +151,7 @@ public partial class DuplicatesViewModel : ObservableObject
                     _childDirIdsByParent[parentId] = list;
                 }
 
-                list.Add(dir.Id);
+                list.Add(dir.DirId);
             }
         }
 
@@ -164,7 +164,7 @@ public partial class DuplicatesViewModel : ObservableObject
             if (rootDir.Status == ScanEntryStatus.None)
                 continue;
 
-            var node = GetOrCreateNode(rootDir.Id);
+            var node = GetOrCreateNode(rootDir.DirId, true);
 
             node.Parent = null;
             node.ShowFullPath = true;                 // you can also use scanRoot.DisplayName if preferred
@@ -174,15 +174,21 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
     
-    private FolderNodeViewModel GetOrCreateNode(Guid dirId)
+    private FolderNodeViewModel GetOrCreateNode(Guid dirId, bool isScanRoot = false)
     {
         if (_folderNodes.TryGetValue(dirId, out var existing))
             return existing;
 
+        ScanRoot? scanRoot = isScanRoot ? _repo.ScanRootsView.FirstOrDefault(s => s.DirId == dirId) : null;
         var dir = _dirs[dirId];
-        var fullPath = _repo.GetFullDirPath(dir.Id);
+        string fullPath;
+        
+        if (isScanRoot && scanRoot != null)
+            fullPath = scanRoot.RootPath;
+        else
+            fullPath = _repo.GetFullDirPath(dir.DirId);
 
-        var node = new FolderNodeViewModel(dir.Id, dir.Name, fullPath, _scanner)
+        var node = new FolderNodeViewModel(dir.DirId, dir.Name, fullPath, _scanner)
         {
             // this delegate is called by the node when it is expanded
             EnsureChildrenLoaded = EnsureChildrenLoaded
@@ -192,7 +198,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
         // If it has children, add a dummy so the UI shows an expand arrow,
         // but don't actually allocate real child nodes yet.
-        if (_childDirIdsByParent.ContainsKey(dir.Id))
+        if (_childDirIdsByParent.ContainsKey(dir.DirId))
             node.AddDummyChild();
 
         return node;
@@ -275,7 +281,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public async Task OptimizeRepoAsync()
     {
         // Run compaction off the UI thread
-        await Task.Run(() => _repo.CompactNow());
+        await Task.Run(() => _repo.CompactAsync());
 
         // After compaction, reload from the repo to reflect any changes
         await Dispatcher.UIThread.InvokeAsync(() =>

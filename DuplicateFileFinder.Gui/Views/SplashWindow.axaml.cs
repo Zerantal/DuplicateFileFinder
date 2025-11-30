@@ -2,9 +2,9 @@ using Avalonia.Controls;
 
 namespace DuplicateFileFinder.Gui.Views;
 
-public partial class MainWindow : Window
+public partial class SplashWindow : Window
 {
-    public MainWindow()
+    public SplashWindow()
     {
         InitializeComponent();
     }

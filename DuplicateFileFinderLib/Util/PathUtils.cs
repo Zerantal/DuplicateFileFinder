@@ -83,7 +83,12 @@ public static class PathUtils
         return normalized;
     }
 
+    public static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 
+    public static StringComparer PathComparer => StringComparer.FromComparison(PathComparison);
+    
     public static string? GetParentPath(string path)
     {
         return Path.GetDirectoryName(NormalizePath(path));
@@ -131,14 +136,12 @@ public static class PathUtils
         if (sb.Length > 0) parts.Add(sb.ToString());
         return parts;
     }
-    
+
     public static bool PathsEqual(string a, string b)
         => string.Equals(
             NormalizePath(a),
             NormalizePath(b),
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+            PathComparison);
     
     public static bool IsSubPathOf(string candidate, string root)
     {
@@ -148,9 +151,7 @@ public static class PathUtils
         if (PathUtils.PathsEqual(candidate, root))
             return true;
 
-        if (!candidate.StartsWith(root, OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal))
+        if (!candidate.StartsWith(root, PathComparison))
             return false;
 
         // Ensure we’re not just matching a prefix (e.g. /home/z2 vs /home/z)
