@@ -1,4 +1,3 @@
-using System;
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 using Xunit;
@@ -10,8 +9,8 @@ public sealed class DirRecordTests
     [Fact]
     public void DirRecord_MemoryPackRoundTrip_PreservesAllFields()
     {
-        var id = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
+        long id = 99;
+        long parentId = 66;
 
         var original = new DirRecord
         {

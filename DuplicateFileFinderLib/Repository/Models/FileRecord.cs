@@ -5,8 +5,8 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record FileRecord
 {
-    [MemoryPackOrder(0)] public required Guid FileId { get; init; }
-    [MemoryPackOrder(1)] public required Guid DirId { get; init; }
+    [MemoryPackOrder(10)] public required long FileId { get; init; }
+    [MemoryPackOrder(11)] public required long DirId { get; init; }
     [MemoryPackOrder(2)] public required string Name { get; init; }
     [MemoryPackOrder(3)] public long Size { get; init; }
     [MemoryPackOrder(4)] public HashKey Hash { get; init; }

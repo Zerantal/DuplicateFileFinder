@@ -5,7 +5,7 @@ using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository;
 
-public sealed class ScanSession : IAsyncDisposable, IScanSession
+public sealed class ScanSession : IScanSession
 {
     private readonly Repo _repo;
     private readonly int _maxFilesBeforeFlush;
@@ -15,10 +15,10 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     private readonly SemaphoreSlim _flushGate = new(1, 1);
 
     // Session-local view of all directories (both from repo snapshot and created during this scan)
-    private readonly Dictionary<Guid, DirRecord> _dirsById;
+    private readonly Dictionary<long, DirRecord> _dirsById;
     
     // Normalized full dir path -> DirId
-    private readonly Dictionary<string, Guid> _dirPathIndex;
+    private readonly Dictionary<string, long> _dirPathIndex;
 
     // Normalized full file path -> FileRecord (latest state within this session)
     private readonly Dictionary<string, FileRecord> _filesByPath;
@@ -36,7 +36,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     public ScanSession(
         Repo repo,
         ScanRun run,
-        IReadOnlyDictionary<Guid, DirRecord> existingDirsInRepo,
+        IReadOnlyDictionary<long, DirRecord> existingDirsInRepo,
         int maxFilesBeforeFlush,
         int maxDirsBeforeFlush)
     {
@@ -45,8 +45,8 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
         _maxFilesBeforeFlush = maxFilesBeforeFlush;
         _maxDirsBeforeFlush = maxDirsBeforeFlush;
         
-        _dirsById      = new Dictionary<Guid, DirRecord>(existingDirsInRepo.Count);
-        _dirPathIndex = new Dictionary<string, Guid>(PathUtils.PathComparer);
+        _dirsById      = new Dictionary<long, DirRecord>(existingDirsInRepo.Count);
+        _dirPathIndex = new Dictionary<string, long>(PathUtils.PathComparer);
         _filesByPath   = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
 
         // Seed session dirs and path index from repo snapshot
@@ -62,7 +62,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     
     public ScanRun Run { get; }
 
-    public long ScanSequence => Run.ScanSequence;
+    public long RunId => Run.RunId;
     public string RootPath => Run.RootPath;
 
     public async ValueTask DisposeAsync()
@@ -78,7 +78,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
         }
 
         if (!_finished)
-            _repo.MarkScanFailed(ScanSequence, "ScanSession disposed before completion.", cancelled: true);
+            _repo.MarkScanFailed(RunId, "ScanSession disposed before completion.", cancelled: true);
     }
 
     // ---------------------------------------------------------------------
@@ -103,7 +103,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     /// Creates any missing parents as dummy dirs (Status=None), and the leaf with the
     /// requested <paramref name="status"/> (or a default if null). Returns the DirId.
     /// </summary>
-    public Guid AddOrUpdateDirectory(
+    public long AddOrUpdateDirectory(
         string fullPath,
         ScanEntryStatus? status       = null,
         string? errorMessage = null)
@@ -151,9 +151,8 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
             current = NormalizePath(parentPath);
         }
-
-        Guid? parentId = null;
-
+        
+        long? parentId = null;
         // If we stopped because we hit a known parent, remember its FileId
         if (_dirPathIndex.TryGetValue(current, out var knownParentId))
             parentId = knownParentId;
@@ -178,19 +177,19 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
                 : ScanEntryStatus.None;
 
             var effectiveError = isLeaf ? errorMessage : null;
-
-            var id = Guid.NewGuid();
+            
+            var id = _repo.AllocateDirId_NoLock();
 
             var dir = new DirRecord
             {
-                DirId               = id,
+                DirId            = id,
                 ParentId         = parentId,
                 Name             = name,
-                LastSeenSequence = ScanSequence,
+                LastSeenSequence = RunId,
                 Status           = effectiveStatus,
                 ErrorMessage     = effectiveError
             };
-
+            
             parentId = id;
 
             _dirsById[id] = dir;
@@ -214,7 +213,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     }
 
     private void UpdateExistingDir(
-        Guid             id,
+        long             id,
         ScanEntryStatus? status,
         string?          errorMessage,
         ref bool         shouldFlush)
@@ -227,7 +226,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
         var updated = existing with
         {
-            LastSeenSequence = ScanSequence,
+            LastSeenSequence = RunId,
             Status           = newStatus,
             ErrorMessage     = newError
         };
@@ -288,13 +287,13 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
                 file = existing with
                 {
-                    DirId               = dirId,
-                    Name                = name,
+                    DirId                = dirId,
+                    Name                 = name,
                     Size                 = newSize,
                     Hash                 = newHash,
                     Modified             = newMod,
                     Created              = newCreated,
-                    LastSeenScanSequence = ScanSequence,
+                    LastSeenScanSequence = RunId,
                     Status               = newStatus,
                     ErrorMessage         = newError
                 };
@@ -309,14 +308,14 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
                 file = new FileRecord
                 {
-                    FileId                  = Guid.NewGuid(),
-                    DirId               = dirId,
-                    Name                = name,
+                    FileId               = _repo.AllocateFileId_NoLock(),
+                    DirId                = dirId,
+                    Name                 = name,
                     Size                 = effectiveSize,
                     Hash                 = effectiveHash,
                     Modified             = effectiveMod,
                     Created              = effectiveCreated,
-                    LastSeenScanSequence = ScanSequence,
+                    LastSeenScanSequence = RunId,
                     Status               = effectiveStatus,
                     ErrorMessage        = errorMessage
                 };
@@ -337,19 +336,19 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     // Deletion APIs
     // ---------------------------------------------------------------------
 
-    public void MarkDirectoryDeleted(Guid dirId)
+    public void MarkDirectoryDeleted(long dirId)
     {
         lock (_bufferLock)
         {
-            _pendingDirTombstones.Add(new DirTombstone(dirId, ScanSequence));
+            _pendingDirTombstones.Add(new DirTombstone(dirId, RunId));
         }
     }
 
-    public void MarkFileDeleted(Guid fileId)
+    public void MarkFileDeleted(long fileId)
     {
         lock (_bufferLock)
         {
-            _pendingFileTombstones.Add(new FileTombstone(fileId, ScanSequence));
+            _pendingFileTombstones.Add(new FileTombstone(fileId, RunId));
         }
     }
     
@@ -393,7 +392,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
 
             var delta = new RepoDelta
             {
-                ScanSequence = ScanSequence,
+                RunId        = RunId,
                 Dirs         = dirsToFlush,
                 Files        = filesToFlush,
                 DeletedDirs  = dirTombsToFlush,
@@ -416,7 +415,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.CompleteScanForRoot(ScanSequence, Run.RootPath);
+        _repo.CompleteScanForRoot(RunId, Run.RootPath);
         _finished = true;
     }
 
@@ -424,7 +423,7 @@ public sealed class ScanSession : IAsyncDisposable, IScanSession
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
+        _repo.MarkScanFailed(RunId, errorMessage, cancelled);
         _finished = true;
     }
 }

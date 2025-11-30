@@ -7,7 +7,7 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record ScanRootSnapshotOnDisk
 {
-    [MemoryPackOrder(0)] public required Guid ScanRootId { get; init; }
+    [MemoryPackOrder(0)] public required long ScanRootId { get; init; }
 
     // All dirs that belong to this scan root
     [MemoryPackOrder(1)] public required DirRecord[] Dirs { get; init; } = [];

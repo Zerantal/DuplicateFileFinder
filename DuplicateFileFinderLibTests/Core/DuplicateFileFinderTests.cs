@@ -94,8 +94,10 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         public void CompactNow() { }
 
-        public string GetFullDirPath(Guid dirId)
-            => throw new NotImplementedException();
+        public string GetFullDirPath(long dirId)
+        {
+            throw new NotImplementedException();
+        }
 
         public void RemoveScanRoot(string rootPath)
         {
@@ -106,21 +108,34 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         {
             throw new NotImplementedException();
         }
+
+        public void Dispose()
+        {
+            throw new NotImplementedException();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            throw new NotImplementedException();
+        }
     }
 
     private sealed class CapturingSession(string rootPath) : IScanSession
     {
+        private long _dirCounter = 1;
         public ScanRun Run { get; } = new()
         {
-            ScanSequence = 1,
+            RunId = 1,
             RootPath = rootPath,
             StartedAt = DateTimeOffset.UtcNow,
             Status = ScanRunStatus.InProgress,
-            ScanRootId = Guid.NewGuid(),
+            ScanRootId = 88,
             Mode = ScanMode.Full
         };
 
-        public long ScanSequence => Run.ScanSequence;
+        public long RunId { get; }
+
+        public long ScanSequence => Run.RunId;
         public string RootPath => Run.RootPath;
 
         public readonly List<ObservedDir> ObservedDirectories = new();
@@ -140,12 +155,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public Guid AddOrUpdateDirectory(string fullPath, ScanEntryStatus? status = null, string? errorMessage = null)
+        public long AddOrUpdateDirectory(string fullPath, ScanEntryStatus? status, string? errorMessage)
         {
             var lastRecordDirEntry = ObservedDirectories.LastOrDefault(f => f.FullPath == fullPath);
             status ??= lastRecordDirEntry?.Status ?? ScanEntryStatus.Enumerated;
             ObservedDirectories.Add(new ObservedDir(fullPath, status.Value, errorMessage));
-            return Guid.NewGuid();
+            return _dirCounter++;
         }
 
         public void AddOrUpdateFile(string fullFilePath, long? size = null, HashKey? hash = null, DateTimeOffset? modified = null,
@@ -166,7 +181,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
                     errorMessage));
         }
 
-        public void MarkDirectoryDeleted(Guid dirId)
+        public void MarkDirectoryDeleted(long dirId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void MarkFileDeleted(long fileId)
         {
             throw new NotImplementedException();
         }

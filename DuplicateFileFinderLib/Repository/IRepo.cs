@@ -3,7 +3,7 @@ using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository;
 
-public interface IRepo
+public interface IRepo : IDisposable, IAsyncDisposable
 {
     RepoViewSnapshot GetSnapshot();
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
@@ -19,7 +19,7 @@ public interface IRepo
     public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default);
     public void SaveScanSnapshots();
     public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default);
-    string GetFullDirPath(Guid dirId);
+    string GetFullDirPath(long dirId);
     
     void RemoveScanRoot(string rootPath);
 

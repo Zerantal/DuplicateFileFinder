@@ -4,13 +4,11 @@ using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository;
 
-public interface IScanSession
+public interface IScanSession : IAsyncDisposable
 {
     ScanRun Run { get; }
-    long ScanSequence { get; }
+    long RunId { get; }
     string RootPath { get; }
-
-    ValueTask DisposeAsync();
 
     /// <summary>
     /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.FileId
@@ -18,7 +16,7 @@ public interface IScanSession
     /// and the leaf with the requested <paramref name="status"/> (or a default if null).
     /// Returns the directory FileId.
     /// </summary>
-    Guid AddOrUpdateDirectory(
+    long AddOrUpdateDirectory(
         string fullPath,
         ScanEntryStatus? status       = null,
         string?         errorMessage = null);
@@ -51,14 +49,14 @@ public interface IScanSession
     /// The implementation is responsible for emitting appropriate tombstones
     /// in its RepoDelta.
     /// </summary>
-    void MarkDirectoryDeleted(Guid dirId);
+    void MarkDirectoryDeleted(long dirId);
 
     /// <summary>
     /// Mark an existing file as deleted in this scan.
     /// The implementation is responsible for emitting appropriate tombstones
     /// in its RepoDelta.
     /// </summary>
-    void MarkFileDeleted(Guid fileId);
+    void MarkFileDeleted(long fileId);
 
     Task FlushProgressAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);

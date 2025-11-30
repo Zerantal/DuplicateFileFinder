@@ -10,8 +10,8 @@ public sealed class FileRecordTests
         [Fact]
         public void FileRecord_MemoryPackRoundTrip_PreservesAllFields()
         {
-            var id = Guid.NewGuid();
-            var dirId = Guid.NewGuid();
+            var id = 44;
+            var dirId = 55;
 
             var hashBytes = new byte[16];
             new Random(42).NextBytes(hashBytes);

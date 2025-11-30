@@ -9,7 +9,7 @@ namespace DuplicateFileFinderLib.Repository;
 ///     The persistent database of all scanned files across all scan locations.
 ///     Uses a snapshot + append-only delta log for durability.
 /// </summary>
-public sealed partial class Repo : IRepo, IDisposable, IAsyncDisposable
+public sealed partial class Repo : IRepo
 {
     private const int RepoSchemaVersion = 5;
     
@@ -17,14 +17,14 @@ public sealed partial class Repo : IRepo, IDisposable, IAsyncDisposable
     private readonly string _logDirPath;
     
     // live state
-    private Dictionary<Guid, DirRecord> _dirs = new();
-    private Dictionary<Guid, FileRecord> _files = new();
-    private Dictionary<HashKey, List<Guid>> _hashIndex = new();
+    private Dictionary<long, DirRecord>  _dirs       = new();
+    private Dictionary<long, FileRecord> _files      = new();
+    private Dictionary<HashKey, List<long>> _fileHashIndex = new();
     private List<ScanRun> _scanRuns = new();
-    private Dictionary<Guid, ScanRoot> _scanRoots = new(); // RootId -> ScanRoot
-    
-    private readonly ConcurrentDictionary<Guid, string> _dirPathCache = new(); // DirId -> full path
-    private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan sequence number -> scan run 
+    private Dictionary<long, ScanRoot>   _scanRoots  = new();
+
+    private readonly Dictionary<long, string> _dirPathCache = new();
+    private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run 
     
     private readonly Lock _sync = new();
     
@@ -54,13 +54,13 @@ public sealed partial class Repo : IRepo, IDisposable, IAsyncDisposable
 
         _scanRoots.Clear();
         foreach (var root in metaFile.ScanRoots)
-            _scanRoots[root.Id] = root;
+            _scanRoots[root.RootId] = root;
 
         _scanRuns.Clear();
         _scanRuns.AddRange(metaFile.ScanRuns);
 
         _scanRunIndex.Clear();
         foreach (var run in _scanRuns)
-            _scanRunIndex[run.ScanSequence] = run;
+            _scanRunIndex[run.RunId] = run;
     }
 }

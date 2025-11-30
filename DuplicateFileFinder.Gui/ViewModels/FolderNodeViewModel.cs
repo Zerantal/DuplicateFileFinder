@@ -20,10 +20,10 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     // Dummy child used to show the expand arrow before children are loaded.
     private static readonly FolderNodeViewModel DummyChild =
-        new(Guid.Empty, string.Empty, string.Empty, null, isDummy: true);
+        new(0, string.Empty, string.Empty, null, isDummy: true);
 
     public FolderNodeViewModel(
-        Guid dirId,
+        long dirId,
         string name,
         string fullPath,
         IScanCoordinator scanCoordinator)
@@ -32,7 +32,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     }
 
     private FolderNodeViewModel(
-        Guid dirId,
+        long dirId,
         string name,
         string fullPath,
         IScanCoordinator? scanCoordinator,
@@ -45,7 +45,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         _isDummy = isDummy;
     }
 
-    public Guid DirId { get; }
+    public long DirId { get; }
 
     public string Name
     {

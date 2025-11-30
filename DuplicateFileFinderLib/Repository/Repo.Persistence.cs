@@ -54,17 +54,17 @@ public sealed partial class Repo
         foreach (var f in delta.Files)
         {
             if (_files.TryGetValue(f.FileId, out var old))
-                RemoveFromHashIndex_NoLock(old);
+                RemoveFromFileHashIndex_NoLock(old);
 
             _files[f.FileId] = f;
-            AddToHashIndex_NoLock(f);
+            AddToFileHashIndex_NoLock(f);
         }
 
         // files deleted
         foreach (var x in delta.DeletedFiles)
         {
             if (_files.TryGetValue(x.FileId, out var old))
-                RemoveFromHashIndex_NoLock(old);
+                RemoveFromFileHashIndex_NoLock(old);
 
             _files.Remove(x.FileId);
         }
@@ -113,13 +113,13 @@ public sealed partial class Repo
 
 
     private async Task PersistScanRootSnapshotAsync(
-        Guid scanRootId,
-        IReadOnlyDictionary<Guid, DirRecord> allDirs,
-        IReadOnlyDictionary<Guid, FileRecord> allFiles,
+        long scanRootId,
+        IReadOnlyDictionary<long, DirRecord> allDirs,
+        IReadOnlyDictionary<long, FileRecord> allFiles,
         CancellationToken ct = default)
     {
         // Find the ScanRoot
-        var scanRoot = _metaFile.ScanRoots.FirstOrDefault(r => r.Id == scanRootId);
+        var scanRoot = _metaFile.ScanRoots.FirstOrDefault(r => r.RootId == scanRootId);
         if (scanRoot is null)
             throw new InvalidOperationException($"Unknown ScanRoot {scanRootId}.");
 
@@ -150,11 +150,11 @@ public sealed partial class Repo
         await RepoStore.SaveScanRootSnapshotAsync(_repoPath, rootSnap, ct).ConfigureAwait(false);
     }
 
-    private static HashSet<Guid> CollectDirSubtree(
-        Guid rootDirId,
-        IReadOnlyDictionary<Guid, DirRecord> allDirs)
+    private static HashSet<long> CollectDirSubtree(
+        long rootDirId,
+        IReadOnlyDictionary<long, DirRecord> allDirs)
     {
-        var result = new HashSet<Guid>();
+        var result = new HashSet<long>();
 
         // Root not present? Nothing to do.
         if (!allDirs.ContainsKey(rootDirId))
@@ -162,21 +162,21 @@ public sealed partial class Repo
 
         // Build parent -> children index once for this call.
         // This is O(N) over allDirs and avoids N * N scanning.
-        var childrenByParent = new Dictionary<Guid, List<Guid>>(allDirs.Count);
+        var childrenByParent = new Dictionary<long, List<long>>(allDirs.Count);
 
         foreach (var dir in allDirs.Values)
             if (dir.ParentId is { } parentId)
             {
                 if (!childrenByParent.TryGetValue(parentId, out var list))
                 {
-                    list = new List<Guid>();
+                    list = new List<long>();
                     childrenByParent[parentId] = list;
                 }
 
                 list.Add(dir.DirId);
             }
 
-        var queue = new Queue<Guid>();
+        var queue = new Queue<long>();
         result.Add(rootDirId);
         queue.Enqueue(rootDirId);
 
@@ -229,8 +229,8 @@ public sealed partial class Repo
 
     private static void ApplyDelta(
         RepoDelta delta,
-        Dictionary<Guid, DirRecord> dirs,
-        Dictionary<Guid, FileRecord> files)
+        Dictionary<long, DirRecord> dirs,
+        Dictionary<long, FileRecord> files)
     {
         // Dirs
         foreach (var d in delta.Dirs)
@@ -252,7 +252,7 @@ public sealed partial class Repo
     {
         _dirs.Clear();
         _files.Clear();
-        _hashIndex.Clear();
+        _fileHashIndex.Clear();
         _dirPathCache.Clear();
 
         // 1. Load per-root snapshots
@@ -260,7 +260,7 @@ public sealed partial class Repo
         {
             ct.ThrowIfCancellationRequested();
 
-            var snap = await RepoStore.LoadScanRootSnapshotAsync(_repoPath, root.Id, ct)
+            var snap = await RepoStore.LoadScanRootSnapshotAsync(_repoPath, root.RootId, ct)
                 .ConfigureAwait(false);
             if (snap is null) continue;
 
@@ -290,13 +290,13 @@ public sealed partial class Repo
         _ = PersistMetaAsync();
 
         // Take copies so we snapshot a stable view
-        var dirsCopy = new Dictionary<Guid, DirRecord>(_dirs);
-        var filesCopy = new Dictionary<Guid, FileRecord>(_files);
+        var dirsCopy = new Dictionary<long, DirRecord>(_dirs);
+        var filesCopy = new Dictionary<long, FileRecord>(_files);
 
         // Persist snapshots per scan root
         foreach (var scanRoot in _scanRoots.Values)
             PersistScanRootSnapshotAsync(
-                    scanRoot.Id,
+                    scanRoot.RootId,
                     dirsCopy,
                     filesCopy,
                     CancellationToken.None)
@@ -307,7 +307,7 @@ public sealed partial class Repo
 
     private void RebuildHashIndex_NoLock()
     {
-        _hashIndex.Clear();
+        _fileHashIndex.Clear();
 
         foreach (var file in _files.Values)
         {
@@ -315,10 +315,10 @@ public sealed partial class Repo
             if (!file.Hash.IsComputed)
                 continue;
 
-            if (!_hashIndex.TryGetValue(file.Hash, out var list))
+            if (!_fileHashIndex.TryGetValue(file.Hash, out var list))
             {
-                list = new List<Guid>();
-                _hashIndex[file.Hash] = list;
+                list = new List<long>();
+                _fileHashIndex[file.Hash] = list;
             }
 
             list.Add(file.FileId);

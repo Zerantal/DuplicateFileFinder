@@ -7,7 +7,8 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record ScanRoot
 {
-    [MemoryPackOrder(0)] public required Guid Id                   { get; init; }
+    [MemoryPackOrder(12)] public required long RootId              { get; init; }
+    [MemoryPackOrder(13)] public required long DirId               { get; init; }
 
     /// <summary>
     /// Canonical logical root path at the time the root was created.
@@ -19,7 +20,6 @@ public partial record ScanRoot
     /// <summary>
     /// The DirRecord.FileId that corresponds to this root in the repo's directory tree.
     /// </summary>
-    [MemoryPackOrder(2)] public required Guid DirId               { get; init; }
     
     [MemoryPackOrder(9)] public required DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     [MemoryPackOrder(10)] public DateTimeOffset? LastScannedAt    { get; init; }
@@ -38,5 +38,5 @@ public partial record ScanRoot
     
     // to be updated on each scan (may change for removable media)
     [MemoryPackOrder(8)] public string? DevicePath                { get; init; }
-    [MemoryPackOrder(11)] public string? DeviceModel               { get; init; }
+    [MemoryPackOrder(11)] public string? DeviceModel              { get; init; }
 }

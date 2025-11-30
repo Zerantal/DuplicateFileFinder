@@ -17,12 +17,12 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
     // Guid DirId -> DirRecord (for folder tree construction)
-    private readonly Dictionary<Guid, DirRecord> _dirs = new();
+    private readonly Dictionary<long, DirRecord> _dirs = new();
     
     // parentDirId -> list of child dir Ids
-    private readonly Dictionary<Guid, List<Guid>> _childDirIdsByParent = new();
+    private readonly Dictionary<long, List<long>> _childDirIdsByParent = new();
 
-    private readonly Dictionary<Guid, FolderNodeViewModel> _folderNodes = new();
+    private readonly Dictionary<long, FolderNodeViewModel> _folderNodes = new();
     // private readonly Dictionary<HashKey, List<Guid>> _hashIndex = new();
 
     private readonly IRepo _repo;
@@ -147,7 +147,7 @@ public partial class DuplicatesViewModel : ObservableObject
             {
                 if (!_childDirIdsByParent.TryGetValue(parentId, out var list))
                 {
-                    list = new List<Guid>();
+                    list = new List<long>();
                     _childDirIdsByParent[parentId] = list;
                 }
 
@@ -174,7 +174,7 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
     
-    private FolderNodeViewModel GetOrCreateNode(Guid dirId, bool isScanRoot = false)
+    private FolderNodeViewModel GetOrCreateNode(long dirId, bool isScanRoot = false)
     {
         if (_folderNodes.TryGetValue(dirId, out var existing))
             return existing;

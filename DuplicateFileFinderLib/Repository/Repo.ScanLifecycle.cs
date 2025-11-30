@@ -7,18 +7,20 @@ namespace DuplicateFileFinderLib.Repository;
 
 public sealed partial class Repo
 {
-    internal long AllocateScanSequence()
+    internal long AllocateRunId()
     {
         lock (_sync)
         {
-            return AllocateScanSequence_NoLock();
+            var id = AllocateRunId_NoLock();
+            SaveMeta_NoLock();
+            return id;
         }
     }
 
-    private long AllocateScanSequence_NoLock()
+    private long AllocateRunId_NoLock()
     {
-        var seq = Meta.NextScanSequence;
-        Meta = Meta with { NextScanSequence = seq + 1 };
+        var seq = Meta.NextRunId;
+        Meta = Meta with { NextRunId = seq + 1 };
 
         SyncMetaFile_NoLock();
         SaveMeta_NoLock();
@@ -26,19 +28,42 @@ public sealed partial class Repo
         return seq;
     }
 
-
+    private long AllocateLogId_NoLock()
+    {
+        var id = Meta.NextLogSequence;
+        Meta = Meta with { NextLogSequence = id + 1 };
+        return id;
+    }
+    
     internal long AllocateLogId()
     {
         lock (_sync)
         {
-            var id = Meta.NextLogSequence;
-            Meta = Meta with { NextLogSequence = id + 1 };
-
-            SyncMetaFile_NoLock();
+            var id = AllocateLogId_NoLock();
             SaveMeta_NoLock();
-
             return id;
         }
+    }
+
+    internal long AllocateDirId_NoLock()
+    {
+        var id = Meta.NextDirId;
+        Meta = Meta with { NextDirId = id + 1 };
+        return id;
+    }
+
+    internal long AllocateFileId_NoLock()
+    {
+        var id = Meta.NextFileId;
+        Meta = Meta with { NextFileId = id + 1 };
+        return id;
+    }
+
+    internal long AllocateRootId_NoLock()
+    {
+        var id = Meta.NextRootId;
+        Meta = Meta with { NextRootId = id + 1 };
+        return id;
     }
     
     // Caller holds _sync
@@ -55,37 +80,36 @@ public sealed partial class Repo
             .GetAwaiter()
             .GetResult();
     }
-
-    private void AddToHashIndex_NoLock(FileRecord f)
+    
+    private void AddToFileHashIndex_NoLock(FileRecord f)
     {
         if (!f.Hash.IsComputed)
             return;
 
-        if (!_hashIndex.TryGetValue(f.Hash, out var list))
+        if (!_fileHashIndex.TryGetValue(f.Hash, out var list))
         {
-            list = new List<Guid>();
-            _hashIndex[f.Hash] = list;
+            list = new List<long>();
+            _fileHashIndex[f.Hash] = list;
         }
 
         if (!list.Contains(f.FileId))
             list.Add(f.FileId);
     }
-
-    private void RemoveFromHashIndex_NoLock(FileRecord f)
+    
+ private void RemoveFromFileHashIndex_NoLock(FileRecord f)
     {
         if (!f.Hash.IsComputed)
             return;
 
-        if (_hashIndex.TryGetValue(f.Hash, out var list))
+        if (_fileHashIndex.TryGetValue(f.Hash, out var list))
         {
             list.Remove(f.FileId);
             if (list.Count == 0)
-                _hashIndex.Remove(f.Hash);
+                _fileHashIndex.Remove(f.Hash);
         }
     }
-
     
-    internal void MarkScanCompleted(long sequence)
+ internal void MarkScanCompleted(long sequence)
     {
         lock (_sync)
         {
@@ -100,7 +124,7 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
+            var idx = _scanRuns.FindIndex(r => r.RunId == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
@@ -126,7 +150,7 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
+            var idx = _scanRuns.FindIndex(r => r.RunId == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
@@ -172,7 +196,7 @@ public sealed partial class Repo
 
         var tombstoneDelta = new RepoDelta
         {
-            ScanSequence = scanSequence,
+            RunId = scanSequence,
             Files = new List<FileRecord>(),
             Dirs = new List<DirRecord>(),
             DeletedFiles = deletedFiles,
@@ -184,7 +208,7 @@ public sealed partial class Repo
     }
 
     
-    private bool IsUnderRoot(Guid dirId, string rootPath)
+    private bool IsUnderRoot(long dirId, string rootPath)
     {
         var path = GetFullDirPath(dirId);
         return path.StartsWith(rootPath, PathUtils.PathComparison);
@@ -203,9 +227,9 @@ public sealed partial class Repo
 
         var newRoot = new ScanRoot
         {
-            Id            = Guid.NewGuid(),
+            RootId        = AllocateRootId_NoLock(),
             RootPath      = normalizedRootPath,
-            DirId         = Guid.Empty,
+            DirId         = 0,
             CreatedAt     = now,
             LastScannedAt = now,
             VolumeId      = null,
@@ -216,7 +240,7 @@ public sealed partial class Repo
             DeviceModel   = null
         };
 
-        _scanRoots[newRoot.Id] = newRoot;
+        _scanRoots[newRoot.RootId] = newRoot;
         
         SyncMetaFile_NoLock();
         _ = PersistMetaAsync();
@@ -224,7 +248,7 @@ public sealed partial class Repo
         return newRoot;
     }
 
-    internal void BindScanRootDirId(Guid scanRootId, Guid dirId)
+    internal void BindScanRootDirId(long scanRootId, long dirId)
     {
         lock (_sync)
         {
@@ -236,7 +260,7 @@ public sealed partial class Repo
                 return;
 
             // First-time bind, or rebind if it was Guid.Empty
-            if (root.DirId == Guid.Empty || root.DirId == dirId)
+            if (root.DirId == 0 || root.DirId == dirId)
             {
                 _scanRoots[scanRootId] = root with { DirId = dirId };
                 SyncMetaFile_NoLock();
@@ -248,7 +272,6 @@ public sealed partial class Repo
             }
         }
     }
-
     
     // Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
     private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)

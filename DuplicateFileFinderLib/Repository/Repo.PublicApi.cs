@@ -18,8 +18,8 @@ public sealed partial class Repo
 
         _disposed = true;
 
-        Dictionary<Guid, DirRecord>? dirsCopy;
-        Dictionary<Guid, FileRecord>? filesCopy;
+        Dictionary<long, DirRecord>? dirsCopy;
+        Dictionary<long, FileRecord>? filesCopy;
         RepoMetaFile? metaCopy;
         List<ScanRoot>? scanRootsCopy;
 
@@ -27,8 +27,8 @@ public sealed partial class Repo
         lock (_sync)
         {
             // Take local snapshots of the in-memory dictionaries for async work outside lock
-            dirsCopy = new Dictionary<Guid, DirRecord>(_dirs);
-            filesCopy = new Dictionary<Guid, FileRecord>(_files);
+            dirsCopy = new Dictionary<long, DirRecord>(_dirs);
+            filesCopy = new Dictionary<long, FileRecord>(_files);
 
             // Sync metaFile so it's up to date
             SyncMetaFile_NoLock();
@@ -44,7 +44,7 @@ public sealed partial class Repo
         // 3. Write per-root snapshots
         foreach (var root in scanRootsCopy)
             await PersistScanRootSnapshotAsync(
-                root.Id,
+                root.RootId,
                 dirsCopy,
                 filesCopy,
                 CancellationToken.None
@@ -75,17 +75,17 @@ public sealed partial class Repo
         // 1. Copy a shallow view of hash -> fileIds under lock (cheap vs full snapshot).
         // 2. Resolve fileIds to FileRecord outside lock via a local helper, still locking briefly.
 
-        Dictionary<HashKey, List<Guid>> hashToIds;
+        Dictionary<HashKey, List<long>> hashToIds;
         lock (_sync)
         {
-            hashToIds = new Dictionary<HashKey, List<Guid>>(_hashIndex.Count);
-            foreach (var kv in _hashIndex)
+            hashToIds = new Dictionary<HashKey, List<long>>(_fileHashIndex.Count);
+            foreach (var kv in _fileHashIndex)
             {
                 // Only consider candidates with possible duplicates
                 if (kv.Value.Count < 2)
                     continue;
 
-                hashToIds[kv.Key] = new List<Guid>(kv.Value);
+                hashToIds[kv.Key] = new List<long>(kv.Value);
             }
         }
 
@@ -117,8 +117,8 @@ public sealed partial class Repo
     {
         lock (_sync)
         {
-            var files = new Dictionary<Guid, FileRecord>(_files);
-            var dirs = new Dictionary<Guid, DirRecord>(_dirs);
+            var files = new Dictionary<long, FileRecord>(_files);
+            var dirs = new Dictionary<long, DirRecord>(_dirs);
             var hashIndex = BuildHashIndex(files);
 
             return new RepoViewSnapshot
@@ -138,7 +138,7 @@ public sealed partial class Repo
         var dirsToDelete = new List<DirTombstone>();
         var filesToDelete = new List<FileTombstone>();
 
-        var seq = AllocateScanSequence();
+        var seq = AllocateRunId();
         foreach (var dir in snap.Dirs.Values)
         {
             var dirPath = GetFullDirPath(dir.DirId);
@@ -158,7 +158,7 @@ public sealed partial class Repo
 
         var delta = new RepoDelta
         {
-            ScanSequence = seq,
+            RunId = seq,
             Dirs = new List<DirRecord>(),
             Files = new List<FileRecord>(),
             DeletedDirs = dirsToDelete,
@@ -184,20 +184,20 @@ public sealed partial class Repo
 
         ScanRun run;
         RepoDelta? rootDelta = null;
-        Dictionary<Guid, DirRecord> existingDirs;
+        Dictionary<long, DirRecord> existingDirs;
 
         lock (_sync)
         {
-            var scanSeq = AllocateScanSequence_NoLock();
+            var runId = AllocateRunId_NoLock();
 
             // Find or create the ScanRoot for this logical path
             var scanRoot = FindOrCreateScanRoot_NoLock(normalizedRootPath);
 
             // Ensure ScanRoot.DirId is bound to a real DirRecord in _dirs.
-            if (scanRoot.DirId == Guid.Empty || !_dirs.ContainsKey(scanRoot.DirId))
+            if (scanRoot.DirId == 0 || !_dirs.ContainsKey(scanRoot.DirId))
             {
                 // Try to reuse an existing dir whose full path matches the root path
-                Guid? existingRootDirId = null;
+                long? existingRootDirId = null;
 
                 foreach (var kv in _dirs)
                 {
@@ -223,50 +223,50 @@ public sealed partial class Repo
                     var name = Path.GetFileName(trimmed);
                     if (string.IsNullOrEmpty(name))
                         name = normalizedRootPath; // fallback for "/" or drive roots
-
-                    var rootDirId = Guid.NewGuid();
+                    
+                    var rootDirId = AllocateDirId_NoLock();
 
                     var rootDir = new DirRecord
                     {
                         DirId = rootDirId,
                         ParentId = null,
                         Name = name,
-                        LastSeenSequence = scanSeq,
+                        LastSeenSequence = runId,
                         Status = ScanEntryStatus.None, // “known root, not yet enumerated”
                         ErrorMessage = null
                     };
 
                     _dirs[rootDirId] = rootDir;
 
-                    scanRoot = scanRoot with { DirId = rootDirId };
-                    _scanRoots[scanRoot.Id] = scanRoot;
+                    scanRoot = scanRoot with { DirId = rootDirId};
+                    _scanRoots[scanRoot.RootId] = scanRoot;
 
                     // Build a tiny delta to persist the root dir
                     rootDelta = new RepoDelta
                     {
-                        ScanSequence = scanSeq,
+                        RunId = runId,
                         Dirs = new List<DirRecord> { rootDir }
                     };
                 }
-                _scanRoots[scanRoot.Id] = scanRoot;
+                _scanRoots[scanRoot.RootId] = scanRoot;
             }
 
             if (vInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, vInfo);
 
             run = new ScanRun
             {
-                ScanSequence = scanSeq,
+                ScanRootId = scanRoot.RootId,
+                RunId = runId,
                 RootPath = normalizedRootPath,
                 StartedAt = DateTimeOffset.UtcNow,
                 FinishedAt = null,
                 Status = ScanRunStatus.InProgress,
                 ErrorMessage = null,
-                ScanRootId = scanRoot.Id,
                 Mode = scanMode
             };
 
             _scanRuns.Add(run);
-            _scanRunIndex[scanSeq] = run;
+            _scanRunIndex[runId] = run;
             SaveMeta_NoLock();
             
             existingDirs = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -314,7 +314,7 @@ public sealed partial class Repo
         }
     }
 
-    public string GetFullDirPath(Guid dirId)
+ public string GetFullDirPath(long dirId)
     {
         // Fast path: return cached value
         if (_dirPathCache.TryGetValue(dirId, out var cached))
@@ -361,7 +361,7 @@ public sealed partial class Repo
         _dirPathCache[dirId] = fullPath;
         return fullPath;
     }
-
+    
     public async Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default)
     {
         if (policy is not null)
@@ -385,8 +385,8 @@ public sealed partial class Repo
         //
         // 2. Rebuild a clean dictionary of all dirs/files from deltas (outside lock)
         //
-        var allDirs = new Dictionary<Guid, DirRecord>();
-        var allFiles = new Dictionary<Guid, FileRecord>();
+        var allDirs = new Dictionary<long, DirRecord>();
+        var allFiles = new Dictionary<long, FileRecord>();
 
         var deltaFiles = Directory
             .GetFiles(_logDirPath, $"{generation}-*.delta")
@@ -422,7 +422,7 @@ public sealed partial class Repo
 
             var snap = new ScanRootSnapshotOnDisk
             {
-                ScanRootId = root.Id,
+                ScanRootId = root.RootId,
                 Dirs = dirRecs,
                 Files = fileRecs
             };
@@ -486,7 +486,7 @@ public sealed partial class Repo
                     RepoId = Guid.NewGuid(),
                     RepoPath = repoPath,
                     RepoHostName = Environment.MachineName,
-                    NextScanSequence = 0
+                    NextRunId = 0
                 },
                 ScanRoots = new List<ScanRoot>(),
                 ScanRuns = new List<ScanRun>()
@@ -503,16 +503,16 @@ public sealed partial class Repo
 
             TimingLog.Counter("files", repo._files.Count);
             TimingLog.Counter("dirs", repo._dirs.Count);
-            TimingLog.Counter("HashIndex", repo._hashIndex.Count);
+            TimingLog.Counter("HashIndex", repo._fileHashIndex.Count);
         }
 
         return repo;
     }
 
-    private static IReadOnlyDictionary<HashKey, IReadOnlyList<Guid>> BuildHashIndex(
-        IReadOnlyDictionary<Guid, FileRecord> files)
+    private static IReadOnlyDictionary<HashKey, IReadOnlyList<long>> BuildHashIndex(
+        IReadOnlyDictionary<long, FileRecord> files)
     {
-        var result = new Dictionary<HashKey, List<Guid>>();
+        var result = new Dictionary<HashKey, List<long>>();
 
         foreach (var f in files.Values)
         {
@@ -521,7 +521,7 @@ public sealed partial class Repo
 
             if (!result.TryGetValue(f.Hash, out var list))
             {
-                list = new List<Guid>();
+                list = new List<long>();
                 result[f.Hash] = list;
             }
 
@@ -529,7 +529,7 @@ public sealed partial class Repo
         }
 
         // Convert lists to IReadOnlyList
-        return result.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<Guid>)kv.Value);
+        return result.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<long>)kv.Value);
     }
 
     

@@ -58,7 +58,7 @@ public static class RepoStore
 
     public static async Task<ScanRootSnapshotOnDisk?> LoadScanRootSnapshotAsync(
         string repoPath,
-        Guid scanRootId,
+        long scanRootId,
         CancellationToken ct = default)
     {
         var path = GetRootSnapshotPath(repoPath, scanRootId);
@@ -81,6 +81,6 @@ public static class RepoStore
     private static string GetRootsFolder(string repoPath)
         => Path.Combine(repoPath, RootsFolderName);
 
-    private static string GetRootSnapshotPath(string repoPath, Guid scanRootId)
+    private static string GetRootSnapshotPath(string repoPath, long scanRootId)
         => Path.Combine(GetRootsFolder(repoPath), $"{scanRootId:N}.mp");
 }

@@ -11,7 +11,7 @@ public sealed class RepoDeltaTests
         [Fact]
         public void RepoDelta_DefaultLists_AreNonNullAndEmpty()
         {
-            var delta = new RepoDelta {ScanSequence = 99};
+            var delta = new RepoDelta {RunId = 99};
 
             Assert.NotNull(delta.Files);
             Assert.NotNull(delta.Dirs);
@@ -27,9 +27,9 @@ public sealed class RepoDeltaTests
         [Fact]
         public void RepoDelta_MemoryPackRoundTrip_PreservesCollections()
         {
-            var dirId = Guid.NewGuid();
-            var fileId1 = Guid.NewGuid();
-            var fileId2 = Guid.NewGuid();
+            var dirId = 11;
+            var fileId1 = 22;
+            var fileId2 = 33;
             var scanSequence = 3;
 
             var hashBytes = new byte[16];
@@ -83,7 +83,7 @@ public sealed class RepoDeltaTests
                 Dirs = new List<DirRecord> { dir },
                 DeletedFiles = new List<FileTombstone> { tombFile },
                 DeletedDirs = new List<DirTombstone> { tombDir },
-                ScanSequence = scanSequence
+                RunId = scanSequence
             };
 
             var bytes = MemoryPackSerializer.Serialize(original);
@@ -93,7 +93,7 @@ public sealed class RepoDeltaTests
             Assert.Equal(original.Dirs.Count, roundTripped.Dirs.Count);
             Assert.Equal(original.DeletedFiles.Count, roundTripped.DeletedFiles.Count);
             Assert.Equal(original.DeletedDirs.Count, roundTripped.DeletedDirs.Count);
-            Assert.Equal(original.ScanSequence, roundTripped.ScanSequence);
+            Assert.Equal(original.RunId, roundTripped.RunId);
 
             Assert.Contains(roundTripped.Files, f => f.FileId == fileId1);
             Assert.Contains(roundTripped.Files, f => f.FileId == fileId2);

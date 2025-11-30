@@ -37,8 +37,8 @@ public sealed partial class Repo
             // ------------------------------------
             // 1. Fix DIR_PARENT_MISSING
             // ------------------------------------
-            var knownDirIds = new HashSet<Guid>(_dirs.Keys);
-            var newDirs     = new Dictionary<Guid, DirRecord>(_dirs);
+            var knownDirIds = new HashSet<long>(_dirs.Keys);
+            var newDirs     = new Dictionary<long, DirRecord>(_dirs);
 
             foreach (var (id, dir) in _dirs)
             {
@@ -63,7 +63,7 @@ public sealed partial class Repo
             {
                 var run = _scanRuns[i];
 
-                if (run.ScanRootId == Guid.Empty)
+                if (run.ScanRootId == 0)
                     continue;
 
                 if (rootsById.ContainsKey(run.ScanRootId))
@@ -73,13 +73,13 @@ public sealed partial class Repo
                     continue; // cannot recover without a path
 
                 var canonical = PathUtils.NormalizePath(run.RootPath);
-                var dirId     = TryGetDirIdForFullPath_NoLock(canonical) ?? Guid.Empty;
+                var dirId = TryGetDirIdForFullPath_NoLock(canonical) ?? 0;
 
                 var root = new ScanRoot
                 {
-                    Id            = run.ScanRootId,
-                    RootPath      = canonical,
+                    RootId        = run.ScanRootId,
                     DirId         = dirId,
+                    RootPath      = canonical,
                     CreatedAt     = run.StartedAt,
                     LastScannedAt = run.FinishedAt ?? run.StartedAt,
 
@@ -92,7 +92,7 @@ public sealed partial class Repo
                     DisplayName   = null
                 };
 
-                rootsById[root.Id] = root;
+                rootsById[root.RootId] = root;
                 changedScanRoots   = true;
             }
 
@@ -103,7 +103,7 @@ public sealed partial class Repo
             // ------------------------------------
             foreach (var (id, root) in _scanRoots.ToArray())
             {
-                if (root.DirId != Guid.Empty)
+                if (root.DirId != 0)
                     continue;
 
                 if (string.IsNullOrWhiteSpace(root.RootPath))
@@ -143,11 +143,11 @@ public sealed partial class Repo
                     if (string.IsNullOrEmpty(leafName))
                         leafName = canonical;
 
-                    var newDirId = Guid.NewGuid();
-
+                    var newDirId = AllocateDirId_NoLock();
+                    
                     var newRootDir = new DirRecord
                     {
-                        DirId               = newDirId,
+                        DirId            = newDirId,
                         ParentId         = null,
                         Name             = leafName,
                         LastSeenSequence = 0,
@@ -160,7 +160,7 @@ public sealed partial class Repo
                     dirId            = newDirId;
                 }
 
-                if (dirId is { } boundId && boundId != Guid.Empty)
+                if (dirId is { } boundId && boundId != 0)
                 {
                     var updated = root with { DirId = boundId };
                     _scanRoots[id] = updated;
@@ -188,7 +188,7 @@ public sealed partial class Repo
 
             foreach (var run in _scanRuns)
             {
-                if (!usedSequences.Contains(run.ScanSequence))
+                if (!usedSequences.Contains(run.RunId))
                 {
                     changedScanRuns = true;
                     continue;
@@ -201,7 +201,7 @@ public sealed partial class Repo
             {
                 _scanRuns    = keptRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in keptRuns) _scanRunIndex.Add(run.ScanSequence, run);
+                foreach (var run in keptRuns) _scanRunIndex.Add(run.RunId, run);
             }
 
             // ------------------------------------
@@ -210,7 +210,7 @@ public sealed partial class Repo
             var runsByRootId = _scanRuns.GroupBy(r => r.ScanRootId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            var newRoots = new Dictionary<Guid, ScanRoot>();
+            var newRoots = new Dictionary<long, ScanRoot>();
             foreach (var (id, root) in _scanRoots)
             {
                 if (runsByRootId.TryGetValue(id, out var runs) && runs.Count > 0)
@@ -233,9 +233,9 @@ public sealed partial class Repo
                 .GroupBy(r => r.RootPath, StringComparer.Ordinal)
                 .ToList();
 
-            var canonicalRoots   = new Dictionary<Guid, ScanRoot>();
-            var rootIdRemap      = new Dictionary<Guid, Guid>(); // oldId -> canonicalId
-            var rootIdsToDelete  = new HashSet<Guid>();
+            var canonicalRoots   = new Dictionary<long, ScanRoot>();
+            var rootIdRemap      = new Dictionary<long, long>(); // oldId -> canonicalId
+            var rootIdsToDelete  = new HashSet<long>();
 
             foreach (var grp in rootsByPath)
             {
@@ -243,14 +243,14 @@ public sealed partial class Repo
                 if (roots.Count == 1)
                 {
                     var single = roots[0];
-                    canonicalRoots[single.Id] = single;
+                    canonicalRoots[single.RootId] = single;
                     continue;
                 }
 
                 // Choose canonical:
                 // 1. prefer one with non-empty DirId
                 // 2. among those, prefer latest LastScannedAt
-                var candidates = roots.Where(r => r.DirId != Guid.Empty).ToList();
+                var candidates = roots.Where(r => r.DirId != 0).ToList();
                 if (candidates.Count == 0)
                     candidates = roots;
 
@@ -258,16 +258,16 @@ public sealed partial class Repo
                     .OrderByDescending(r => r.LastScannedAt)
                     .First();
 
-                canonicalRoots[canonical.Id] = canonical;
+                canonicalRoots[canonical.RootId] = canonical;
 
                 // Map others to canonical
                 foreach (var r in roots)
                 {
-                    if (r.Id == canonical.Id)
+                    if (r.RootId == canonical.RootId)
                         continue;
 
-                    rootIdRemap[r.Id] = canonical.Id;
-                    rootIdsToDelete.Add(r.Id);
+                    rootIdRemap[r.RootId] = canonical.RootId;
+                    rootIdsToDelete.Add(r.RootId);
                 }
             }
 
@@ -291,7 +291,7 @@ public sealed partial class Repo
 
                 _scanRuns     = newRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in newRuns) _scanRunIndex.Add(run.ScanSequence, run);
+                foreach (var run in newRuns) _scanRunIndex.Add(run.RunId, run);
                 changedScanRuns = true;
             }
 
@@ -306,26 +306,28 @@ public sealed partial class Repo
             // ------------------------------------
             if (Directory.Exists(rootsDirPath))
             {
-                var validRootIds = new HashSet<Guid>(_scanRoots.Keys);
+                var validRootIds = new HashSet<long>(_scanRoots.Keys);
 
-                foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
-                {
-                    var name = Path.GetFileNameWithoutExtension(path);
-                    if (!Guid.TryParseExact(name, "N", out var id))
-                        continue;
-
-                    if (!validRootIds.Contains(id))
-                    {
-                        try
-                        {
-                            File.Delete(path);
-                        }
-                        catch
-                        {
-                            // ignore IO errors in repair
-                        }
-                    }
-                }
+                throw new NotImplementedException("TODO");
+                
+                // foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
+                // {
+                //     var name = Path.GetFileNameWithoutExtension(path);
+                //     if (!Guid.TryParseExact(name, "N", out var id))
+                //         continue;
+                //
+                //     if (!validRootIds.Contains(id))
+                //     {
+                //         try
+                //         {
+                //             File.Delete(path);
+                //         }
+                //         catch
+                //         {
+                //             // ignore IO errors in repair
+                //         }
+                //     }
+                // }
             }
 
             // ------------------------------------
@@ -337,7 +339,7 @@ public sealed partial class Repo
         }
     }
     
-    private Guid? TryGetDirIdForFullPath_NoLock(string canonicalFullPath)
+    private long? TryGetDirIdForFullPath_NoLock(string canonicalFullPath)
     {
         foreach (var kv in _dirs)
         {
