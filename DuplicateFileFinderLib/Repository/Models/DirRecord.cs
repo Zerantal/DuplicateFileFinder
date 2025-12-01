@@ -5,10 +5,10 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public partial record DirRecord
 {
-    [MemoryPackOrder(0)] public required Guid Id { get; init; }
-    [MemoryPackOrder(1)] public required Guid? ParentId { get; init; }
+    [MemoryPackOrder(0)] public required long DirId { get; init; }
+    [MemoryPackOrder(1)] public required long? ParentId { get; init; }
     [MemoryPackOrder(2)] public required string Name { get; init; }
-    [MemoryPackOrder(3)] public required long LastSeenSequence { get; init; }
+    [MemoryPackOrder(3)] public required long SeenDuringScanRunId { get; init; }
     [MemoryPackOrder(4)] public required ScanEntryStatus Status { get; init; }
     [MemoryPackOrder(5)] public string? ErrorMessage { get; init; }
 

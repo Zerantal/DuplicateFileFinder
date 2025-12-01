@@ -11,12 +11,17 @@
         <PackageReference Include="JetBrains.Annotations" Version="2025.2.2"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*"/>
         <PackageReference Include="xunit.v3" Version="3.2.0" />
+        <PackageReference Include="xunit.v3.runner.inproc.console" Version="3.2.1" />
     </ItemGroup>
     
     <ItemGroup>
         <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj">
             <Properties>DefineConstants=$(DefineConstants);UNIT_TESTING</Properties>
         </ProjectReference>
+    </ItemGroup>
+    
+    <ItemGroup>
+      <Folder Include="Repository\Migrations\" />
     </ItemGroup>
 
     <PropertyGroup>

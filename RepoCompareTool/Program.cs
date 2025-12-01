@@ -4,7 +4,7 @@ namespace RepoCompareTool;
 
 public static class Program
 {
-    public static int Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
         if (args.Length != 2)
         {
@@ -30,10 +30,10 @@ public static class Program
         try
         {
             Console.WriteLine($"Opening left  repo: {pathA}");
-            var repoA = Repo.Open(pathA);
+            var repoA = await Repo.OpenAsync(pathA);
 
             Console.WriteLine($"Opening right repo: {pathB}");
-            var repoB = Repo.Open(pathB);
+            var repoB = await Repo.OpenAsync(pathB);
 
             var result = SemanticRepoComparer.Compare(repoA, pathA, repoB, pathB);
             

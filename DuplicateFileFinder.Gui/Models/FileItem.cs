@@ -1,7 +1,7 @@
 namespace DuplicateFileFinder.Gui.Models;
 
 public readonly record struct FileItem(
-    Guid Id,
+    long Id,
     string Name,
     string FullPath,
     long Size,

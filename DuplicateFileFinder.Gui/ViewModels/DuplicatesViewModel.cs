@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinder.Gui.Util;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
 
@@ -17,9 +18,12 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
     // Guid DirId -> DirRecord (for folder tree construction)
-    private readonly Dictionary<Guid, DirRecord> _dirs = new();
+    private readonly Dictionary<long, DirRecord> _dirs = new();
+    
+    // parentDirId -> list of child dir Ids
+    private readonly Dictionary<long, List<long>> _childDirIdsByParent = new();
 
-    private readonly Dictionary<Guid, FolderNodeViewModel> _folderNodes = new();
+    private readonly Dictionary<long, FolderNodeViewModel> _folderNodes = new();
     // private readonly Dictionary<HashKey, List<Guid>> _hashIndex = new();
 
     private readonly IRepo _repo;
@@ -94,9 +98,9 @@ public partial class DuplicatesViewModel : ObservableObject
         foreach (var (id, dir) in snapshot.Dirs)
             _dirs[id] = dir;
 
-        BuildFolderTree();
-        RebuildDuplicatesAndStats(snapshot);
-        ApplyFilters();
+        using (TimingLog.StartPhase("BuildFolderTree()")) BuildFolderTree();
+        using (TimingLog.StartPhase("RebuildDuplicatesAndState()")) RebuildDuplicatesAndStats(snapshot);
+        using (TimingLog.StartPhase("ApplyFilters()")) ApplyFilters();
     }
 
     private void RebuildDuplicatesAndStats(RepoViewSnapshot snapshot)
@@ -130,37 +134,97 @@ public partial class DuplicatesViewModel : ObservableObject
     {
         FolderRoots.Clear();
         _folderNodes.Clear();
+        _childDirIdsByParent.Clear();
 
-        // Create node instances for each directory
+        // Build a parent -> children index, only for "live" directories
         foreach (var dir in _dirs.Values)
         {
-            var fullPath = _repo.GetFullDirPath(dir.Id);
-            var node = new FolderNodeViewModel(dir.Id, dir.Name, fullPath, _scanner);
-            _folderNodes[dir.Id] = node;
+            if (dir.Status == ScanEntryStatus.None)
+                continue;
+
+            if (dir.ParentId is { } parentId &&
+                _dirs.TryGetValue(parentId, out var parentDir) &&
+                parentDir.Status != ScanEntryStatus.None)
+            {
+                if (!_childDirIdsByParent.TryGetValue(parentId, out var list))
+                {
+                    list = new List<long>();
+                    _childDirIdsByParent[parentId] = list;
+                }
+
+                list.Add(dir.DirId);
+            }
         }
 
-        // Wire up parent/child relationships and decide roots
-        foreach (var dir in _dirs.Values)
+        // Use actual scan roots as the visible roots
+        foreach (var scanRoot in _repo.ScanRootsView)
         {
-            var node = _folderNodes[dir.Id];
-            if (dir.ParentId is { } parentId && _dirs[parentId].Status != ScanEntryStatus.None &&
-                _folderNodes.TryGetValue(parentId, out var parentNode))
-            {
-                node.Parent = parentNode;
-                InsertChildSorted(parentNode, node);
-            }
-            else
-            {
-                if (_dirs[node.DirId].Status == ScanEntryStatus.None)
-                    continue;
+            if (!_dirs.TryGetValue(scanRoot.DirId, out var rootDir))
+                continue;
 
-                node.Parent = null;
-                node.ShowFullPath = true;
-                node.OnRootRemoved = n => FolderRoots.Remove(n);
-                InsertRootSorted(node);
-            }
+            if (rootDir.Status == ScanEntryStatus.None)
+                continue;
+
+            var node = GetOrCreateNode(rootDir.DirId, true);
+
+            node.Parent = null;
+            node.ShowFullPath = true;                 // you can also use scanRoot.DisplayName if preferred
+            node.OnRootRemoved = n => FolderRoots.Remove(n);
+
+            InsertRootSorted(node);
         }
     }
+    
+    private FolderNodeViewModel GetOrCreateNode(long dirId, bool isScanRoot = false)
+    {
+        if (_folderNodes.TryGetValue(dirId, out var existing))
+            return existing;
+
+        ScanRoot? scanRoot = isScanRoot ? _repo.ScanRootsView.FirstOrDefault(s => s.DirId == dirId) : null;
+        var dir = _dirs[dirId];
+        string fullPath;
+        
+        if (isScanRoot && scanRoot != null)
+            fullPath = scanRoot.RootPath;
+        else
+            fullPath = _repo.GetFullDirPath(dir.DirId);
+
+        var node = new FolderNodeViewModel(dir.DirId, dir.Name, fullPath, _scanner)
+        {
+            // this delegate is called by the node when it is expanded
+            EnsureChildrenLoaded = EnsureChildrenLoaded
+        };
+
+        _folderNodes[dirId] = node;
+
+        // If it has children, add a dummy so the UI shows an expand arrow,
+        // but don't actually allocate real child nodes yet.
+        if (_childDirIdsByParent.ContainsKey(dir.DirId))
+            node.AddDummyChild();
+
+        return node;
+    }
+
+    private void EnsureChildrenLoaded(FolderNodeViewModel node)
+    {
+        // If we already materialised the children, do nothing
+        if (!node.HasDummyChild)
+            return;
+
+        node.ClearChildren();
+
+        if (!_childDirIdsByParent.TryGetValue(node.DirId, out var childIds))
+            return;
+
+        foreach (var childId in childIds)
+        {
+            var childNode = GetOrCreateNode(childId);
+            childNode.Parent = node;
+            InsertChildSorted(node, childNode);
+        }
+    }
+
+
 
     private void InsertRootSorted(FolderNodeViewModel node)
     {
@@ -218,7 +282,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public async Task OptimizeRepoAsync()
     {
         // Run compaction off the UI thread
-        await Task.Run(() => _repo.CompactNow());
+        await Task.Run(() => _repo.CompactAsync());
 
         // After compaction, reload from the repo to reflect any changes
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -230,7 +294,10 @@ public partial class DuplicatesViewModel : ObservableObject
 
     public void LoadFromRepo()
     {
-        var snap = _repo.GetSnapshot();
-        InitializeFromSnapshot(snap);
+        using (TimingLog.StartPhase("LoadFromRepo()"))
+        {
+            var snap = _repo.GetSnapshot();
+            InitializeFromSnapshot(snap);
+        }
     }
 }

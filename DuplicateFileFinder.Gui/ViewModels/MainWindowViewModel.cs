@@ -11,7 +11,7 @@ namespace DuplicateFileFinder.Gui.ViewModels;
 public partial class MainWindowViewModel : ObservableObject
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-
+    
     private readonly IDialogService _dialogService;
 
     private readonly IScanCoordinator _scanCoordinator;
@@ -22,14 +22,14 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isScanning;
 
     /// <inheritdoc/>
-    public MainWindowViewModel(Repo repo,
+    private MainWindowViewModel(Repo repo,
         IScanCoordinator scanCoordinator,
         IDialogService dialogService)
     {
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
         Duplicates = new DuplicatesViewModel(repo, scanCoordinator);
-        
+
         _scanCoordinator.ScanCompleted += (_, _) =>
         {
             IsScanning = false;
@@ -37,9 +37,9 @@ public partial class MainWindowViewModel : ObservableObject
         };
     }
 
-    public DuplicatesViewModel Duplicates { get; }
+    public DuplicatesViewModel? Duplicates { get; set; }
 
-    public bool CanStartScan => !IsScanning && !_scanCoordinator.IsScanning;
+    public bool CanStartScan => !IsScanning && !(_scanCoordinator is { IsScanning: true });
 
     // ---------------- Commands ----------------
 
@@ -58,7 +58,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         try
         {
-            await Duplicates.OptimizeRepoAsync();
+            await Duplicates!.OptimizeRepoAsync();
             await _dialogService.ShowInfoAsync("Repository optimized", "The repository has been compacted.");
         }
         catch (Exception ex)
@@ -78,5 +78,17 @@ public partial class MainWindowViewModel : ObservableObject
         IsScanning = true;
         
         await _scanCoordinator.RunScanWithDialogAsync(path);
+    }
+
+    public static async Task<MainWindowViewModel?> CreateMainWindowAsync(string repoDir)
+    {
+        var repo = await Repo.OpenAsync(repoDir);
+        var dialogService = new DialogService();
+        var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(repo);
+        var scanCoordinator = new ScanCoordinator(repo, scanEngine, dialogService);
+        
+        var mainWindowVm = new MainWindowViewModel(repo, scanCoordinator, dialogService);
+        
+        return mainWindowVm;
     }
 }

@@ -18,9 +18,10 @@ public sealed class DuplicateFileFinder
     private readonly IRepo _repo;
     
     private readonly bool _throttleProgress = true;
-    private readonly int _hashDegreeOfParallelism;
     
     private readonly IVolumeInfoProvider? _volumeInfoProvider;
+    
+    private int _hashDegreeOfParallelism;
 
     /// <summary>
     /// Internal representation of a file that needs hashing.
@@ -35,8 +36,7 @@ public sealed class DuplicateFileFinder
         IRepo repo,
         IVolumeInfoProvider? volumeInfoProvider = null,
         IFileEnumerator? fs = null,
-        IChecksumPipeline? checksums = null,
-        int? hashDegreeOfParallelism  = null)
+        IChecksumPipeline? checksums = null)
     {
         if (volumeInfoProvider is not null)
             _volumeInfoProvider = volumeInfoProvider;
@@ -49,11 +49,7 @@ public sealed class DuplicateFileFinder
         _fs = fs ?? new FileEnumerator();
         _checksums = checksums ?? new ChecksumPipelineMD5();
         _repo = repo;
-        
-        var dop = hashDegreeOfParallelism ?? Environment.ProcessorCount;
-        if (dop < 1) dop = 1;
-        _hashDegreeOfParallelism = dop;
-
+        _hashDegreeOfParallelism = Environment.ProcessorCount;
     }
     
     internal DuplicateFileFinder(IRepo repo, bool throttleProgress)
@@ -86,6 +82,8 @@ public sealed class DuplicateFileFinder
         {
             // ignored
         }
+
+        _hashDegreeOfParallelism = vInfo is { IsRotational: true } ? 1 : Environment.ProcessorCount;
         
         var session = _repo.BeginScan(location, mode, vInfo);
 
@@ -133,7 +131,7 @@ public sealed class DuplicateFileFinder
 
             await session.CompleteAsync(token);
             Report(progress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
-            _repo.CompactIfNeeded();
+            await _repo.CompactAsync(ct: token);
         }
         catch (OperationCanceledException)
         {
@@ -304,19 +302,16 @@ public sealed class DuplicateFileFinder
     private QuickRescanState BuildQuickRescanState(RepoViewSnapshot snapshot, string rootPath)
     {
         var rootNormalized = PathUtils.NormalizePath(rootPath);
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
 
-        var files = new Dictionary<string, FileRecord>(StringComparer.FromComparison(comparison));
-        var dirs  = new Dictionary<string, DirRecord>(StringComparer.FromComparison(comparison));
+        var files = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
+        var dirs  = new Dictionary<string, DirRecord>(PathUtils.PathComparer);
 
         foreach (var dir in snapshot.Dirs.Values)
         {
-            var dirPath = _repo.GetFullDirPath(dir.Id);
+            var dirPath = _repo.GetFullDirPath(dir.DirId);
             var norm    = PathUtils.NormalizePath(dirPath);
 
-            if (!norm.StartsWith(rootNormalized,comparison))
+            if (!norm.StartsWith(rootNormalized, PathUtils.PathComparison))
                 continue;
 
             dirs[norm] = dir;
@@ -327,7 +322,7 @@ public sealed class DuplicateFileFinder
             var dirPath = _repo.GetFullDirPath(file.DirId);
             var full    = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
 
-            if (!full.StartsWith(rootNormalized, comparison))
+            if (!full.StartsWith(rootNormalized, PathUtils.PathComparison))
                 continue;
 
             files[full] = file;
@@ -341,13 +336,13 @@ public sealed class DuplicateFileFinder
         // Files that remained in the map are now missing on disk
         foreach (var file in quickState.PreviousFiles.Values)
         {
-            session.MarkFileDeleted(file.Id);
+            session.MarkFileDeleted(file.FileId);
         }
 
         // Directories that remained are missing; this naturally includes whole subtrees.
         foreach (var dir in quickState.PreviousDirs.Values)
         {
-            session.MarkDirectoryDeleted(dir.Id);
+            session.MarkDirectoryDeleted(dir.DirId);
         }
     }
 
@@ -371,7 +366,7 @@ public sealed class DuplicateFileFinder
             Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
             return;
         }
-
+        
         var result = await HashingRunner.HashFilesAsync(
             filesToHash,
             _checksums,

@@ -40,7 +40,7 @@ public sealed partial class DuplicateSetRow : ObservableObject
     {
         _items.AddRange(_files.Select(r =>
             new FileItem(
-                r.Id,
+                r.FileId,
                 r.Name,
                 _pathResolver(r), r.Size,
                 r.Modified)));

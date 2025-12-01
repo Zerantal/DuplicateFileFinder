@@ -16,7 +16,7 @@ var repoDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.L
 if (Directory.Exists(repoDir))
     Directory.Delete(repoDir, true);
 
-var repo = Repo.Open(repoDir);
+var repo = await Repo.OpenAsync(repoDir);
 var finder = new DuplicateFileFinder(repo);
 
 log.Info($"Bench location: {root}", root);
@@ -25,4 +25,4 @@ using (TimingLog.Start("Folder scan", root))
     await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
 }
 
-repo.CompactNow();
+await repo.CompactAsync();
