@@ -326,7 +326,7 @@ public sealed partial class Repo
         // Reconstruct path from leaf → root
         var parts = new List<string>(16);
 
-        var cursor = node;
+        var cursor = node; 
         while (true)
         {
             parts.Add(cursor.Name);

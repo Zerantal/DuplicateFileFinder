@@ -11,7 +11,7 @@ namespace DuplicateFileFinderLib.Repository;
 /// </summary>
 public sealed partial class Repo : IRepo
 {
-    private const int RepoSchemaVersion = 5;
+    private const int RepoSchemaVersion = 6;
     
     private readonly string _repoPath;
     private readonly string _logDirPath;

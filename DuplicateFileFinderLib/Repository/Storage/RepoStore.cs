@@ -82,5 +82,5 @@ public static class RepoStore
         => Path.Combine(repoPath, RootsFolderName);
 
     private static string GetRootSnapshotPath(string repoPath, long scanRootId)
-        => Path.Combine(GetRootsFolder(repoPath), $"{scanRootId:N}.mp");
+        => Path.Combine(GetRootsFolder(repoPath), $"{scanRootId}.mp");
 }
