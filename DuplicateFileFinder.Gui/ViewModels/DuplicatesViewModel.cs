@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinder.Gui.Util;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
 
@@ -97,9 +98,9 @@ public partial class DuplicatesViewModel : ObservableObject
         foreach (var (id, dir) in snapshot.Dirs)
             _dirs[id] = dir;
 
-        BuildFolderTree();
-        RebuildDuplicatesAndStats(snapshot);
-        ApplyFilters();
+        using (TimingLog.StartPhase("BuildFolderTree()")) BuildFolderTree();
+        using (TimingLog.StartPhase("RebuildDuplicatesAndState()")) RebuildDuplicatesAndStats(snapshot);
+        using (TimingLog.StartPhase("ApplyFilters()")) ApplyFilters();
     }
 
     private void RebuildDuplicatesAndStats(RepoViewSnapshot snapshot)
@@ -293,7 +294,10 @@ public partial class DuplicatesViewModel : ObservableObject
 
     public void LoadFromRepo()
     {
-        var snap = _repo.GetSnapshot();
-        InitializeFromSnapshot(snap);
+        using (TimingLog.StartPhase("LoadFromRepo()"))
+        {
+            var snap = _repo.GetSnapshot();
+            InitializeFromSnapshot(snap);
+        }
     }
 }
