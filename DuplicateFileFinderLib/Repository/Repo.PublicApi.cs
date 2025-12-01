@@ -314,7 +314,7 @@ public sealed partial class Repo
         }
     }
 
- public string GetFullDirPath(long dirId)
+    public string GetFullDirPath(long dirId)
     {
         // Fast path: return cached value
         if (_dirPathCache.TryGetValue(dirId, out var cached))
@@ -366,10 +366,13 @@ public sealed partial class Repo
     {
         if (policy is not null)
         {
-            if (!await ShouldCompactAsync(policy))
+            if (!await ShouldCompactAsync(policy).ConfigureAwait(false))
                 return; // no-op: thresholds not met
         }
 
+        Dictionary<long, DirRecord>  dirsSnapshot;
+        Dictionary<long, FileRecord> filesSnapshot;
+        List<ScanRoot>               rootsSnapshot;
         long nextLogSeq;
         long generation;
 
@@ -378,46 +381,57 @@ public sealed partial class Repo
         //
         lock (_sync)
         {
+            // Clone into fresh dictionaries so we can operate outside the lock
+            dirsSnapshot   = new Dictionary<long, DirRecord>(_dirs);
+            filesSnapshot  = new Dictionary<long, FileRecord>(_files);
+            rootsSnapshot  = _scanRoots.Values.ToList();
+
             nextLogSeq = Meta.NextLogSequence;
             generation = Meta.Generation;
         }
 
         //
-        // 2. Rebuild a clean dictionary of all dirs/files from deltas (outside lock)
+        // 2. Pre-index files by DirId for efficient per-root selection
         //
-        var allDirs = new Dictionary<long, DirRecord>();
-        var allFiles = new Dictionary<long, FileRecord>();
+        var filesByDir = filesSnapshot.Values
+            .GroupBy(f => f.DirId)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
-        var deltaFiles = Directory
-            .GetFiles(_logDirPath, $"{generation}-*.delta")
-            .OrderBy(f => f, StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var path in deltaFiles)
+        //
+        // 3. Write per-root snapshots based on the in-memory snapshot (outside lock)
+        //
+        foreach (var root in rootsSnapshot)
         {
             ct.ThrowIfCancellationRequested();
 
-            var bytes = await File.ReadAllBytesAsync(path, ct);
-            var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
-            if (delta == null)
+            if (root.DirId == 0 || !dirsSnapshot.ContainsKey(root.DirId))
+            {
+                // Unbound root: write an empty snapshot so the root still exists
+                var emptySnap = new ScanRootSnapshotOnDisk
+                {
+                    ScanRootId = root.RootId,
+                    Dirs       = Array.Empty<DirRecord>(),
+                    Files      = Array.Empty<FileRecord>()
+                };
+
+                await RepoStore.SaveScanRootSnapshotAsync(_repoPath, emptySnap, ct)
+                    .ConfigureAwait(false);
+
                 continue;
+            }
 
-            // Minimal pure-function ApplyDelta variant
-            ApplyDelta(delta, allDirs, allFiles);
-        }
+            // Collect the subtree of dirs under this root
+            var subtree = CollectDirSubtree(root.DirId, dirsSnapshot);
 
-        //
-        // 3. Persist per-root snapshots (outside lock)
-        //
-        foreach (var root in _scanRoots.Values)
-        {
-            ct.ThrowIfCancellationRequested();
+            var dirRecs = subtree
+                .Select(id => dirsSnapshot[id])
+                .ToArray();
 
-            var subtree = CollectDirSubtree(root.DirId, allDirs);
-
-            var dirRecs = subtree.Select(id => allDirs[id]).ToArray();
             var fileRecs = subtree
-                .SelectMany(dirId => allFiles.Values.Where(f => f.DirId == dirId))
+                .SelectMany(dirId =>
+                    filesByDir.TryGetValue(dirId, out var list)
+                        ? list
+                        : Enumerable.Empty<FileRecord>())
                 .ToArray();
 
             var snap = new ScanRootSnapshotOnDisk
@@ -432,7 +446,8 @@ public sealed partial class Repo
         }
 
         //
-        // 4. Commit new meta baseline + generation under lock
+        // 4. Bump generation and mark all logs up to nextLogSeq - 1 as snapshotted
+        //    under the lock, then persist meta
         //
         lock (_sync)
         {
@@ -443,24 +458,30 @@ public sealed partial class Repo
                 LastCompaction = DateTimeOffset.UtcNow
             };
 
-            // Sync + write new meta.mp
             SyncMetaFile_NoLock();
             SaveMeta_NoLock();
         }
 
         //
-        // 5. Remove obsolete deltas (old generation)
+        // 5. Delete old-generation delta files
         //
+        var deltaFiles = Directory
+            .GetFiles(_logDirPath, $"{generation}-*.delta")
+            .ToList();
+
         foreach (var f in deltaFiles)
+        {
             try
             {
                 File.Delete(f);
             }
             catch
             {
-                /* ignore */
+                // Best-effort: ignore IO errors during cleanup
             }
+        }
     }
+
     
     public static async Task<Repo> OpenAsync(string repoPath, CancellationToken ct = default)
     {
