@@ -97,18 +97,18 @@ public sealed class ScanSessionTests : IDisposable
 
         var dir = dirs[0];
         Assert.Equal("root", dir.Name);
-        Assert.Equal(session.RunId, dir.LastSeenSequence);
+        Assert.Equal(session.RunId, dir.SeenDuringScanRunId);
 
         var files = snapshot.Files.Values.ToList();
         Assert.Single(files);
 
         var file = files[0];
         Assert.Equal("file.txt", file.Name);
-        Assert.Equal(session.RunId, file.LastSeenScanSequence);
+        Assert.Equal(session.RunId, file.SeenDuringSeenScanRunId);
 
         // ScanRun should exist and still be InProgress
         var run = Assert.Single(repo.ScanRunsView);
-        Assert.Equal(session.RunId, run.RunId);
+        Assert.Equal(session.RunId, run.ScanRunId);
         Assert.Equal(ScanRunStatus.InProgress, run.Status);
 
         await session.DisposeAsync();
@@ -140,7 +140,7 @@ public sealed class ScanSessionTests : IDisposable
             DirId = rootDirId,
             ParentId = null,
             Name = "root",
-            LastSeenSequence = seq,
+            SeenDuringScanRunId = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -149,7 +149,7 @@ public sealed class ScanSessionTests : IDisposable
             DirId = subDirId,
             ParentId = rootDirId,
             Name = "sub",
-            LastSeenSequence = seq,
+            SeenDuringScanRunId = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -162,7 +162,7 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            LastSeenScanSequence = seq,
+            SeenDuringSeenScanRunId = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -213,7 +213,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.False(snapshot2.Files.ContainsKey(oldFileId));
 
         // ScanRun should be marked Completed for this sequence.
-        var run = Assert.Single(repo.ScanRunsView, r => r.RunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
         Assert.Equal(ScanRunStatus.Completed, run.Status);
     }
 
@@ -240,7 +240,7 @@ public sealed class ScanSessionTests : IDisposable
             DirId = dirId,
             ParentId = null,
             Name = "root",
-            LastSeenSequence = 1,
+            SeenDuringScanRunId = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -253,7 +253,7 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            LastSeenScanSequence = 1,
+            SeenDuringSeenScanRunId = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -283,7 +283,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.True(snapshot2.Files.ContainsKey(fileId));
 
         // ScanRun for this sequence should be Failed or Cancelled.
-        var run = Assert.Single(repo.ScanRunsView, r => r.RunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
         Assert.True(run.Status == ScanRunStatus.Failed || run.Status == ScanRunStatus.Cancelled);
         Assert.Equal("cancelled", run.ErrorMessage);
     }
@@ -312,7 +312,7 @@ public sealed class ScanSessionTests : IDisposable
             DirId =dirId,
             ParentId = null,
             Name = "root",
-            LastSeenSequence = 1,
+            SeenDuringScanRunId = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -325,7 +325,7 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            LastSeenScanSequence = 1,
+            SeenDuringSeenScanRunId = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -353,7 +353,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.True(snapshot2.Files.ContainsKey(fileId));
 
         // ScanRun for this sequence should not be InProgress anymore.
-        var run = Assert.Single(repo.ScanRunsView, r => r.RunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
         Assert.NotEqual(ScanRunStatus.InProgress, run.Status);
     }
 

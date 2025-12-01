@@ -12,7 +12,7 @@ public sealed class ScanRunTests
     {
         var original = new ScanRun
         {
-            RunId = 42,
+            ScanRunId = 42,
             RootPath = "/some/root",
             StartedAt = new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.Zero),
             FinishedAt = new DateTimeOffset(2024, 2, 3, 5, 6, 7, TimeSpan.Zero),
@@ -25,7 +25,7 @@ public sealed class ScanRunTests
         var bytes = MemoryPackSerializer.Serialize(original);
         var roundTripped = MemoryPackSerializer.Deserialize<ScanRun>(bytes)!;
 
-        Assert.Equal(original.RunId, roundTripped.RunId);
+        Assert.Equal(original.ScanRunId, roundTripped.ScanRunId);
         Assert.Equal(original.RootPath, roundTripped.RootPath);
         Assert.Equal(original.StartedAt, roundTripped.StartedAt);
         Assert.Equal(original.FinishedAt, roundTripped.FinishedAt);

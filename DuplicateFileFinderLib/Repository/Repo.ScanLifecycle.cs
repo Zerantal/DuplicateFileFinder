@@ -19,8 +19,8 @@ public sealed partial class Repo
 
     private long AllocateRunId_NoLock()
     {
-        var seq = Meta.NextRunId;
-        Meta = Meta with { NextRunId = seq + 1 };
+        var seq = Meta.NextScanRunId;
+        Meta = Meta with { NextScanRunId = seq + 1 };
 
         SyncMetaFile_NoLock();
         SaveMeta_NoLock();
@@ -61,8 +61,8 @@ public sealed partial class Repo
 
     internal long AllocateRootId_NoLock()
     {
-        var id = Meta.NextRootId;
-        Meta = Meta with { NextRootId = id + 1 };
+        var id = Meta.NextScanRootId;
+        Meta = Meta with { NextScanRootId = id + 1 };
         return id;
     }
     
@@ -124,7 +124,7 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.RunId == sequence);
+            var idx = _scanRuns.FindIndex(r => r.ScanRunId == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
@@ -150,7 +150,7 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.RunId == sequence);
+            var idx = _scanRuns.FindIndex(r => r.ScanRunId == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
@@ -174,7 +174,7 @@ public sealed partial class Repo
                 if (!IsUnderRoot(file.DirId, rootPath))
                     continue;
 
-                if (file.LastSeenScanSequence < scanSequence)
+                if (file.SeenDuringSeenScanRunId < scanSequence)
                     deletedFiles.Add(new FileTombstone(file.FileId, scanSequence));
             }
             
@@ -183,7 +183,7 @@ public sealed partial class Repo
                 if (!IsUnderRoot(dir.DirId, rootPath))
                     continue;
 
-                if (dir.LastSeenSequence < scanSequence)
+                if (dir.SeenDuringScanRunId < scanSequence)
                     deletedDirs.Add(new DirTombstone(dir.DirId, scanSequence));
             }
         }

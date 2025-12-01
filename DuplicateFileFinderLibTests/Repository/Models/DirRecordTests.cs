@@ -17,7 +17,7 @@ public sealed class DirRecordTests
             DirId = id,
             ParentId = parentId,
             Name = "subdir",
-            LastSeenSequence = 123,
+            SeenDuringScanRunId = 123,
             Status = ScanEntryStatus.Error,
             ErrorMessage = "oops"
         };
@@ -28,7 +28,7 @@ public sealed class DirRecordTests
         Assert.Equal(original.DirId, roundTripped.DirId);
         Assert.Equal(original.ParentId, roundTripped.ParentId);
         Assert.Equal(original.Name, roundTripped.Name);
-        Assert.Equal(original.LastSeenSequence, roundTripped.LastSeenSequence);
+        Assert.Equal(original.SeenDuringScanRunId, roundTripped.SeenDuringScanRunId);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
     }

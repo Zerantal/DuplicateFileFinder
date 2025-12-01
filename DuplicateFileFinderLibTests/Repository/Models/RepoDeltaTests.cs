@@ -41,7 +41,7 @@ public sealed class RepoDeltaTests
                 DirId = dirId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -55,7 +55,7 @@ public sealed class RepoDeltaTests
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
+                SeenDuringSeenScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -69,7 +69,7 @@ public sealed class RepoDeltaTests
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
+                SeenDuringSeenScanRunId = 1,
                 Status = ScanEntryStatus.Hashed,
                 ErrorMessage = "err"
             };

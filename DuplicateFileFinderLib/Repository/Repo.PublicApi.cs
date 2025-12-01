@@ -231,7 +231,7 @@ public sealed partial class Repo
                         DirId = rootDirId,
                         ParentId = null,
                         Name = name,
-                        LastSeenSequence = runId,
+                        SeenDuringScanRunId = runId,
                         Status = ScanEntryStatus.None, // “known root, not yet enumerated”
                         ErrorMessage = null
                     };
@@ -256,7 +256,7 @@ public sealed partial class Repo
             run = new ScanRun
             {
                 ScanRootId = scanRoot.RootId,
-                RunId = runId,
+                ScanRunId = runId,
                 RootPath = normalizedRootPath,
                 StartedAt = DateTimeOffset.UtcNow,
                 FinishedAt = null,
@@ -486,7 +486,7 @@ public sealed partial class Repo
                     RepoId = Guid.NewGuid(),
                     RepoPath = repoPath,
                     RepoHostName = Environment.MachineName,
-                    NextRunId = 0
+                    NextScanRunId = 0
                 },
                 ScanRoots = new List<ScanRoot>(),
                 ScanRuns = new List<ScanRun>()

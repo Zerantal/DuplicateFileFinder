@@ -150,7 +150,7 @@ public sealed partial class Repo
                         DirId            = newDirId,
                         ParentId         = null,
                         Name             = leafName,
-                        LastSeenSequence = 0,
+                        SeenDuringScanRunId = 0,
                         Status           = ScanEntryStatus.None,
                         ErrorMessage     = null
                     };
@@ -174,21 +174,21 @@ public sealed partial class Repo
             var usedSequences = new HashSet<long>();
             foreach (var d in _dirs.Values)
             {
-                if (d.LastSeenSequence > 0)
-                    usedSequences.Add(d.LastSeenSequence);
+                if (d.SeenDuringScanRunId > 0)
+                    usedSequences.Add(d.SeenDuringScanRunId);
             }
 
             foreach (var f in _files.Values)
             {
-                if (f.LastSeenScanSequence > 0)
-                    usedSequences.Add(f.LastSeenScanSequence);
+                if (f.SeenDuringSeenScanRunId > 0)
+                    usedSequences.Add(f.SeenDuringSeenScanRunId);
             }
 
             var keptRuns      = new List<ScanRun>();
 
             foreach (var run in _scanRuns)
             {
-                if (!usedSequences.Contains(run.RunId))
+                if (!usedSequences.Contains(run.ScanRunId))
                 {
                     changedScanRuns = true;
                     continue;
@@ -201,7 +201,7 @@ public sealed partial class Repo
             {
                 _scanRuns    = keptRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in keptRuns) _scanRunIndex.Add(run.RunId, run);
+                foreach (var run in keptRuns) _scanRunIndex.Add(run.ScanRunId, run);
             }
 
             // ------------------------------------
@@ -291,7 +291,7 @@ public sealed partial class Repo
 
                 _scanRuns     = newRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in newRuns) _scanRunIndex.Add(run.RunId, run);
+                foreach (var run in newRuns) _scanRunIndex.Add(run.ScanRunId, run);
                 changedScanRuns = true;
             }
 

@@ -62,7 +62,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.NotEqual(Guid.Empty, meta.RepoId);
             Assert.Equal(_rootDir, meta.RepoPath);
             Assert.False(string.IsNullOrWhiteSpace(meta.RepoHostName));
-            Assert.Equal(0, meta.NextRunId);
+            Assert.Equal(0, meta.NextScanRunId);
         }
 
         [Fact]
@@ -70,7 +70,7 @@ namespace DuplicateFileFinderLibTests.Repository
         {
             var repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
             var metaBefore = ReadMeta();
-            Assert.Equal(0, metaBefore.NextRunId);
+            Assert.Equal(0, metaBefore.NextScanRunId);
 
             var seq1 = repo.AllocateRunId();
             var metaAfter1 = ReadMeta();
@@ -79,13 +79,13 @@ namespace DuplicateFileFinderLibTests.Repository
             // - allocate current value
             // - persist +1
             Assert.Equal(0, seq1);
-            Assert.Equal(1, metaAfter1.NextRunId);
+            Assert.Equal(1, metaAfter1.NextScanRunId);
 
             var seq2 = repo.AllocateRunId();
             var metaAfter2 = ReadMeta();
 
             Assert.Equal(1, seq2);
-            Assert.Equal(2, metaAfter2.NextRunId);
+            Assert.Equal(2, metaAfter2.NextScanRunId);
         }
 
         [Fact]
@@ -124,7 +124,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = rootDirId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = 0,
+                SeenDuringScanRunId = 0,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -157,7 +157,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = dirId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -175,7 +175,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
+                SeenDuringSeenScanRunId = 1,
                 Status = ScanEntryStatus.Hashed,
                 ErrorMessage = null
             };
@@ -212,7 +212,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = dirId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -230,7 +230,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
+                SeenDuringSeenScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -284,7 +284,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = dirId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = seq,
+                SeenDuringScanRunId = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -298,7 +298,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hash1,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = seq,
+                SeenDuringSeenScanRunId = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -329,7 +329,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hash2,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = seq,
+                SeenDuringSeenScanRunId = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -386,7 +386,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = rootId,
                 ParentId = null,
                 Name = "root",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -396,7 +396,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId = childId,
                 ParentId = rootId,
                 Name = "child",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -443,7 +443,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId               = rootId,
                 ParentId         = null,
                 Name             = "root",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status           = ScanEntryStatus.Enumerated,
                 ErrorMessage     = null
             };
@@ -453,7 +453,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId               = subId,
                 ParentId         = rootId,
                 Name             = "sub",
-                LastSeenSequence = 1,
+                SeenDuringScanRunId = 1,
                 Status           = ScanEntryStatus.Enumerated,
                 ErrorMessage     = null
             };
@@ -471,7 +471,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash                 = hash,
                 Modified             = DateTimeOffset.UtcNow,
                 Created              = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
+                SeenDuringSeenScanRunId = 1,
                 Status               = ScanEntryStatus.Enumerated,
                 ErrorMessage         = null
             };
@@ -494,7 +494,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash                 = hash,
                 Modified             = DateTimeOffset.UtcNow,
                 Created              = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 2,
+                SeenDuringSeenScanRunId = 2,
                 Status               = ScanEntryStatus.Enumerated,
                 ErrorMessage         = null
             };
@@ -535,7 +535,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 DirId             = rootDirId,
                 ParentId          = null,
                 Name              = "root",
-                LastSeenSequence  = seq,
+                SeenDuringScanRunId  = seq,
                 Status            = ScanEntryStatus.Enumerated,
                 ErrorMessage      = null
             };
@@ -581,7 +581,7 @@ namespace DuplicateFileFinderLibTests.Repository
                     DirId = dirId,
                     ParentId = null,
                     Name = "root",
-                    LastSeenSequence = 1,
+                    SeenDuringScanRunId = 1,
                     Status = ScanEntryStatus.Enumerated,
                     ErrorMessage = null
                 };
@@ -599,7 +599,7 @@ namespace DuplicateFileFinderLibTests.Repository
                     Hash = hashKey,
                     Modified = DateTimeOffset.UtcNow,
                     Created = DateTimeOffset.UtcNow,
-                    LastSeenScanSequence = 1,
+                    SeenDuringSeenScanRunId = 1,
                     Status = ScanEntryStatus.Hashed,
                     ErrorMessage = null
                 };

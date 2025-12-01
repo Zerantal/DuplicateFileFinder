@@ -125,7 +125,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         private long _dirCounter = 1;
         public ScanRun Run { get; } = new()
         {
-            RunId = 1,
+            ScanRunId = 1,
             RootPath = rootPath,
             StartedAt = DateTimeOffset.UtcNow,
             Status = ScanRunStatus.InProgress,
@@ -135,7 +135,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         public long RunId { get; }
 
-        public long ScanSequence => Run.RunId;
+        public long ScanSequence => Run.ScanRunId;
         public string RootPath => Run.RootPath;
 
         public readonly List<ObservedDir> ObservedDirectories = new();

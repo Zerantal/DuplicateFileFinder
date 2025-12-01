@@ -179,17 +179,17 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "RUN_ROOT_MISSING",
-                    Message = $"ScanRun {run.RunId} references missing ScanRootId {run.ScanRootId}."
+                    Message = $"ScanRun {run.ScanRunId} references missing ScanRootId {run.ScanRootId}."
                 });
             }
 
-            if (run.RunId >= meta.NextRunId)
+            if (run.ScanRunId >= meta.NextScanRunId)
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "RUN_SEQUENCE_OUT_OF_RANGE",
-                    Message = $"ScanRun {run.RunId} >= NextRunId {meta.NextRunId}."
+                    Message = $"ScanRun {run.ScanRunId} >= NextScanRunId {meta.NextScanRunId}."
                 });
             }
         }
@@ -241,25 +241,25 @@ public sealed partial class Repo
         var usedSequences = new HashSet<long>();
         foreach (var d in dirs.Values)
         {
-            if (d.LastSeenSequence > 0)
-                usedSequences.Add(d.LastSeenSequence);
+            if (d.SeenDuringScanRunId > 0)
+                usedSequences.Add(d.SeenDuringScanRunId);
         }
 
         foreach (var f in files.Values)
         {
-            if (f.LastSeenScanSequence > 0)
-                usedSequences.Add(f.LastSeenScanSequence);
+            if (f.SeenDuringSeenScanRunId > 0)
+                usedSequences.Add(f.SeenDuringSeenScanRunId);
         }
 
         foreach (var run in scanRuns)
         {
-            if (!usedSequences.Contains(run.RunId))
+            if (!usedSequences.Contains(run.ScanRunId))
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Info,
                     Code     = "RUN_ORPHAN_NO_REFERENCES",
-                    Message  = $"ScanRun {run.RunId} (rootPath={run.RootPath}) is not referenced by any DirRecord/FileRecord."
+                    Message  = $"ScanRun {run.ScanRunId} (rootPath={run.RootPath}) is not referenced by any DirRecord/FileRecord."
                 });
             }
         }

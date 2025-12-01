@@ -62,7 +62,7 @@ public sealed class ScanSession : IScanSession
     
     public ScanRun Run { get; }
 
-    public long RunId => Run.RunId;
+    public long RunId => Run.ScanRunId;
     public string RootPath => Run.RootPath;
 
     public async ValueTask DisposeAsync()
@@ -185,7 +185,7 @@ public sealed class ScanSession : IScanSession
                 DirId            = id,
                 ParentId         = parentId,
                 Name             = name,
-                LastSeenSequence = RunId,
+                SeenDuringScanRunId = RunId,
                 Status           = effectiveStatus,
                 ErrorMessage     = effectiveError
             };
@@ -226,7 +226,7 @@ public sealed class ScanSession : IScanSession
 
         var updated = existing with
         {
-            LastSeenSequence = RunId,
+            SeenDuringScanRunId = RunId,
             Status           = newStatus,
             ErrorMessage     = newError
         };
@@ -293,7 +293,7 @@ public sealed class ScanSession : IScanSession
                     Hash                 = newHash,
                     Modified             = newMod,
                     Created              = newCreated,
-                    LastSeenScanSequence = RunId,
+                    SeenDuringSeenScanRunId = RunId,
                     Status               = newStatus,
                     ErrorMessage         = newError
                 };
@@ -315,7 +315,7 @@ public sealed class ScanSession : IScanSession
                     Hash                 = effectiveHash,
                     Modified             = effectiveMod,
                     Created              = effectiveCreated,
-                    LastSeenScanSequence = RunId,
+                    SeenDuringSeenScanRunId = RunId,
                     Status               = effectiveStatus,
                     ErrorMessage        = errorMessage
                 };

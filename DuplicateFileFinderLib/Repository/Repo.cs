@@ -61,6 +61,6 @@ public sealed partial class Repo : IRepo
 
         _scanRunIndex.Clear();
         foreach (var run in _scanRuns)
-            _scanRunIndex[run.RunId] = run;
+            _scanRunIndex[run.ScanRunId] = run;
     }
 }
