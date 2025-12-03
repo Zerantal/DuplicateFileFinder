@@ -1,7 +1,7 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {

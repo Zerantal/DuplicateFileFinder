@@ -8,11 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
+using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
+
 // ReSharper disable UnusedAutoPropertyAccessor.Local
 // ReSharper disable ParameterOnlyUsedForPreconditionCheck.Local
 // ReSharper disable AccessToDisposedClosure

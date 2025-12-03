@@ -6,7 +6,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DuplicateFileFinderLib.IO;
+namespace DuplicateFileFinderLib.IO.Platforms;
 
 [SupportedOSPlatform("linux")]
 public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider

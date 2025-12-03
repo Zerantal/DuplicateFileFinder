@@ -3,7 +3,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Services;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using NLog;
 
 namespace DuplicateFileFinder.Gui.ViewModels;

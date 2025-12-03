@@ -2,7 +2,7 @@ using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {

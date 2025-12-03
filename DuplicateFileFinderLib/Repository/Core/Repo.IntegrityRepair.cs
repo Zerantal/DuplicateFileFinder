@@ -3,7 +3,7 @@
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
@@ -57,7 +57,7 @@ public sealed partial class Repo
             // ------------------------------------
             // 2. Fix RUN_ROOT_MISSING (recreate ScanRoots)
             // ------------------------------------
-            var rootsById = _scanRoots.ToDictionary(kv => kv.Key, kv => kv.Value);
+            var rootsById = Enumerable.ToDictionary<KeyValuePair<long, ScanRoot>, long, ScanRoot>(_scanRoots, kv => kv.Key, kv => kv.Value);
 
             for (int i = 0; i < _scanRuns.Count; i++)
             {
@@ -101,7 +101,7 @@ public sealed partial class Repo
             // ------------------------------------
             // 3. Bind ROOT_DIRID_EMPTY (ScanRoot.DirId)
             // ------------------------------------
-            foreach (var (id, root) in _scanRoots.ToArray())
+            foreach (var (id, root) in Enumerable.ToArray(_scanRoots))
             {
                 if (root.DirId != 0)
                     continue;
@@ -124,8 +124,8 @@ public sealed partial class Repo
                     if (string.IsNullOrEmpty(leafName))
                         leafName = canonical;
 
-                    var candidates = _dirs.Values
-                        .Where(d => string.Equals(d.Name, leafName, StringComparison.Ordinal))
+                    var candidates = Enumerable
+                        .Where(_dirs.Values, d => string.Equals(d.Name, leafName, StringComparison.Ordinal))
                         .Select(d => d.DirId)
                         .ToList();
 
@@ -207,7 +207,7 @@ public sealed partial class Repo
             // ------------------------------------
             // 5. Remove ScanRoots with no remaining runs
             // ------------------------------------
-            var runsByRootId = _scanRuns.GroupBy(r => r.ScanRootId)
+            var runsByRootId = Enumerable.GroupBy(_scanRuns, r => r.ScanRootId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             var newRoots = new Dictionary<long, ScanRoot>();
@@ -229,8 +229,8 @@ public sealed partial class Repo
             // ------------------------------------
             // 6. Deduplicate ScanRoots per RootPath
             // ------------------------------------
-            var rootsByPath = _scanRoots.Values
-                .GroupBy(r => r.RootPath, StringComparer.Ordinal)
+            var rootsByPath = Enumerable
+                .GroupBy<ScanRoot, string>(_scanRoots.Values, r => r.RootPath, StringComparer.Ordinal)
                 .ToList();
 
             var canonicalRoots   = new Dictionary<long, ScanRoot>();

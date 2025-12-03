@@ -7,7 +7,7 @@ using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.Services;
 using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinder.Gui.ViewModels;

@@ -2,12 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 using Xunit;
+using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
-namespace DuplicateFileFinderLibTests.Repository
+namespace DuplicateFileFinderLibTests.Repository.Core
 {
     public sealed class RepoTests : IDisposable
     {

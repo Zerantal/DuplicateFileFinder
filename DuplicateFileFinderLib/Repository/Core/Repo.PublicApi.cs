@@ -1,11 +1,12 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Util;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
@@ -251,7 +252,7 @@ public sealed partial class Repo
         var bytes = MemoryPackSerializer.Serialize(delta);
 
         await File.WriteAllBytesAsync(tmp, bytes, cancellationToken).ConfigureAwait(false);
-        Fsync(tmp); // TODO: Async versions of FSync?
+        Repo.Fsync(tmp); // TODO: Async versions of FSync?
         File.Move(tmp, final, true);
 
         long generation;
@@ -402,7 +403,7 @@ public sealed partial class Repo
             }
 
             // Collect the subtree of dirs under this root
-            var subtree = CollectDirSubtree(root.DirId, dirsSnapshot);
+            var subtree = Repo.CollectDirSubtree(root.DirId, dirsSnapshot);
 
             var dirRecs = subtree
                 .Select(id => dirsSnapshot[id])

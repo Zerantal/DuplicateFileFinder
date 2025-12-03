@@ -1,6 +1,8 @@
 using System.Threading.Channels;
+using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public abstract class ChannelRepoPlugin : IRepoPlugin
 {

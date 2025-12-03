@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.IO.Platforms;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.IO;
+namespace DuplicateFileFinderLibTests.IO.Platforms;
 
 [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility")]
 public sealed class LinuxVolumeInfoProviderTests

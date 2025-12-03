@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace DuplicateFileFinderLib.IO;
+namespace DuplicateFileFinderLib.IO.Platforms;
 
 // TODO: Testing / Validation
 

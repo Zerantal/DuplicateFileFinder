@@ -1,4 +1,6 @@
-namespace DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Core;
+
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IRepoEventSink
 {

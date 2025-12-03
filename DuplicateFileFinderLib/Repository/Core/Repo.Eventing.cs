@@ -1,4 +1,6 @@
-namespace DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
+
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {

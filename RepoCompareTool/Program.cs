@@ -1,4 +1,4 @@
-using DuplicateFileFinderLib.Repository;
+using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
 namespace RepoCompareTool;
 

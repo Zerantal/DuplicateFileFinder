@@ -1,9 +1,10 @@
 // DuplicateFileFinderLib/Repository/ScanSession.cs
 
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed class ScanSession : IScanSession
 {

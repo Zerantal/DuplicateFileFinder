@@ -1,6 +1,6 @@
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IHashIndexReadModel
 {

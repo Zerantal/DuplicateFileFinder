@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.Repository
+namespace DuplicateFileFinderLibTests.Repository.Plugins
 {
     public sealed class HashIndexPluginTests
     {

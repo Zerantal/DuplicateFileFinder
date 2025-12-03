@@ -1,4 +1,4 @@
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IRepoHost : IAsyncDisposable
 {

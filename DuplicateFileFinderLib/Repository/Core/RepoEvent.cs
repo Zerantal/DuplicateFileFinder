@@ -1,34 +1,6 @@
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
-
-// public enum RepoEventKind
-// {
-//     DeltaCommitted,
-//     ScanRunCompleted,
-//     Compacted,
-//     Opened 
-// }
-
-// public sealed record RepoEvent
-// {
-//     public required RepoEventKind Kind { get; init; }
-//
-//     // Common
-//     public required long Generation { get; init; }
-//     public required long NextLogSequence { get; init; }
-//
-//     // For DeltaCommitted
-//     public long? ScanSequence { get; init; }
-//     public RepoDelta? Delta { get; init; }
-//
-//     // For ScanRunCompleted
-//     public ScanRun? ScanRun { get; init; }
-//
-//     // For Opened / Compacted (optional: snapshot hook)
-//     public RepoViewSnapshot? Snapshot { get; init; }
-// }
-
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public abstract record RepoEvent
 {

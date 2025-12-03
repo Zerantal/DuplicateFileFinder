@@ -1,6 +1,8 @@
+using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class HashIndexPlugin() : ChannelRepoPlugin(capacity: 4096), IHashIndexReadModel
 {

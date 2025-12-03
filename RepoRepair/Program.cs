@@ -1,4 +1,4 @@
-﻿using DuplicateFileFinderLib.Repository;
+﻿using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
 var repo = await Repo.OpenAsync("/home/z/.local/share/DuplicateFileFinder/repo");
 

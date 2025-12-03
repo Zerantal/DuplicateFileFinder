@@ -1,4 +1,7 @@
-namespace DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins;
+
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed class RepoHost : IRepoHost
 {
@@ -17,7 +20,7 @@ public sealed class RepoHost : IRepoHost
     public static async Task<RepoHost> OpenAsync(string repoDir, CancellationToken ct = default)
     {
         // 1. Open the repo
-        var repo = await Repository.Repo.OpenAsync(repoDir, ct).ConfigureAwait(false);
+        var repo = await Core.Repo.OpenAsync(repoDir, ct).ConfigureAwait(false);
 
         // 2. Create plugins
         var hashIndex = new HashIndexPlugin();

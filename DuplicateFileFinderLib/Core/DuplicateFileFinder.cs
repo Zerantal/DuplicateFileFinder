@@ -3,8 +3,9 @@
 using System.Runtime.InteropServices;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.IO.Platforms;
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
 

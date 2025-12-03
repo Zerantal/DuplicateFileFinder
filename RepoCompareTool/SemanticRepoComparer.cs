@@ -1,5 +1,5 @@
 using System.Text.Json;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace RepoCompareTool;

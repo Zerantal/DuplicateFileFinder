@@ -3,7 +3,7 @@
 using Avalonia.Threading;
 using DuplicateFileFinder.Gui.ViewModels;
 using DuplicateFileFinder.Gui.Views;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;

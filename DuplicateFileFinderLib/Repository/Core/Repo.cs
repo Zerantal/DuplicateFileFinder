@@ -1,8 +1,9 @@
 // DuplicateFileFinderLib/Repo/Repo.cs
 
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 /// <summary>
 ///     The persistent database of all scanned files across all scan locations.
