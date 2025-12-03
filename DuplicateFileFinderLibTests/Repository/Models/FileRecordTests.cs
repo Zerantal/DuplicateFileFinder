@@ -26,7 +26,7 @@ public sealed class FileRecordTests
                 Hash = hashKey,
                 Modified = new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero),
                 Created = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero),
-                SeenDuringSeenScanRunId = 99,
+                LastSeenScanSequence = 99,
                 Status = ScanEntryStatus.Hashed,
                 ErrorMessage = "some error"
             };
@@ -41,7 +41,7 @@ public sealed class FileRecordTests
             Assert.Equal(original.Hash, roundTripped.Hash);
             Assert.Equal(original.Modified, roundTripped.Modified);
             Assert.Equal(original.Created, roundTripped.Created);
-            Assert.Equal(original.SeenDuringSeenScanRunId, roundTripped.SeenDuringSeenScanRunId);
+            Assert.Equal(original.LastSeenScanSequence, roundTripped.LastSeenScanSequence);
             Assert.Equal(original.Status, roundTripped.Status);
             Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
         }

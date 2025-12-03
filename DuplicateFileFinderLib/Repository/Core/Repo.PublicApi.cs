@@ -1,16 +1,21 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Util;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
     internal RepoMeta Meta { get; private set; } = null!;
 
+    // Public read-only views
+    public IReadOnlyList<ScanRoot> ScanRootsView => _scanRoots.Values.ToList();
+    public IReadOnlyList<ScanRun> ScanRunsView => _scanRuns;
+    
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -61,96 +66,49 @@ public sealed partial class Repo
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
-
-    // Public read-only views
-    public IReadOnlyList<ScanRoot> ScanRootsView => _scanRoots.Values.ToList();
-    public IReadOnlyList<ScanRun> ScanRunsView => _scanRuns;
-
-    /// <summary>
-    ///     Returns all duplicate groups (files that share a hash, with group size >= 2).
-    /// </summary>
-    public IReadOnlyList<IReadOnlyList<FileRecord>> GetDuplicateGroups()
-    {
-        // Strategy:
-        // 1. Copy a shallow view of hash -> fileIds under lock (cheap vs full snapshot).
-        // 2. Resolve fileIds to FileRecord outside lock via a local helper, still locking briefly.
-
-        Dictionary<HashKey, List<long>> hashToIds;
-        lock (_sync)
-        {
-            hashToIds = new Dictionary<HashKey, List<long>>(_fileHashIndex.Count);
-            foreach (var kv in _fileHashIndex)
-            {
-                // Only consider candidates with possible duplicates
-                if (kv.Value.Count < 2)
-                    continue;
-
-                hashToIds[kv.Key] = new List<long>(kv.Value);
-            }
-        }
-
-        var groups = new List<IReadOnlyList<FileRecord>>();
-
-        foreach (var kv in hashToIds)
-        {
-            var ids = kv.Value;
-            if (ids.Count < 2)
-                continue;
-
-            var files = new List<FileRecord>(ids.Count);
-
-            lock (_sync)
-            {
-                foreach (var id in ids)
-                    if (_files.TryGetValue(id, out var file))
-                        files.Add(file);
-            }
-
-            if (files.Count >= 2)
-                groups.Add(files);
-        }
-
-        return groups;
-    }
-
+    
     public RepoViewSnapshot GetSnapshot()
     {
         lock (_sync)
         {
-            var files = new Dictionary<long, FileRecord>(_files);
-            var dirs = new Dictionary<long, DirRecord>(_dirs);
-            var hashIndex = BuildHashIndex(files);
-
-            return new RepoViewSnapshot
-            {
-                Files = files,
-                Dirs = dirs,
-                HashIndex = hashIndex
-            };
+            return CreateSnapshot_NoLock();
         }
     }
+
+    private RepoViewSnapshot CreateSnapshot_NoLock()
+    {
+        var files = new Dictionary<long, FileRecord>(_files);
+        var dirs = new Dictionary<long, DirRecord>(_dirs);
+
+        return new RepoViewSnapshot
+        {
+            Files = files,
+            Dirs = dirs
+        };
+    }
+    
 
     public void RemoveScanRoot(string rootPath)
     {
         rootPath = PathUtils.NormalizePath(rootPath);
         var snap = GetSnapshot();
 
-        var dirsToDelete = new List<DirTombstone>();
-        var filesToDelete = new List<FileTombstone>();
+        var dirsToDelete = new List<DirRecord>();
+        var filesToDelete = new List<FileRecord>();
 
         var seq = AllocateRunId();
         foreach (var dir in snap.Dirs.Values)
         {
             var dirPath = GetFullDirPath(dir.DirId);
             var normalized = PathUtils.NormalizePath(dirPath);
-            if (normalized.StartsWith(rootPath, PathUtils.PathComparison)) dirsToDelete.Add(new DirTombstone(dir.DirId, seq));
+            if (normalized.StartsWith(rootPath, PathUtils.PathComparison)) dirsToDelete.Add(dir);
         }
 
         foreach (var file in snap.Files.Values)
         {
             var dirPath = GetFullDirPath(file.DirId);
             var full = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
-            if (full.StartsWith(rootPath, PathUtils.PathComparison)) filesToDelete.Add(new FileTombstone(file.FileId, seq));
+            if (full.StartsWith(rootPath, PathUtils.PathComparison)) filesToDelete.Add(file);
         }
 
         if (dirsToDelete.Count == 0 && filesToDelete.Count == 0)
@@ -158,11 +116,9 @@ public sealed partial class Repo
 
         var delta = new RepoDelta
         {
-            RunId = seq,
-            Dirs = new List<DirRecord>(),
-            Files = new List<FileRecord>(),
-            DeletedDirs = dirsToDelete,
-            DeletedFiles = filesToDelete
+            ScanSequence = seq,
+            Dirs = dirsToDelete,
+            Files = filesToDelete
         };
 
         CommitDelta(delta);
@@ -229,9 +185,9 @@ public sealed partial class Repo
                     var rootDir = new DirRecord
                     {
                         DirId = rootDirId,
-                        ParentId = null,
+                        ParentDirId = null,
                         Name = name,
-                        SeenDuringScanRunId = runId,
+                        LastSeenScanSequence = runId,
                         Status = ScanEntryStatus.None, // “known root, not yet enumerated”
                         ErrorMessage = null
                     };
@@ -244,7 +200,7 @@ public sealed partial class Repo
                     // Build a tiny delta to persist the root dir
                     rootDelta = new RepoDelta
                     {
-                        RunId = runId,
+                        ScanSequence = runId,
                         Dirs = new List<DirRecord> { rootDir }
                     };
                 }
@@ -256,7 +212,7 @@ public sealed partial class Repo
             run = new ScanRun
             {
                 ScanRootId = scanRoot.RootId,
-                ScanRunId = runId,
+                ScanSequence = runId,
                 RootPath = normalizedRootPath,
                 StartedAt = DateTimeOffset.UtcNow,
                 FinishedAt = null,
@@ -296,15 +252,34 @@ public sealed partial class Repo
         var bytes = MemoryPackSerializer.Serialize(delta);
 
         await File.WriteAllBytesAsync(tmp, bytes, cancellationToken).ConfigureAwait(false);
-        Fsync(tmp); // TODO: Async versions of FSync?
+        Repo.Fsync(tmp); // TODO: Async versions of FSync?
         File.Move(tmp, final, true);
 
+        long generation;
+        long nextLogSequence;
         lock (_sync)
         {
-            ApplyDelta(delta);   
+            generation = Meta.Generation;
+            nextLogSequence = Meta.NextLogSequence;
+            ApplyDelta_NoLock(delta);   
         }
+
+        OnDeltaCommitted(generation, nextLogSequence, delta);
+        
     }
 
+    private void OnDeltaCommitted(long generation, long nextLogSequence, RepoDelta delta)
+    {
+        var evt = new DeltaCommittedEvent
+        {
+            Generation      = generation,
+            NextLogSequence = nextLogSequence,
+            ScanSequence    = delta.ScanSequence,
+            Delta           = delta
+        };
+
+        PublishEvent(evt);
+    }
 
     public void SaveScanSnapshots()
     {
@@ -331,7 +306,7 @@ public sealed partial class Repo
         {
             parts.Add(cursor.Name);
 
-            if (cursor.ParentId is { } parentId)
+            if (cursor.ParentDirId is { } parentId)
             {
                 if (!_dirs.TryGetValue(parentId, out cursor))
                     // Console.WriteLine($"parentId {parentId} not found in repo. Dir = {node}");
@@ -341,6 +316,13 @@ public sealed partial class Repo
             }
             else
             {
+                // root path from scan root
+                var scanRoot = _scanRoots.Values.FirstOrDefault(r => r.DirId == cursor.DirId);
+                if (scanRoot is not null)
+                {
+                    parts.AddRange(scanRoot.RootPath.Split('/', StringSplitOptions.RemoveEmptyEntries)[..^1].Reverse());
+                }
+
                 break;
             }
         }
@@ -421,7 +403,7 @@ public sealed partial class Repo
             }
 
             // Collect the subtree of dirs under this root
-            var subtree = CollectDirSubtree(root.DirId, dirsSnapshot);
+            var subtree = Repo.CollectDirSubtree(root.DirId, dirsSnapshot);
 
             var dirRecs = subtree
                 .Select(id => dirsSnapshot[id])
@@ -457,8 +439,7 @@ public sealed partial class Repo
                 LastSnapshottedLogSequence = nextLogSeq - 1,
                 LastCompaction = DateTimeOffset.UtcNow
             };
-
-            SyncMetaFile_NoLock();
+            
             SaveMeta_NoLock();
         }
 
@@ -480,6 +461,31 @@ public sealed partial class Repo
                 // Best-effort: ignore IO errors during cleanup
             }
         }
+
+        OnCompacted();
+    }
+
+    private void OnCompacted()
+    {
+        long generation;
+        long nextLogSeq;
+        RepoViewSnapshot snapshot;
+        
+        lock (_sync)
+        {
+            generation = Meta.Generation;
+            nextLogSeq = Meta.NextLogSequence;
+            snapshot = CreateSnapshot_NoLock();
+        }
+
+        var evt = new CompactedEvent
+        {
+            Generation      = generation,
+            NextLogSequence = nextLogSeq,
+            Snapshot        = snapshot
+        };
+
+        PublishEvent(evt);
     }
 
     
@@ -507,7 +513,7 @@ public sealed partial class Repo
                     RepoId = Guid.NewGuid(),
                     RepoPath = repoPath,
                     RepoHostName = Environment.MachineName,
-                    NextScanRunId = 0
+                    NextScanSequence = 0
                 },
                 ScanRoots = new List<ScanRoot>(),
                 ScanRuns = new List<ScanRun>()
@@ -524,35 +530,10 @@ public sealed partial class Repo
 
             TimingLog.Counter("files", repo._files.Count);
             TimingLog.Counter("dirs", repo._dirs.Count);
-            TimingLog.Counter("HashIndex", repo._fileHashIndex.Count);
         }
-
+        
         return repo;
     }
-
-    private static IReadOnlyDictionary<HashKey, IReadOnlyList<long>> BuildHashIndex(
-        IReadOnlyDictionary<long, FileRecord> files)
-    {
-        var result = new Dictionary<HashKey, List<long>>();
-
-        foreach (var f in files.Values)
-        {
-            if (!f.Hash.IsComputed)
-                continue;
-
-            if (!result.TryGetValue(f.Hash, out var list))
-            {
-                list = new List<long>();
-                result[f.Hash] = list;
-            }
-
-            list.Add(f.FileId);
-        }
-
-        // Convert lists to IReadOnlyList
-        return result.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<long>)kv.Value);
-    }
-
     
     private async Task<bool> ShouldCompactAsync(RepoCompactionPolicy policy)
     {

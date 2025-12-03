@@ -7,7 +7,7 @@ using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.FileSystem;
+namespace DuplicateFileFinderLibTests.IO;
 
 
 public sealed class FileEnumeratorTests : IDisposable

@@ -2,12 +2,12 @@
 
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IScanSession : IAsyncDisposable
 {
     ScanRun Run { get; }
-    long RunId { get; }
+    long ScanSequence { get; }
     string RootPath { get; }
 
     /// <summary>
@@ -49,14 +49,14 @@ public interface IScanSession : IAsyncDisposable
     /// The implementation is responsible for emitting appropriate tombstones
     /// in its RepoDelta.
     /// </summary>
-    void MarkDirectoryDeleted(long dirId);
+    void MarkDirectoryDeleted(DirRecord dir);
 
     /// <summary>
     /// Mark an existing file as deleted in this scan.
     /// The implementation is responsible for emitting appropriate tombstones
     /// in its RepoDelta.
     /// </summary>
-    void MarkFileDeleted(long fileId);
+    void MarkFileDeleted(FileRecord file);
 
     Task FlushProgressAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);

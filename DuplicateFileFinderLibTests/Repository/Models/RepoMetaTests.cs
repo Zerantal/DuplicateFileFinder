@@ -21,7 +21,7 @@ public sealed class RepoMetaTests
             RepoId = repoId,
             RepoPath = "/repo/path",
             RepoHostName = "host-name",
-            NextScanRunId = 20
+            NextScanSequence = 20
         };
 
         var bytes = MemoryPackSerializer.Serialize(original);
@@ -35,6 +35,6 @@ public sealed class RepoMetaTests
         Assert.Equal(original.RepoId, roundTripped.RepoId);
         Assert.Equal(original.RepoPath, roundTripped.RepoPath);
         Assert.Equal(original.RepoHostName, roundTripped.RepoHostName);
-        Assert.Equal(original.NextScanRunId, roundTripped.NextScanRunId);
+        Assert.Equal(original.NextScanSequence, roundTripped.NextScanSequence);
     }
 }

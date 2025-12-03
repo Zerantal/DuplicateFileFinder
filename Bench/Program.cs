@@ -1,8 +1,8 @@
 ﻿using Bench;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository;
 using NLog;
+using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
 var log = LogManager.GetCurrentClassLogger();
 var root = args.Length > 1 && args[0] == "--root" ? args[1] : args.FirstOrDefault() ?? ".";

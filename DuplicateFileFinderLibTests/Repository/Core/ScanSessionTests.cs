@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using DuplicateFileFinderLib.Repository;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using Xunit;
+using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
-namespace DuplicateFileFinderLibTests.Repository;
+namespace DuplicateFileFinderLibTests.Repository.Core;
 
 public sealed class ScanSessionTests : IDisposable
 {
@@ -97,18 +98,18 @@ public sealed class ScanSessionTests : IDisposable
 
         var dir = dirs[0];
         Assert.Equal("root", dir.Name);
-        Assert.Equal(session.RunId, dir.SeenDuringScanRunId);
+        Assert.Equal(session.ScanSequence, dir.LastSeenScanSequence);
 
         var files = snapshot.Files.Values.ToList();
         Assert.Single(files);
 
         var file = files[0];
         Assert.Equal("file.txt", file.Name);
-        Assert.Equal(session.RunId, file.SeenDuringSeenScanRunId);
+        Assert.Equal(session.ScanSequence, file.LastSeenScanSequence);
 
         // ScanRun should exist and still be InProgress
         var run = Assert.Single(repo.ScanRunsView);
-        Assert.Equal(session.RunId, run.ScanRunId);
+        Assert.Equal(session.ScanSequence, run.ScanSequence);
         Assert.Equal(ScanRunStatus.InProgress, run.Status);
 
         await session.DisposeAsync();
@@ -138,18 +139,18 @@ public sealed class ScanSessionTests : IDisposable
         var rootDir = new DirRecord
         {
             DirId = rootDirId,
-            ParentId = null,
+            ParentDirId = null,
             Name = "root",
-            SeenDuringScanRunId = seq,
+            LastSeenScanSequence = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
         var subDir = new DirRecord
         {
             DirId = subDirId,
-            ParentId = rootDirId,
+            ParentDirId = rootDirId,
             Name = "sub",
-            SeenDuringScanRunId = seq,
+            LastSeenScanSequence = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -162,14 +163,14 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            SeenDuringSeenScanRunId = seq,
+            LastSeenScanSequence = seq,
             Status = ScanEntryStatus.Enumerated
         };
 
         var scanSeq = (repo as Repo)!.AllocateLogId();
         await repo.CommitDeltaAsync(new RepoDelta
         {
-            RunId = scanSeq,
+            ScanSequence = scanSeq,
             Dirs = [rootDir, subDir],
             Files = [oldFile]
         }, TestContext.Current.CancellationToken);
@@ -213,7 +214,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.False(snapshot2.Files.ContainsKey(oldFileId));
 
         // ScanRun should be marked Completed for this sequence.
-        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanSequence == session.ScanSequence);
         Assert.Equal(ScanRunStatus.Completed, run.Status);
     }
 
@@ -238,9 +239,9 @@ public sealed class ScanSessionTests : IDisposable
         var dir = new DirRecord
         {
             DirId = dirId,
-            ParentId = null,
+            ParentDirId = null,
             Name = "root",
-            SeenDuringScanRunId = 1,
+            LastSeenScanSequence = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -253,13 +254,13 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            SeenDuringSeenScanRunId = 1,
+            LastSeenScanSequence = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
         await repo.CommitDeltaAsync(new RepoDelta
         {
-            RunId = 1,
+            ScanSequence = 1,
             Dirs = [dir],
             Files = [file]
         }, TestContext.Current.CancellationToken);
@@ -283,7 +284,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.True(snapshot2.Files.ContainsKey(fileId));
 
         // ScanRun for this sequence should be Failed or Cancelled.
-        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanSequence == session.ScanSequence);
         Assert.True(run.Status == ScanRunStatus.Failed || run.Status == ScanRunStatus.Cancelled);
         Assert.Equal("cancelled", run.ErrorMessage);
     }
@@ -310,9 +311,9 @@ public sealed class ScanSessionTests : IDisposable
         var dir = new DirRecord
         {
             DirId =dirId,
-            ParentId = null,
+            ParentDirId = null,
             Name = "root",
-            SeenDuringScanRunId = 1,
+            LastSeenScanSequence = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
@@ -325,13 +326,13 @@ public sealed class ScanSessionTests : IDisposable
             Hash = hash,
             Modified = DateTimeOffset.UtcNow,
             Created = DateTimeOffset.UtcNow,
-            SeenDuringSeenScanRunId = 1,
+            LastSeenScanSequence = 1,
             Status = ScanEntryStatus.Enumerated
         };
 
         await repo.CommitDeltaAsync(new RepoDelta
         {
-            RunId = 1,
+            ScanSequence = 1,
             Dirs = [dir],
             Files = [file]
         }, TestContext.Current.CancellationToken);
@@ -353,7 +354,7 @@ public sealed class ScanSessionTests : IDisposable
         Assert.True(snapshot2.Files.ContainsKey(fileId));
 
         // ScanRun for this sequence should not be InProgress anymore.
-        var run = Assert.Single(repo.ScanRunsView, r => r.ScanRunId == session.RunId);
+        var run = Assert.Single(repo.ScanRunsView, r => r.ScanSequence == session.ScanSequence);
         Assert.NotEqual(ScanRunStatus.InProgress, run.Status);
     }
 

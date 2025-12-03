@@ -5,13 +5,14 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace DuplicateFileFinderLib.IO;
+namespace DuplicateFileFinderLib.IO.Platforms;
 
 // TODO: Testing / Validation
 
 [SupportedOSPlatform("windows")]
 public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
 {
+    // ReSharper disable once ReturnTypeCanBeNotNullable
     public VolumeInfo? GetVolumeInfoForPath(string rootPath)
     {
         if (string.IsNullOrWhiteSpace(rootPath))

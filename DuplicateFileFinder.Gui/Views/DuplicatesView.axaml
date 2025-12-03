@@ -23,7 +23,8 @@
                   Grid.Column="0"
                   ItemsSource="{Binding FolderRoots}"
                   SelectionChanged="OnFolderSelected"
-                  SelectionMode="Single">
+                  SelectionMode="Single"
+                  FontFamily="monospace">
             <TreeView.Styles>
                 <!-- Bind the container's IsExpanded to the VM's IsExpanded -->
                 <Style Selector="TreeViewItem"
@@ -34,7 +35,8 @@
             <TreeView.ItemTemplate>
                 <TreeDataTemplate DataType="vm:FolderNodeViewModel"
                                   ItemsSource="{Binding Children}">
-                    <TextBlock Text="{Binding DisplayName}">
+                    <TextBlock Text="{Binding DisplayName}"
+                               FontFamily="monospace">
                         <TextBlock.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Quick rescan"
@@ -80,7 +82,8 @@
 
                 <!-- Virtualized rows -->
                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Auto">
+                              VerticalScrollBarVisibility="Auto"
+                              FontFamily="monospace">
                     <ItemsRepeater ItemsSource="{Binding FilteredSets}">
                         <ItemsRepeater.Layout>
                             <StackLayout Orientation="Vertical"
@@ -107,7 +110,8 @@
                                         </Style>
                                     </controls:SelectableBorder.Styles>
 
-                                    <Grid ColumnDefinitions="2*,80,140">
+                                    <Grid ColumnDefinitions="2*,80,140"
+                                          Margin="0,0,16,0">
                                         <TextBlock Grid.Column="0"
                                                    Text="{Binding RepresentativeName}"
                                                    TextTrimming="CharacterEllipsis" />
@@ -134,7 +138,8 @@
                         IsReadOnly="True"
                         AutoGenerateColumns="False"
                         HeadersVisibility="Column"
-                        Margin="0,6,0,0">
+                        Margin="0,6,0,0"
+                        FontFamily="monospace">
             <dgrid:DataGrid.Columns>
                 <dgrid:DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
                 <dgrid:DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*" />

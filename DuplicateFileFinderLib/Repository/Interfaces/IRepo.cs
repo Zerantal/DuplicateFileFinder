@@ -1,7 +1,7 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
 
-namespace DuplicateFileFinderLib.Repository;
+namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {
@@ -22,10 +22,4 @@ public interface IRepo : IDisposable, IAsyncDisposable
     string GetFullDirPath(long dirId);
     
     void RemoveScanRoot(string rootPath);
-
-    /// <summary>
-    /// Returns all duplicate groups in the repo:
-    /// each group is a list of files that share the same hash and group size >= 2.
-    /// </summary>
-    IReadOnlyList<IReadOnlyList<FileRecord>> GetDuplicateGroups();
 }
