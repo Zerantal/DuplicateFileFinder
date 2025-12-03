@@ -11,17 +11,13 @@ public sealed class RepoDeltaTests
         [Fact]
         public void RepoDelta_DefaultLists_AreNonNullAndEmpty()
         {
-            var delta = new RepoDelta {RunId = 99};
+            var delta = new RepoDelta {ScanSequence = 99};
 
             Assert.NotNull(delta.Files);
             Assert.NotNull(delta.Dirs);
-            Assert.NotNull(delta.DeletedFiles);
-            Assert.NotNull(delta.DeletedDirs);
 
             Assert.Empty(delta.Files);
             Assert.Empty(delta.Dirs);
-            Assert.Empty(delta.DeletedFiles);
-            Assert.Empty(delta.DeletedDirs);
         }
 
         [Fact]
@@ -39,9 +35,9 @@ public sealed class RepoDeltaTests
             var dir = new DirRecord
             {
                 DirId = dirId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -55,7 +51,7 @@ public sealed class RepoDeltaTests
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -69,21 +65,19 @@ public sealed class RepoDeltaTests
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Hashed,
                 ErrorMessage = "err"
             };
 
-            var tombFile = new FileTombstone(fileId1, 5);
-            var tombDir = new DirTombstone(dirId, 5);
+            var tombFile = file1 with { Status = ScanEntryStatus.Deleted };
+            var tombDir = dir with { Status = ScanEntryStatus.Deleted };
 
             var original = new RepoDelta
             {
-                Files = new List<FileRecord> { file1, file2 },
-                Dirs = new List<DirRecord> { dir },
-                DeletedFiles = new List<FileTombstone> { tombFile },
-                DeletedDirs = new List<DirTombstone> { tombDir },
-                RunId = scanSequence
+                Files = new List<FileRecord> { file1, file2, tombFile },
+                Dirs = new List<DirRecord> { dir, tombDir },
+                ScanSequence = scanSequence
             };
 
             var bytes = MemoryPackSerializer.Serialize(original);
@@ -91,14 +85,10 @@ public sealed class RepoDeltaTests
 
             Assert.Equal(original.Files.Count, roundTripped.Files.Count);
             Assert.Equal(original.Dirs.Count, roundTripped.Dirs.Count);
-            Assert.Equal(original.DeletedFiles.Count, roundTripped.DeletedFiles.Count);
-            Assert.Equal(original.DeletedDirs.Count, roundTripped.DeletedDirs.Count);
-            Assert.Equal(original.RunId, roundTripped.RunId);
+            Assert.Equal(original.ScanSequence, roundTripped.ScanSequence);
 
             Assert.Contains(roundTripped.Files, f => f.FileId == fileId1);
             Assert.Contains(roundTripped.Files, f => f.FileId == fileId2);
             Assert.Contains(roundTripped.Dirs, d => d.DirId == dirId);
-            Assert.Contains(roundTripped.DeletedFiles, t => t.FileId == fileId1);
-            Assert.Contains(roundTripped.DeletedDirs, t => t.DirId == dirId);
         }
     }

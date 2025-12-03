@@ -12,6 +12,7 @@ namespace DuplicateFileFinderLib.IO;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
 {
+    // ReSharper disable once ReturnTypeCanBeNotNullable
     public VolumeInfo? GetVolumeInfoForPath(string rootPath)
     {
         if (string.IsNullOrWhiteSpace(rootPath))

@@ -10,7 +10,7 @@ public sealed partial class Repo
     /// <summary>
     /// One-off repair for migrated / messy repos.
     /// It:
-    /// - Promotes dirs whose ParentId is missing to roots.
+    /// - Promotes dirs whose ParentDirId is missing to roots.
     /// - Recreates missing ScanRoots for ScanRuns.
     /// - Binds ScanRoot.DirId (creating dummy root dirs as needed).
     /// - Removes ScanRuns that are not referenced by any Dir/File record.
@@ -42,10 +42,10 @@ public sealed partial class Repo
 
             foreach (var (id, dir) in _dirs)
             {
-                if (dir.ParentId is { } pid && !knownDirIds.Contains(pid))
+                if (dir.ParentDirId is { } pid && !knownDirIds.Contains(pid))
                 {
                     // Parent is missing: promote this directory to a root.
-                    var fixedDir = dir with { ParentId = null };
+                    var fixedDir = dir with { ParentDirId = null };
                     newDirs[id]  = fixedDir;
                     changedDirs  = true;
                 }
@@ -148,9 +148,9 @@ public sealed partial class Repo
                     var newRootDir = new DirRecord
                     {
                         DirId            = newDirId,
-                        ParentId         = null,
+                        ParentDirId         = null,
                         Name             = leafName,
-                        SeenDuringScanRunId = 0,
+                        LastSeenScanSequence = 0,
                         Status           = ScanEntryStatus.None,
                         ErrorMessage     = null
                     };
@@ -174,21 +174,21 @@ public sealed partial class Repo
             var usedSequences = new HashSet<long>();
             foreach (var d in _dirs.Values)
             {
-                if (d.SeenDuringScanRunId > 0)
-                    usedSequences.Add(d.SeenDuringScanRunId);
+                if (d.LastSeenScanSequence > 0)
+                    usedSequences.Add(d.LastSeenScanSequence);
             }
 
             foreach (var f in _files.Values)
             {
-                if (f.SeenDuringSeenScanRunId > 0)
-                    usedSequences.Add(f.SeenDuringSeenScanRunId);
+                if (f.LastSeenScanSequence > 0)
+                    usedSequences.Add(f.LastSeenScanSequence);
             }
 
             var keptRuns      = new List<ScanRun>();
 
             foreach (var run in _scanRuns)
             {
-                if (!usedSequences.Contains(run.ScanRunId))
+                if (!usedSequences.Contains(run.ScanSequence))
                 {
                     changedScanRuns = true;
                     continue;
@@ -201,7 +201,7 @@ public sealed partial class Repo
             {
                 _scanRuns    = keptRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in keptRuns) _scanRunIndex.Add(run.ScanRunId, run);
+                foreach (var run in keptRuns) _scanRunIndex.Add(run.ScanSequence, run);
             }
 
             // ------------------------------------
@@ -291,7 +291,7 @@ public sealed partial class Repo
 
                 _scanRuns     = newRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in newRuns) _scanRunIndex.Add(run.ScanRunId, run);
+                foreach (var run in newRuns) _scanRunIndex.Add(run.ScanSequence, run);
                 changedScanRuns = true;
             }
 
@@ -307,27 +307,25 @@ public sealed partial class Repo
             if (Directory.Exists(rootsDirPath))
             {
                 var validRootIds = new HashSet<long>(_scanRoots.Keys);
-
-                throw new NotImplementedException("TODO");
                 
-                // foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
-                // {
-                //     var name = Path.GetFileNameWithoutExtension(path);
-                //     if (!Guid.TryParseExact(name, "N", out var id))
-                //         continue;
-                //
-                //     if (!validRootIds.Contains(id))
-                //     {
-                //         try
-                //         {
-                //             File.Delete(path);
-                //         }
-                //         catch
-                //         {
-                //             // ignore IO errors in repair
-                //         }
-                //     }
-                // }
+                foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
+                {
+                    var name = Path.GetFileNameWithoutExtension(path);
+                    if (!long.TryParse(name, out var id))
+                        continue;
+                
+                    if (!validRootIds.Contains(id))
+                    {
+                        try
+                        {
+                            File.Delete(path);
+                        }
+                        catch
+                        {
+                            // ignore IO errors in repair
+                        }
+                    }
+                }
             }
 
             // ------------------------------------

@@ -138,13 +138,13 @@ public sealed partial class Repo
 
         foreach (var dir in dirs.Values)
         {
-            if (dir.ParentId is { } parentId && !dirs.ContainsKey(parentId))
+            if (dir.ParentDirId is { } parentId && !dirs.ContainsKey(parentId))
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "DIR_PARENT_MISSING",
-                    Message = $"Dir {dir.DirId} ('{dir.Name}') has missing ParentId {parentId}."
+                    Message = $"Dir {dir.DirId} ('{dir.Name}') has missing ParentDirId {parentId}."
                 });
             }
         }
@@ -179,17 +179,17 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "RUN_ROOT_MISSING",
-                    Message = $"ScanRun {run.ScanRunId} references missing ScanRootId {run.ScanRootId}."
+                    Message = $"ScanRun {run.ScanSequence} references missing ScanRootId {run.ScanRootId}."
                 });
             }
 
-            if (run.ScanRunId >= meta.NextScanRunId)
+            if (run.ScanSequence >= meta.NextScanSequence)
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "RUN_SEQUENCE_OUT_OF_RANGE",
-                    Message = $"ScanRun {run.ScanRunId} >= NextScanRunId {meta.NextScanRunId}."
+                    Message = $"ScanRun {run.ScanSequence} >= NextScanSequence {meta.NextScanSequence}."
                 });
             }
         }
@@ -241,25 +241,25 @@ public sealed partial class Repo
         var usedSequences = new HashSet<long>();
         foreach (var d in dirs.Values)
         {
-            if (d.SeenDuringScanRunId > 0)
-                usedSequences.Add(d.SeenDuringScanRunId);
+            if (d.LastSeenScanSequence > 0)
+                usedSequences.Add(d.LastSeenScanSequence);
         }
 
         foreach (var f in files.Values)
         {
-            if (f.SeenDuringSeenScanRunId > 0)
-                usedSequences.Add(f.SeenDuringSeenScanRunId);
+            if (f.LastSeenScanSequence > 0)
+                usedSequences.Add(f.LastSeenScanSequence);
         }
 
         foreach (var run in scanRuns)
         {
-            if (!usedSequences.Contains(run.ScanRunId))
+            if (!usedSequences.Contains(run.ScanSequence))
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Info,
                     Code     = "RUN_ORPHAN_NO_REFERENCES",
-                    Message  = $"ScanRun {run.ScanRunId} (rootPath={run.RootPath}) is not referenced by any DirRecord/FileRecord."
+                    Message  = $"ScanRun {run.ScanSequence} (rootPath={run.RootPath}) is not referenced by any DirRecord/FileRecord."
                 });
             }
         }
@@ -366,24 +366,23 @@ public sealed partial class Repo
 
         if (Directory.Exists(rootsDirPath))
         {
-            throw new NotImplementedException("Fix, once I know how the file names will be constructed");
             foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
-                // if (Guid.TryParseExact(fileName, "N", out var id))
-                // {
-                //     snapshotFilesById[id] = path;
-                // }
-                // else
-                // {
-                //     issues.Add(new RepoIntegrityIssue
-                //     {
-                //         Severity = RepoIntegritySeverity.Warning,
-                //         Code     = "ROOT_SNAPSHOT_BAD_NAME",
-                //         Message  = $"Snapshot file '{fileName}' does not parse as Guid in 'N' format.",
-                //         FilePath = path
-                //     });
-                // }
+                if (long.TryParse(fileName, out var id))
+                {
+                    snapshotFilesById[id] = path;
+                }
+                else
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Warning,
+                        Code     = "ROOT_SNAPSHOT_BAD_NAME",
+                        Message  = $"Snapshot file '{fileName}' does not parse as Guid in 'N' format.",
+                        FilePath = path
+                    });
+                }
             }
         }
 
@@ -587,14 +586,16 @@ public sealed partial class Repo
         IDictionary<long, FileRecord> files)
     {
         foreach (var d in delta.Dirs)
-            dirs[d.DirId] = d;
-        foreach (var x in delta.DeletedDirs)
-            dirs.Remove(x.DirId);
+            if (d.Status == ScanEntryStatus.Deleted)
+                dirs.Remove(d.DirId);
+            else
+                dirs[d.DirId] = d;
 
         foreach (var f in delta.Files)
-            files[f.FileId] = f;
-        foreach (var x in delta.DeletedFiles)
-            files.Remove(x.FileId);
+            if (f.Status == ScanEntryStatus.Deleted)
+                files.Remove(f.FileId);
+            else
+                files[f.FileId] = f;
     }
 
     private static void CompareState<T>(
@@ -655,7 +656,7 @@ public sealed partial class Repo
             return;
         }
 
-        if (dir.ParentId is { } parentId && dirs.ContainsKey(parentId))
+        if (dir.ParentDirId is { } parentId && dirs.ContainsKey(parentId))
         {
             if (!visited.Contains(parentId))
                 DetectDirCycle(parentId, dirs, visited, visiting, issues);

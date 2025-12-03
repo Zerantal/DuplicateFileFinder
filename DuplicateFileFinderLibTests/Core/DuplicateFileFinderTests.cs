@@ -125,7 +125,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         private long _dirCounter = 1;
         public ScanRun Run { get; } = new()
         {
-            ScanRunId = 1,
+            ScanSequence = 1,
             RootPath = rootPath,
             StartedAt = DateTimeOffset.UtcNow,
             Status = ScanRunStatus.InProgress,
@@ -133,9 +133,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             Mode = ScanMode.Full
         };
 
-        public long RunId { get; }
-
-        public long ScanSequence => Run.ScanRunId;
+        public long ScanSequence => Run.ScanSequence;
         public string RootPath => Run.RootPath;
 
         public readonly List<ObservedDir> ObservedDirectories = new();
@@ -181,17 +179,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
                     errorMessage));
         }
 
-        public void MarkDirectoryDeleted(long dirId)
+        public void MarkDirectoryDeleted(DirRecord dir)
         {
             throw new NotImplementedException();
         }
 
-        public void MarkFileDeleted(long fileId)
-        {
-            throw new NotImplementedException();
-        }
-
-        public void MarkFileDeleted(Guid fileId)
+        public void MarkFileDeleted(FileRecord file)
         {
             throw new NotImplementedException();
         }
@@ -681,14 +674,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             filesByPath1.Keys,
             p => PathUtils.IsSamePath(p, deletePath));
 
-        var deleteRecord1 = filesByPath1.Single(kv => PathUtils.IsSamePath(kv.Key, deletePath)).Value;
-        var deleteHash    = deleteRecord1.Hash;
-
-        // Hash index should include the deleted file's hash initially
-        Assert.True(
-            snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore)
-            && idsBefore.Contains(deleteRecord1.FileId));
-
         // Act: delete the file on disk and rescan the same root
         File.Delete(deletePath);
 
@@ -704,11 +689,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         Assert.DoesNotContain(
             filesByPath2.Keys,
             p => PathUtils.IsSamePath(p, deletePath));
-
-        // Hash index should no longer reference the deleted file's hash
-        Assert.False(
-            snap2.HashIndex.TryGetValue(deleteHash, out var idsAfter)
-            && idsAfter.Count > 0);
     }
     
     [Fact]
@@ -877,14 +857,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
         Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, deletePath));
 
-        var deleteRecord1 = files1.Single(kv => PathUtils.IsSamePath(kv.Key, deletePath)).Value;
-        var deleteHash    = deleteRecord1.Hash;
-
-        // Hash index contains deleted file initially
-        Assert.True(
-            snap1.HashIndex.TryGetValue(deleteHash, out var idsBefore) &&
-            idsBefore.Contains(deleteRecord1.FileId));
-
         // Delete file on disk
         File.Delete(deletePath);
 
@@ -897,11 +869,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Assert: kept file remains, deleted file gone
         Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
         Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, deletePath));
-
-        // Hash index no longer references deleted file's hash
-        Assert.False(
-            snap2.HashIndex.TryGetValue(deleteHash, out var idsAfter) &&
-            idsAfter.Count > 0);
     }
 
     [Fact]
@@ -1031,7 +998,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         // Assert 1: no child directory called "TestData" under net9.0
         var childDirNames = snapshot.Dirs.Values
-            .Where(d => d.ParentId == netDirRecord.DirId)
+            .Where(d => d.ParentDirId == netDirRecord.DirId)
             .Select(d => d.Name)
             .ToList();
 

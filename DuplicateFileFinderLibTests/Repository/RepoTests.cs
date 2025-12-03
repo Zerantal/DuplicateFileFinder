@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository;
 using DuplicateFileFinderLib.Repository.Models;
@@ -62,7 +61,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.NotEqual(Guid.Empty, meta.RepoId);
             Assert.Equal(_rootDir, meta.RepoPath);
             Assert.False(string.IsNullOrWhiteSpace(meta.RepoHostName));
-            Assert.Equal(0, meta.NextScanRunId);
+            Assert.Equal(0, meta.NextScanSequence);
         }
 
         [Fact]
@@ -70,7 +69,7 @@ namespace DuplicateFileFinderLibTests.Repository
         {
             var repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
             var metaBefore = ReadMeta();
-            Assert.Equal(0, metaBefore.NextScanRunId);
+            Assert.Equal(0, metaBefore.NextScanSequence);
 
             var seq1 = repo.AllocateRunId();
             var metaAfter1 = ReadMeta();
@@ -79,13 +78,13 @@ namespace DuplicateFileFinderLibTests.Repository
             // - allocate current value
             // - persist +1
             Assert.Equal(0, seq1);
-            Assert.Equal(1, metaAfter1.NextScanRunId);
+            Assert.Equal(1, metaAfter1.NextScanSequence);
 
             var seq2 = repo.AllocateRunId();
             var metaAfter2 = ReadMeta();
 
             Assert.Equal(1, seq2);
-            Assert.Equal(2, metaAfter2.NextScanRunId);
+            Assert.Equal(2, metaAfter2.NextScanSequence);
         }
 
         [Fact]
@@ -97,11 +96,9 @@ namespace DuplicateFileFinderLibTests.Repository
 
             var delta = new RepoDelta
             {
-                RunId = 0,
+                ScanSequence = 0,
                 Files = [],
-                Dirs = [],
-                DeletedFiles = [],
-                DeletedDirs = []
+                Dirs = []
             };
 
             await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);
@@ -122,16 +119,16 @@ namespace DuplicateFileFinderLibTests.Repository
             var rootDirRecord = new DirRecord
             {
                 DirId = rootDirId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = 0,
+                LastSeenScanSequence = 0,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
 
             var delta = new RepoDelta
             {
-                RunId = 0,
+                ScanSequence = 0,
                 Dirs = [rootDirRecord]
             };
 
@@ -150,14 +147,14 @@ namespace DuplicateFileFinderLibTests.Repository
             var repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
 
             var dirId = 11;
-            var fileId = 22;
+            long fileId = 22;
 
             var dir = new DirRecord
             {
                 DirId = dirId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -175,14 +172,14 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Hashed,
                 ErrorMessage = null
             };
 
             var delta = new RepoDelta
             {
-                RunId = 1,
+                ScanSequence = 1,
                 Files = [file],
                 Dirs = [dir]
             };
@@ -191,12 +188,10 @@ namespace DuplicateFileFinderLibTests.Repository
 
             var snapshot = repo.GetSnapshot();
             Assert.Single(snapshot.Dirs);
-            Assert.Single(snapshot.Files);
-            Assert.Single(snapshot.HashIndex);
-
-            var hashEntry = Assert.Single(snapshot.HashIndex);
-            Assert.Equal(hashKey, hashEntry.Key);
-            Assert.Contains(fileId, hashEntry.Value);
+            var fileRecord = Assert.Single(snapshot.Files).Value;
+            
+            Assert.Equal(hashKey, fileRecord.Hash);
+            Assert.Equal(fileId, fileRecord.FileId);
         }
 
         [Fact]
@@ -210,9 +205,9 @@ namespace DuplicateFileFinderLibTests.Repository
             var dir = new DirRecord
             {
                 DirId = dirId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -230,7 +225,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hashKey,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -238,26 +233,23 @@ namespace DuplicateFileFinderLibTests.Repository
             // First delta: add dir+file
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = 1,
+                ScanSequence = 1,
                 Dirs = [dir],
                 Files = [file]
             }, TestContext.Current.CancellationToken);
 
             var snapshot1 = repo.GetSnapshot();
             Assert.Single(snapshot1.Files);
-            Assert.Single(snapshot1.HashIndex);
 
             // Second delta: delete file
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = 2,
-                DeletedFiles = [new(fileId, 2)]
+                ScanSequence = 2,
+                Files = [file with {Status = ScanEntryStatus.Deleted}]
             }, TestContext.Current.CancellationToken);
 
             var snapshot2 = repo.GetSnapshot();
             Assert.Empty(snapshot2.Files);
-            Assert.True(snapshot2.HashIndex.Count == 0 ||
-                        !snapshot2.HashIndex.Values.SelectMany(x => x).Contains(fileId));
         }
 
         [Fact]
@@ -282,9 +274,9 @@ namespace DuplicateFileFinderLibTests.Repository
             var dir = new DirRecord
             {
                 DirId = dirId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = seq,
+                LastSeenScanSequence = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -298,7 +290,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hash1,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = seq,
+                LastSeenScanSequence = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -306,7 +298,7 @@ namespace DuplicateFileFinderLibTests.Repository
             // Delta 1: dir + file1
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = seq,
+                ScanSequence = seq,
                 Dirs = [dir],
                 Files = [file1]
             }, TestContext.Current.CancellationToken);
@@ -329,14 +321,14 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash = hash2,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = seq,
+                LastSeenScanSequence = seq,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
             
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = seq,
+                ScanSequence = seq,
                 Files = [file2]
             }, TestContext.Current.CancellationToken);
             
@@ -356,8 +348,8 @@ namespace DuplicateFileFinderLibTests.Repository
             var repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
 
             // Write a couple of deltas
-            await repo.CommitDeltaAsync(new RepoDelta { RunId = 0 }, TestContext.Current.CancellationToken);
-            await repo.CommitDeltaAsync(new RepoDelta { RunId = 1 }, TestContext.Current.CancellationToken);
+            await repo.CommitDeltaAsync(new RepoDelta { ScanSequence = 0 }, TestContext.Current.CancellationToken);
+            await repo.CommitDeltaAsync(new RepoDelta { ScanSequence = 1 }, TestContext.Current.CancellationToken);
 
             var metaBefore = ReadMeta();
             Assert.Equal(2, metaBefore.NextLogSequence); // ids 0,1 allocated
@@ -384,9 +376,9 @@ namespace DuplicateFileFinderLibTests.Repository
             var rootDir = new DirRecord
             {
                 DirId = rootId,
-                ParentId = null,
+                ParentDirId = null,
                 Name = "root",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
@@ -394,16 +386,16 @@ namespace DuplicateFileFinderLibTests.Repository
             var childDir = new DirRecord
             {
                 DirId = childId,
-                ParentId = rootId,
+                ParentDirId = rootId,
                 Name = "child",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
 
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = 1,
+                ScanSequence = 1,
                 Dirs = [rootDir, childDir]
             }, TestContext.Current.CancellationToken);
 
@@ -441,9 +433,9 @@ namespace DuplicateFileFinderLibTests.Repository
             var rootDir = new DirRecord
             {
                 DirId               = rootId,
-                ParentId         = null,
+                ParentDirId         = null,
                 Name             = "root",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status           = ScanEntryStatus.Enumerated,
                 ErrorMessage     = null
             };
@@ -451,9 +443,9 @@ namespace DuplicateFileFinderLibTests.Repository
             var subDir = new DirRecord
             {
                 DirId               = subId,
-                ParentId         = rootId,
+                ParentDirId         = rootId,
                 Name             = "sub",
-                SeenDuringScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status           = ScanEntryStatus.Enumerated,
                 ErrorMessage     = null
             };
@@ -471,7 +463,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash                 = hash,
                 Modified             = DateTimeOffset.UtcNow,
                 Created              = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 1,
+                LastSeenScanSequence = 1,
                 Status               = ScanEntryStatus.Enumerated,
                 ErrorMessage         = null
             };
@@ -479,7 +471,7 @@ namespace DuplicateFileFinderLibTests.Repository
             // Initial delta: root, sub, old file (seen at sequence 1)
             repo.CommitDelta(new RepoDelta
             {
-                RunId = 1,
+                ScanSequence = 1,
                 Dirs         = [rootDir, subDir],
                 Files        = [oldFile]
             });
@@ -494,14 +486,14 @@ namespace DuplicateFileFinderLibTests.Repository
                 Hash                 = hash,
                 Modified             = DateTimeOffset.UtcNow,
                 Created              = DateTimeOffset.UtcNow,
-                SeenDuringSeenScanRunId = 2,
+                LastSeenScanSequence = 2,
                 Status               = ScanEntryStatus.Enumerated,
                 ErrorMessage         = null
             };
 
             repo.CommitDelta(new RepoDelta
             {
-                RunId = 2,
+                ScanSequence = 2,
                 Files        = [newFile]
             });
 
@@ -533,16 +525,16 @@ namespace DuplicateFileFinderLibTests.Repository
             var rootDir = new DirRecord
             {
                 DirId             = rootDirId,
-                ParentId          = null,
+                ParentDirId          = null,
                 Name              = "root",
-                SeenDuringScanRunId  = seq,
+                LastSeenScanSequence  = seq,
                 Status            = ScanEntryStatus.Enumerated,
                 ErrorMessage      = null
             };
 
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                RunId = seq,
+                ScanSequence = seq,
                 Dirs         = new List<DirRecord> { rootDir }
             }, TestContext.Current.CancellationToken);
 
@@ -550,8 +542,8 @@ namespace DuplicateFileFinderLibTests.Repository
             (repo as Repo)!.BindScanRootDirId(scanRoot.RootId, rootDirId);
 
             // 2. Force some log ids (these will be covered by the next snapshot save)
-            await repo.CommitDeltaAsync(new RepoDelta { RunId = seq }, TestContext.Current.CancellationToken);
-            await repo.CommitDeltaAsync(new RepoDelta { RunId = seq }, TestContext.Current.CancellationToken);
+            await repo.CommitDeltaAsync(new RepoDelta { ScanSequence = seq }, TestContext.Current.CancellationToken);
+            await repo.CommitDeltaAsync(new RepoDelta { ScanSequence = seq }, TestContext.Current.CancellationToken);
 
             // 3. Save snapshots and verify the invariant:
             //    LastSnapshottedLogSequence == NextLogSequence - 1
@@ -579,9 +571,9 @@ namespace DuplicateFileFinderLibTests.Repository
                 var dir = new DirRecord
                 {
                     DirId = dirId,
-                    ParentId = null,
+                    ParentDirId = null,
                     Name = "root",
-                    SeenDuringScanRunId = 1,
+                    LastSeenScanSequence = 1,
                     Status = ScanEntryStatus.Enumerated,
                     ErrorMessage = null
                 };
@@ -599,23 +591,17 @@ namespace DuplicateFileFinderLibTests.Repository
                     Hash = hashKey,
                     Modified = DateTimeOffset.UtcNow,
                     Created = DateTimeOffset.UtcNow,
-                    SeenDuringSeenScanRunId = 1,
+                    LastSeenScanSequence = 1,
                     Status = ScanEntryStatus.Hashed,
                     ErrorMessage = null
                 };
 
                 await repo.CommitDeltaAsync(new RepoDelta
                 {
-                    RunId = 1,
+                    ScanSequence = 1,
                     Dirs = new List<DirRecord> { dir },
                     Files = new List<FileRecord> { file }
                 }, TestContext.Current.CancellationToken);
-
-                var hashIndex = repo.GetSnapshot().HashIndex;
-
-                Assert.True(hashIndex.ContainsKey(hashKey));
-                var ids = hashIndex[hashKey];
-                Assert.Contains(fileId, ids);
             }
             finally
             {

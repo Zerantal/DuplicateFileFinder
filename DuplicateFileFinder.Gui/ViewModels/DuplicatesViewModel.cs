@@ -14,6 +14,9 @@ namespace DuplicateFileFinder.Gui.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
+    private readonly IHashIndexReadModel _hashIndexService;
+    private readonly IRepo _repo;
+    
     // Full universe of duplicate sets keyed by hash
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
@@ -26,7 +29,6 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly Dictionary<long, FolderNodeViewModel> _folderNodes = new();
     // private readonly Dictionary<HashKey, List<Guid>> _hashIndex = new();
 
-    private readonly IRepo _repo;
     private readonly IScanCoordinator _scanner;
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;
@@ -37,10 +39,13 @@ public partial class DuplicatesViewModel : ObservableObject
     private DuplicateSetRow? _selectedSet;
     [ObservableProperty] private long _wastedBytes;
 
-    public DuplicatesViewModel(Repo repo, IScanCoordinator scanner)
+    public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _scanner = scanner;
+        ArgumentNullException.ThrowIfNull(host);
+
+        _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+        _repo = host.Repo;
+        _hashIndexService = host.HashIndex;
 
         LoadFromRepo();
     }
@@ -108,9 +113,11 @@ public partial class DuplicatesViewModel : ObservableObject
         DuplicatesFound = 0;
         WastedBytes = 0;
         FilesScanned = snapshot.Files.Count;
+        _allSets.Clear();
 
-        // Ask the repo for duplicate groups instead of walking HashIndex here.
-        var duplicateGroups = _repo.GetDuplicateGroups();
+        int minDuplicates = 2;
+        long minSize = 10*1024*1024;
+        var duplicateGroups = _hashIndexService.GetDuplicateGroups(minDuplicates, minSize);
 
         foreach (var group in duplicateGroups)
         {
@@ -118,16 +125,13 @@ public partial class DuplicatesViewModel : ObservableObject
                 continue;
 
             // All files in a group share the same hash and size by definition
-            var hash = group[0].Hash;
+            var hash =  group[0].Hash;
             var row = BuildRow(hash, group);
             _allSets[hash] = row;
-
-            var size = group[0].Size;
-            var wasted = (group.Count - 1) * size;
-
-            DuplicatesFound += 1;
-            WastedBytes += wasted;
         }
+
+        DuplicatesFound = _hashIndexService.TotalDuplicateFileCount;
+        WastedBytes = _hashIndexService.TotalSpaceTakenByDuplicates;
     }
 
     private void BuildFolderTree()
@@ -142,7 +146,7 @@ public partial class DuplicatesViewModel : ObservableObject
             if (dir.Status == ScanEntryStatus.None)
                 continue;
 
-            if (dir.ParentId is { } parentId &&
+            if (dir.ParentDirId is { } parentId &&
                 _dirs.TryGetValue(parentId, out var parentDir) &&
                 parentDir.Status != ScanEntryStatus.None)
             {

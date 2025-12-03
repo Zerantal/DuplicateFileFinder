@@ -28,9 +28,9 @@ public sealed class DuplicateFileFinder
     /// </summary>
     private readonly record struct FileToHash(
         string         Path,
-        long           Size,
-        DateTimeOffset CreatedUtc,
-        DateTimeOffset ModifiedUtc);
+        long           Size,                // ReSharper disable once NotAccessedPositionalProperty.Local
+        DateTimeOffset CreatedUtc,         // ReSharper disable once NotAccessedPositionalProperty.Local
+        DateTimeOffset ModifiedUtc); 
 
     public DuplicateFileFinder(
         IRepo repo,
@@ -336,13 +336,13 @@ public sealed class DuplicateFileFinder
         // Files that remained in the map are now missing on disk
         foreach (var file in quickState.PreviousFiles.Values)
         {
-            session.MarkFileDeleted(file.FileId);
+            session.MarkFileDeleted(file);
         }
 
         // Directories that remained are missing; this naturally includes whole subtrees.
         foreach (var dir in quickState.PreviousDirs.Values)
         {
-            session.MarkDirectoryDeleted(dir.DirId);
+            session.MarkDirectoryDeleted(dir);
         }
     }
 

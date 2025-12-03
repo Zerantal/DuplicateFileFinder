@@ -16,12 +16,12 @@ public sealed class ScanCoordinator : IScanCoordinator
     private readonly IDialogService _dialogService;
     private readonly Dff.DuplicateFileFinder _finder;
 
-    private readonly Repo _repo;
+    private readonly IRepo _repo;
 
     private CancellationTokenSource? _cts;
 
     public ScanCoordinator(
-        Repo repo,
+        IRepo repo,
         Dff.DuplicateFileFinder finder,
         IDialogService dialogService)
     {

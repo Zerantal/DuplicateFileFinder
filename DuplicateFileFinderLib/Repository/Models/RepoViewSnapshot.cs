@@ -5,5 +5,4 @@ public sealed class RepoViewSnapshot
 {
     public required IReadOnlyDictionary<long, FileRecord> Files { get; init; }
     public required IReadOnlyDictionary<long, DirRecord> Dirs { get; init; }
-    public required IReadOnlyDictionary<HashKey, IReadOnlyList<long>> HashIndex { get; init; }
 }

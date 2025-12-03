@@ -15,9 +15,9 @@ public sealed class DirRecordTests
         var original = new DirRecord
         {
             DirId = id,
-            ParentId = parentId,
+            ParentDirId = parentId,
             Name = "subdir",
-            SeenDuringScanRunId = 123,
+            LastSeenScanSequence = 123,
             Status = ScanEntryStatus.Error,
             ErrorMessage = "oops"
         };
@@ -26,9 +26,9 @@ public sealed class DirRecordTests
         var roundTripped = MemoryPackSerializer.Deserialize<DirRecord>(bytes)!;
 
         Assert.Equal(original.DirId, roundTripped.DirId);
-        Assert.Equal(original.ParentId, roundTripped.ParentId);
+        Assert.Equal(original.ParentDirId, roundTripped.ParentDirId);
         Assert.Equal(original.Name, roundTripped.Name);
-        Assert.Equal(original.SeenDuringScanRunId, roundTripped.SeenDuringScanRunId);
+        Assert.Equal(original.LastSeenScanSequence, roundTripped.LastSeenScanSequence);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
     }

@@ -28,8 +28,8 @@ public sealed class ScanSession : IScanSession
     private readonly List<FileRecord> _pendingFiles = new();
     
     // Buffered tombstones for deletions in this scan
-    private readonly List<DirTombstone>  _pendingDirTombstones  = new();
-    private readonly List<FileTombstone> _pendingFileTombstones = new();
+    private readonly List<DirRecord>  _pendingDirTombstones  = new();
+    private readonly List<FileRecord> _pendingFileTombstones = new();
     
     private bool _finished;
     
@@ -62,7 +62,7 @@ public sealed class ScanSession : IScanSession
     
     public ScanRun Run { get; }
 
-    public long RunId => Run.ScanRunId;
+    public long ScanSequence => Run.ScanSequence;
     public string RootPath => Run.RootPath;
 
     public async ValueTask DisposeAsync()
@@ -78,7 +78,7 @@ public sealed class ScanSession : IScanSession
         }
 
         if (!_finished)
-            _repo.MarkScanFailed(RunId, "ScanSession disposed before completion.", cancelled: true);
+            _repo.MarkScanFailed(ScanSequence, "ScanSession disposed before completion.", cancelled: true);
     }
 
     // ---------------------------------------------------------------------
@@ -183,9 +183,9 @@ public sealed class ScanSession : IScanSession
             var dir = new DirRecord
             {
                 DirId            = id,
-                ParentId         = parentId,
+                ParentDirId         = parentId,
                 Name             = name,
-                SeenDuringScanRunId = RunId,
+                LastSeenScanSequence = ScanSequence,
                 Status           = effectiveStatus,
                 ErrorMessage     = effectiveError
             };
@@ -226,7 +226,7 @@ public sealed class ScanSession : IScanSession
 
         var updated = existing with
         {
-            SeenDuringScanRunId = RunId,
+            LastSeenScanSequence = ScanSequence,
             Status           = newStatus,
             ErrorMessage     = newError
         };
@@ -293,7 +293,7 @@ public sealed class ScanSession : IScanSession
                     Hash                 = newHash,
                     Modified             = newMod,
                     Created              = newCreated,
-                    SeenDuringSeenScanRunId = RunId,
+                    LastSeenScanSequence = ScanSequence,
                     Status               = newStatus,
                     ErrorMessage         = newError
                 };
@@ -315,7 +315,7 @@ public sealed class ScanSession : IScanSession
                     Hash                 = effectiveHash,
                     Modified             = effectiveMod,
                     Created              = effectiveCreated,
-                    SeenDuringSeenScanRunId = RunId,
+                    LastSeenScanSequence = ScanSequence,
                     Status               = effectiveStatus,
                     ErrorMessage        = errorMessage
                 };
@@ -336,19 +336,19 @@ public sealed class ScanSession : IScanSession
     // Deletion APIs
     // ---------------------------------------------------------------------
 
-    public void MarkDirectoryDeleted(long dirId)
+    public void MarkDirectoryDeleted(DirRecord dir)
     {
         lock (_bufferLock)
         {
-            _pendingDirTombstones.Add(new DirTombstone(dirId, RunId));
+            _pendingDirTombstones.Add(dir with {Status = ScanEntryStatus.Deleted});
         }
     }
 
-    public void MarkFileDeleted(long fileId)
+    public void MarkFileDeleted(FileRecord file)
     {
         lock (_bufferLock)
         {
-            _pendingFileTombstones.Add(new FileTombstone(fileId, RunId));
+            _pendingFileTombstones.Add(file with {Status = ScanEntryStatus.Deleted});
         }
     }
     
@@ -366,8 +366,6 @@ public sealed class ScanSession : IScanSession
         {
             List<DirRecord>  dirsToFlush;
             List<FileRecord> filesToFlush;
-            List<DirTombstone>   dirTombsToFlush;
-            List<FileTombstone>  fileTombsToFlush;
 
             lock (_bufferLock)
             {
@@ -379,10 +377,13 @@ public sealed class ScanSession : IScanSession
                     return;
                 }
 
-                dirsToFlush  = new List<DirRecord>(_pendingDirs);
-                filesToFlush = new List<FileRecord>(_pendingFiles);
-                dirTombsToFlush   = new List<DirTombstone>(_pendingDirTombstones);
-                fileTombsToFlush  = new List<FileTombstone>(_pendingFileTombstones);
+                dirsToFlush = new List<DirRecord>(_pendingDirs.Count + _pendingDirTombstones.Count);
+                filesToFlush = new List<FileRecord>(_pendingFiles.Count + _pendingFileTombstones.Count);
+                
+                dirsToFlush.AddRange(_pendingDirs);
+                dirsToFlush.AddRange(_pendingDirTombstones);
+                filesToFlush.AddRange(_pendingFiles);
+                filesToFlush.AddRange(_pendingFileTombstones);
 
                 _pendingDirs.Clear();
                 _pendingFiles.Clear();
@@ -392,11 +393,9 @@ public sealed class ScanSession : IScanSession
 
             var delta = new RepoDelta
             {
-                RunId        = RunId,
+                ScanSequence = ScanSequence,
                 Dirs         = dirsToFlush,
                 Files        = filesToFlush,
-                DeletedDirs  = dirTombsToFlush,
-                DeletedFiles = fileTombsToFlush
             };
 
             await _repo.CommitDeltaAsync(delta, cancellationToken).ConfigureAwait(false);
@@ -415,7 +414,7 @@ public sealed class ScanSession : IScanSession
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.CompleteScanForRoot(RunId, Run.RootPath);
+        _repo.CompleteScanForRoot(ScanSequence, Run.RootPath);
         _finished = true;
     }
 
@@ -423,7 +422,7 @@ public sealed class ScanSession : IScanSession
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.MarkScanFailed(RunId, errorMessage, cancelled);
+        _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
         _finished = true;
     }
 }

@@ -1,6 +1,5 @@
 // DuplicateFileFinderLib/Repo/Repo.cs
 
-using System.Collections.Concurrent;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository;
@@ -19,7 +18,6 @@ public sealed partial class Repo : IRepo
     // live state
     private Dictionary<long, DirRecord>  _dirs       = new();
     private Dictionary<long, FileRecord> _files      = new();
-    private Dictionary<HashKey, List<long>> _fileHashIndex = new();
     private List<ScanRun> _scanRuns = new();
     private Dictionary<long, ScanRoot>   _scanRoots  = new();
 
@@ -61,6 +59,6 @@ public sealed partial class Repo : IRepo
 
         _scanRunIndex.Clear();
         foreach (var run in _scanRuns)
-            _scanRunIndex[run.ScanRunId] = run;
+            _scanRunIndex[run.ScanSequence] = run;
     }
 }

@@ -36,38 +36,26 @@ public sealed partial class Repo
             var bytes = File.ReadAllBytes(path);
             var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
             if (delta is not null)
-                ApplyDelta(delta);
+                ApplyDelta_NoLock(delta);
         }
     }
 
-    private void ApplyDelta(RepoDelta delta)
+    private void ApplyDelta_NoLock(RepoDelta delta)
     {
-        // dirs added or updated
+        // dirs
         foreach (var d in delta.Dirs)
-            _dirs[d.DirId] = d;
+            if (d.Status == ScanEntryStatus.Deleted)
+                _dirs.Remove(d.DirId);
+            else
+                _dirs[d.DirId] = d;
 
-        // dirs deleted
-        foreach (var x in delta.DeletedDirs)
-            _dirs.Remove(x.DirId);
-
-        // files added or updated
+        // files
         foreach (var f in delta.Files)
-        {
-            if (_files.TryGetValue(f.FileId, out var old))
-                RemoveFromFileHashIndex_NoLock(old);
-
-            _files[f.FileId] = f;
-            AddToFileHashIndex_NoLock(f);
-        }
-
-        // files deleted
-        foreach (var x in delta.DeletedFiles)
-        {
-            if (_files.TryGetValue(x.FileId, out var old))
-                RemoveFromFileHashIndex_NoLock(old);
-
-            _files.Remove(x.FileId);
-        }
+            if (f.Status == ScanEntryStatus.Deleted)
+                _files.Remove(f.FileId);
+            else
+                _files[f.FileId] = f;
+        
     }
 
 
@@ -165,7 +153,7 @@ public sealed partial class Repo
         var childrenByParent = new Dictionary<long, List<long>>(allDirs.Count);
 
         foreach (var dir in allDirs.Values)
-            if (dir.ParentId is { } parentId)
+            if (dir.ParentDirId is { } parentId)
             {
                 if (!childrenByParent.TryGetValue(parentId, out var list))
                 {
@@ -227,32 +215,10 @@ public sealed partial class Repo
         return (bytes, count);
     }
 
-    private static void ApplyDelta(
-        RepoDelta delta,
-        Dictionary<long, DirRecord> dirs,
-        Dictionary<long, FileRecord> files)
-    {
-        // Dirs
-        foreach (var d in delta.Dirs)
-            dirs[d.DirId] = d;
-
-        foreach (var tomb in delta.DeletedDirs)
-            dirs.Remove(tomb.DirId);
-
-        // Files
-        foreach (var f in delta.Files)
-            files[f.FileId] = f;
-
-        foreach (var tomb in delta.DeletedFiles)
-            files.Remove(tomb.FileId);
-    }
-
-
     private async Task InitialiseStateFromStoreAsync(CancellationToken ct)
     {
         _dirs.Clear();
         _files.Clear();
-        _fileHashIndex.Clear();
         _dirPathCache.Clear();
 
         // 1. Load per-root snapshots
@@ -272,10 +238,7 @@ public sealed partial class Repo
         }
 
         ReplayDeltas();
-
-        RebuildHashIndex_NoLock();
     }
-
 
     // Writes per-root snapshots and updates meta. Caller must hold _sync.
     private void SaveScanSnapshots_NoLock()
@@ -302,26 +265,5 @@ public sealed partial class Repo
                     CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
-    }
-
-
-    private void RebuildHashIndex_NoLock()
-    {
-        _fileHashIndex.Clear();
-
-        foreach (var file in _files.Values)
-        {
-            // skip uncomputed / error hash statuses
-            if (!file.Hash.IsComputed)
-                continue;
-
-            if (!_fileHashIndex.TryGetValue(file.Hash, out var list))
-            {
-                list = new List<long>();
-                _fileHashIndex[file.Hash] = list;
-            }
-
-            list.Add(file.FileId);
-        }
     }
 }

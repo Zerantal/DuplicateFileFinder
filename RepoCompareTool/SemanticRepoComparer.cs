@@ -31,7 +31,7 @@ public static class SemanticRepoComparer
         CompareScanRoots(repoA, repoB, diff);
         CompareDirs(repoA, snapA, repoB, snapB, diff);
         CompareFiles(repoA, snapA, repoB, snapB, diff);
-        CompareHashIndex(repoA, snapA, repoB, snapB, diff);
+        // CompareHashIndex(repoA, snapA, repoB, snapB, diff);
 
         return diff;
     }
@@ -314,91 +314,93 @@ public static class SemanticRepoComparer
     // ------------------------------
     // HASH INDEX: hash -> sorted full paths
     // ------------------------------
-    private static void CompareHashIndex(
-        IRepo repoA, RepoViewSnapshot snapA,
-        IRepo repoB, RepoViewSnapshot snapB,
-        SemanticComparisonResult diff)
-    {
-        var dirPathsA = snapA.Dirs.Values
-            .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetFullDirPath(d.DirId)));
-
-        var dirPathsB = snapB.Dirs.Values
-            .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetFullDirPath(d.DirId)));
-
-        // Build semantic hash -> paths map for A
-        var indexA = snapA.HashIndex
-            .GroupBy(kv => HashToString(kv.Key))
-            .ToDictionary(
-                g => g.Key,
-                g => g.SelectMany(kv => kv.Value.Select(fid =>
-                    {
-                        var f = snapA.Files[fid];
-                        var dirPath = dirPathsA.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-                        return NormalizePath(Path.Combine(dirPath, f.Name));
-                    }))
-                    .Distinct()
-                    .OrderBy(p => p)
-                    .ToArray()
-            );
-
-        // Build semantic hash -> paths map for B
-        var indexB = snapB.HashIndex
-            .GroupBy(kv => HashToString(kv.Key))
-            .ToDictionary(
-                g => g.Key,
-                g => g.SelectMany(kv => kv.Value.Select(fid =>
-                    {
-                        var f = snapB.Files[fid];
-                        var dirPath = dirPathsB.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-                        return NormalizePath(Path.Combine(dirPath, f.Name));
-                    }))
-                    .Distinct()
-                    .OrderBy(p => p)
-                    .ToArray()
-            );
-
-        var section = new List<string>();
-
-        var keysA = indexA.Keys.OrderBy(k => k).ToArray();
-        var keysB = indexB.Keys.OrderBy(k => k).ToArray();
-
-        if (!keysA.SequenceEqual(keysB))
-        {
-            var aOnly = keysA.Except(keysB).ToArray();
-            var bOnly = keysB.Except(keysA).ToArray();
-
-            foreach (var h in aOnly)
-                section.Add(SideBySide("Hash", h, "<missing>"));
-
-            foreach (var h in bOnly)
-                section.Add(SideBySide("Hash", "<missing>", h));
-        }
-        else
-        {
-            foreach (var hash in keysA)
-            {
-                var pathsA = indexA[hash];
-                var pathsB = indexB[hash];
-
-                if (pathsA.SequenceEqual(pathsB))
-                    continue;
-
-                var left = string.Join(", ", pathsA);
-                var right = string.Join(", ", pathsB);
-
-                section.Add($"HASH {hash}");
-                section.Add(SideBySide("Paths", left, right));
-                section.Add(string.Empty);
-            }
-        }
-
-        if (section.Count > 0)
-        {
-            diff.Differences.Add($"{Yellow}HASH INDEX DIFFERENCES{Reset}");
-            diff.Differences.AddRange(section);
-            diff.Differences.Add(string.Empty);
-        }
-    }
+    // private static void CompareHashIndex(
+    //     IRepo repoA, RepoViewSnapshot snapA,
+    //     IRepo repoB, RepoViewSnapshot snapB,
+    //     SemanticComparisonResult diff)
+    // {
+    //     IHashIndexService hashIndexService = new  HashIndexService();
+    //     
+    //     var dirPathsA = snapA.Dirs.Values
+    //         .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetFullDirPath(d.DirId)));
+    //
+    //     var dirPathsB = snapB.Dirs.Values
+    //         .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetFullDirPath(d.DirId)));
+    //
+    //     // Build semantic hash -> paths map for A
+    //     var indexA = hashIndexService.BuildIndex(snapA)
+    //         .GroupBy(kv => HashToString(kv.Key))
+    //         .ToDictionary(
+    //             g => g.Key,
+    //             g => g.SelectMany(kv => kv.Value.Select(fid =>
+    //                 {
+    //                     var f = snapA.Files[fid];
+    //                     var dirPath = dirPathsA.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
+    //                     return NormalizePath(Path.Combine(dirPath, f.Name));
+    //                 }))
+    //                 .Distinct()
+    //                 .OrderBy(p => p)
+    //                 .ToArray()
+    //         );
+    //
+    //     // Build semantic hash -> paths map for B
+    //     var indexB = hashIndexService.BuildIndex(snapB)
+    //         .GroupBy(kv => HashToString(kv.Key))
+    //         .ToDictionary(
+    //             g => g.Key,
+    //             g => g.SelectMany(kv => kv.Value.Select(fid =>
+    //                 {
+    //                     var f = snapB.Files[fid];
+    //                     var dirPath = dirPathsB.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
+    //                     return NormalizePath(Path.Combine(dirPath, f.Name));
+    //                 }))
+    //                 .Distinct()
+    //                 .OrderBy(p => p)
+    //                 .ToArray()
+    //         );
+    //
+    //     var section = new List<string>();
+    //
+    //     var keysA = indexA.Keys.OrderBy(k => k).ToArray();
+    //     var keysB = indexB.Keys.OrderBy(k => k).ToArray();
+    //
+    //     if (!keysA.SequenceEqual(keysB))
+    //     {
+    //         var aOnly = keysA.Except(keysB).ToArray();
+    //         var bOnly = keysB.Except(keysA).ToArray();
+    //
+    //         foreach (var h in aOnly)
+    //             section.Add(SideBySide("Hash", h, "<missing>"));
+    //
+    //         foreach (var h in bOnly)
+    //             section.Add(SideBySide("Hash", "<missing>", h));
+    //     }
+    //     else
+    //     {
+    //         foreach (var hash in keysA)
+    //         {
+    //             var pathsA = indexA[hash];
+    //             var pathsB = indexB[hash];
+    //
+    //             if (pathsA.SequenceEqual(pathsB))
+    //                 continue;
+    //
+    //             var left = string.Join(", ", pathsA);
+    //             var right = string.Join(", ", pathsB);
+    //
+    //             section.Add($"HASH {hash}");
+    //             section.Add(SideBySide("Paths", left, right));
+    //             section.Add(string.Empty);
+    //         }
+    //     }
+    //
+    //     if (section.Count > 0)
+    //     {
+    //         diff.Differences.Add($"{Yellow}HASH INDEX DIFFERENCES{Reset}");
+    //         diff.Differences.AddRange(section);
+    //         diff.Differences.Add(string.Empty);
+    //     }
+    // }
 
     // ------------------------------
     // Helpers

@@ -19,8 +19,8 @@ public sealed partial class Repo
 
     private long AllocateRunId_NoLock()
     {
-        var seq = Meta.NextScanRunId;
-        Meta = Meta with { NextScanRunId = seq + 1 };
+        var seq = Meta.NextScanSequence;
+        Meta = Meta with { NextScanSequence = seq + 1 };
 
         SyncMetaFile_NoLock();
         SaveMeta_NoLock();
@@ -81,42 +81,17 @@ public sealed partial class Repo
             .GetResult();
     }
     
-    private void AddToFileHashIndex_NoLock(FileRecord f)
+    internal void MarkScanCompleted(long sequence)
     {
-        if (!f.Hash.IsComputed)
-            return;
-
-        if (!_fileHashIndex.TryGetValue(f.Hash, out var list))
-        {
-            list = new List<long>();
-            _fileHashIndex[f.Hash] = list;
-        }
-
-        if (!list.Contains(f.FileId))
-            list.Add(f.FileId);
-    }
-    
- private void RemoveFromFileHashIndex_NoLock(FileRecord f)
-    {
-        if (!f.Hash.IsComputed)
-            return;
-
-        if (_fileHashIndex.TryGetValue(f.Hash, out var list))
-        {
-            list.Remove(f.FileId);
-            if (list.Count == 0)
-                _fileHashIndex.Remove(f.Hash);
-        }
-    }
-    
- internal void MarkScanCompleted(long sequence)
-    {
+        ScanRun updated;
+        long generation;
+        
         lock (_sync)
         {
             if (!_scanRunIndex.TryGetValue(sequence, out var run))
                 return;
 
-            var updated = run with
+            updated = run with
             {
                 Status = ScanRunStatus.Completed,
                 FinishedAt = DateTimeOffset.UtcNow,
@@ -124,13 +99,27 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.ScanRunId == sequence);
+            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
-            
-            SyncMetaFile_NoLock();
-            _ = PersistMetaAsync();
+
+            generation = Meta.Generation;
+            SaveMeta_NoLock();
         }
+
+        OnScanRunCompleted(generation, sequence, updated);
+    }
+    
+    private void OnScanRunCompleted(long generation, long nextLogSequence, ScanRun run)
+    {
+        var evt = new ScanRunCompletedEvent
+        {
+            Generation      = generation,
+            NextLogSequence = nextLogSequence,
+            Run             = run
+        };
+
+        PublishEvent(evt);
     }
 
     internal void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
@@ -150,7 +139,7 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
-            var idx = _scanRuns.FindIndex(r => r.ScanRunId == sequence);
+            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
             
@@ -161,21 +150,21 @@ public sealed partial class Repo
     
     internal void CompleteScanForRoot(long scanSequence, string rootPath)
     {
-        List<FileTombstone> deletedFiles;
-        List<DirTombstone>  deletedDirs;
+        List<FileRecord> deletedFiles;
+        List<DirRecord>  deletedDirs;
 
         lock (_sync)
         {
-            deletedFiles = new List<FileTombstone>();
-            deletedDirs  = new List<DirTombstone>();
+            deletedFiles = new List<FileRecord>();
+            deletedDirs  = new List<DirRecord>();
 
             foreach (var file in _files.Values)
             {
                 if (!IsUnderRoot(file.DirId, rootPath))
                     continue;
 
-                if (file.SeenDuringSeenScanRunId < scanSequence)
-                    deletedFiles.Add(new FileTombstone(file.FileId, scanSequence));
+                if (file.LastSeenScanSequence < scanSequence)
+                    deletedFiles.Add(file with {Status =  ScanEntryStatus.Deleted});
             }
             
             foreach (var dir in _dirs.Values)
@@ -183,8 +172,8 @@ public sealed partial class Repo
                 if (!IsUnderRoot(dir.DirId, rootPath))
                     continue;
 
-                if (dir.SeenDuringScanRunId < scanSequence)
-                    deletedDirs.Add(new DirTombstone(dir.DirId, scanSequence));
+                if (dir.LastSeenScanSequence < scanSequence)
+                    deletedDirs.Add(dir with {Status = ScanEntryStatus.Deleted});
             }
         }
 
@@ -196,11 +185,9 @@ public sealed partial class Repo
 
         var tombstoneDelta = new RepoDelta
         {
-            RunId = scanSequence,
-            Files = new List<FileRecord>(),
-            Dirs = new List<DirRecord>(),
-            DeletedFiles = deletedFiles,
-            DeletedDirs = deletedDirs
+            ScanSequence = scanSequence,
+            Files = deletedFiles,
+            Dirs = deletedDirs
         };
 
         CommitDelta(tombstoneDelta);
