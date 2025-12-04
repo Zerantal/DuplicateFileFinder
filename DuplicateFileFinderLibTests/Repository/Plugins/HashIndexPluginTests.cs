@@ -5,12 +5,14 @@ using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins
 {
     public sealed class HashIndexPluginTests
     {
+        private readonly TempFsFixture _fs  = new  TempFsFixture("hash-index");
         private static HashKey NewHash(int seed)
         {
             var bytes = new byte[16];
@@ -114,7 +116,7 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
 
             var snapshot = MakeSnapshot(f1, f2, f3);
 
-            await using var plugin = new HashIndexPlugin();
+            await using var plugin = new HashIndexPlugin(_fs.Root);
 
             // Act: simulate repo open
             plugin.Post(MakeBootstrapEvent(snapshot));
@@ -128,9 +130,9 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
 
             // We expect exactly one group (hashDup) with f1 + f2
             var group = Assert.Single(groups);
-            Assert.Equal(2, group.Count);
-            Assert.Contains(1L, group.Select(g => g.FileId));
-            Assert.Contains(2L, group.Select(g => g.FileId));
+            Assert.Equal(2, group.list.Count);
+            Assert.Contains(1L, group.list);
+            Assert.Contains(2L, group.list);
         }
 
         [Fact]
@@ -155,7 +157,7 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
 
             var snapshot = MakeSnapshot(f1);
 
-            await using var plugin = new HashIndexPlugin();
+            await using var plugin = new HashIndexPlugin(_fs.Root);
 
             plugin.Post(MakeBootstrapEvent(snapshot));
 
@@ -195,9 +197,9 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
             var groups = plugin.GetDuplicateGroups();
             var group  = Assert.Single(groups);
 
-            Assert.Equal(2, group.Count);
-            Assert.Contains(1L, group.Select(g => g.FileId));
-            Assert.Contains(2L, group.Select(g => g.FileId));
+            Assert.Equal(2, group.list.Count);
+            Assert.Contains(1L, group.list);
+            Assert.Contains(2L, group.list);
         }
 
         [Fact]
@@ -236,7 +238,7 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
 
             var snapshot = MakeSnapshot(f1, f2);
 
-            await using var plugin = new HashIndexPlugin();
+            await using var plugin = new HashIndexPlugin(_fs.Root);
 
             plugin.Post(MakeBootstrapEvent(snapshot));
 
@@ -300,7 +302,7 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
 
             var snapshot = MakeSnapshot(f1, f2);
 
-            await using var plugin = new HashIndexPlugin();
+            await using var plugin = new HashIndexPlugin(_fs.Root);
 
             plugin.Post(MakeBootstrapEvent(snapshot));
 
