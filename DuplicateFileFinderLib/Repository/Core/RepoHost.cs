@@ -23,7 +23,8 @@ public sealed class RepoHost : IRepoHost
         var repo = await Core.Repo.OpenAsync(repoDir, ct).ConfigureAwait(false);
 
         // 2. Create plugins
-        var hashIndex = new HashIndexPlugin();
+        var hashIndexDir = Path.Combine(repoDir, nameof(HashIndexPlugin));
+        var hashIndex = new HashIndexPlugin(hashIndexDir);
 
         // 3. Bootstrap + subscribe plugins
         repo.RegisterEventSinkWithBootstrap(hashIndex);

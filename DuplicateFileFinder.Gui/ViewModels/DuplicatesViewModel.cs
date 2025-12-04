@@ -121,13 +121,20 @@ public partial class DuplicatesViewModel : ObservableObject
 
         foreach (var group in duplicateGroups)
         {
-            if (group.Count < 2)
-                continue;
-
             // All files in a group share the same hash and size by definition
-            var hash =  group[0].Hash;
-            var row = BuildRow(hash, group);
-            _allSets[hash] = row;
+            try
+            {
+                // retrieve all FileRecords for files in group
+                var fileRecords = group.list.Select(id => snapshot.Files[id]).ToList();
+                var hash = fileRecords[0].Hash;
+                var row = BuildRow(hash, fileRecords);
+                _allSets[hash] = row;
+            }
+            catch (Exception e)
+            {
+                // swallow + continue
+                Console.Error.WriteLine(e);
+            }
         }
 
         DuplicatesFound = _hashIndexService.TotalDuplicateFileCount;
