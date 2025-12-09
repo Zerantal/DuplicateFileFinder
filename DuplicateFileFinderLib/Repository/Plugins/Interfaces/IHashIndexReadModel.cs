@@ -1,4 +1,4 @@
-namespace DuplicateFileFinderLib.Repository.Interfaces;
+namespace DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 public interface IHashIndexReadModel
 {

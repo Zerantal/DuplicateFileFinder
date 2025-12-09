@@ -3,6 +3,13 @@ using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 
+internal interface IRepoInternal
+{
+    void DeleteScanRoot(long scanRootId);
+    
+    long AllocateRunId();
+}
+
 public interface IRepo : IDisposable, IAsyncDisposable
 {
     RepoViewSnapshot GetSnapshot();
@@ -11,8 +18,8 @@ public interface IRepo : IDisposable, IAsyncDisposable
 
     public IScanSession BeginScan(
         string rootPath,
-        ScanMode scanMode = ScanMode.Full,
-        VolumeInfo? volume = null,
+        ScanOperation scanOperation = ScanOperation.FullScan,
+        VolumeInfo? volumeInfo = null,
         int maxFilesBeforeFlush = 50_000,
         int maxDirsBeforeFlush = 10_000);
     void CommitDelta(RepoDelta delta);
@@ -20,6 +27,4 @@ public interface IRepo : IDisposable, IAsyncDisposable
     public void SaveScanSnapshots();
     public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default);
     string GetFullDirPath(long dirId);
-    
-    void RemoveScanRoot(string rootPath);
 }

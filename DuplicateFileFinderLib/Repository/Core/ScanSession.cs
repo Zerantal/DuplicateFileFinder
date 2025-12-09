@@ -2,7 +2,6 @@
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
-using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -14,30 +13,16 @@ public sealed class ScanSession : IScanSession
 
     private readonly Lock _bufferLock = new();
     private readonly SemaphoreSlim _flushGate = new(1, 1);
-
-    // Session-local view of all directories (both from repo snapshot and created during this scan)
-    private readonly Dictionary<long, DirRecord> _dirsById;
     
-    // Normalized full dir path -> DirId
-    private readonly Dictionary<string, long> _dirPathIndex;
-
-    // Normalized full file path -> FileRecord (latest state within this session)
-    private readonly Dictionary<string, FileRecord> _filesByPath;
-    
-    // Buffered records for the next RepoDelta
-    private readonly List<DirRecord> _pendingDirs = new();
-    private readonly List<FileRecord> _pendingFiles = new();
-    
-    // Buffered tombstones for deletions in this scan
-    private readonly List<DirRecord>  _pendingDirTombstones  = new();
-    private readonly List<FileRecord> _pendingFileTombstones = new();
+    private readonly Dictionary<long, DirRecord> _pendingDirs = new();
+    private readonly Dictionary<long, FileRecord> _pendingFiles = new();
     
     private bool _finished;
     
     public ScanSession(
         Repo repo,
         ScanRun run,
-        IReadOnlyDictionary<long, DirRecord> existingDirsInRepo,
+        DirRecord rootDir,
         int maxFilesBeforeFlush,
         int maxDirsBeforeFlush)
     {
@@ -45,26 +30,18 @@ public sealed class ScanSession : IScanSession
         Run = run;
         _maxFilesBeforeFlush = maxFilesBeforeFlush;
         _maxDirsBeforeFlush = maxDirsBeforeFlush;
+        RootDir = rootDir;
         
-        _dirsById      = new Dictionary<long, DirRecord>(existingDirsInRepo.Count);
-        _dirPathIndex = new Dictionary<string, long>(PathUtils.PathComparer);
-        _filesByPath   = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
-
-        // Seed session dirs and path index from repo snapshot
-        foreach (var (id, dir) in existingDirsInRepo)
-        {
-            _dirsById[id] = dir;
-
-            var fullPath   = _repo.GetFullDirPath(id);
-            var normalized = NormalizePath(fullPath);
-            _dirPathIndex[normalized] = id;
-        }
+        
     }
     
     public ScanRun Run { get; }
 
     public long ScanSequence => Run.ScanSequence;
     public string RootPath => Run.RootPath;
+    // public ScanRoot ScanRoot { get; set; }
+
+    public DirRecord RootDir { get; init; }
 
     public async ValueTask DisposeAsync()
     {
@@ -86,272 +63,54 @@ public sealed class ScanSession : IScanSession
     // Path helpers
     // ---------------------------------------------------------------------
 
-    private static string NormalizePath(string path)
+    public long AddOrUpdateDirectory(DirRecord dir)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Path is null or empty", nameof(path));
-
-        var full = Path.GetFullPath(path);
-        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-    }
-
-    // ---------------------------------------------------------------------
-    // Directory upsert (path-based)
-    // ---------------------------------------------------------------------
-
-    /// <summary>
-    /// Ensure that the directory at <paramref name="fullPath"/> has a stable DirRecord.FileId.
-    /// Creates any missing parents as dummy dirs (Status=None), and the leaf with the
-    /// requested <paramref name="status"/> (or a default if null). Returns the DirId.
-    /// </summary>
-    public long AddOrUpdateDirectory(
-        string fullPath,
-        ScanEntryStatus? status       = null,
-        string? errorMessage = null)
-    {
-        if (string.IsNullOrWhiteSpace(fullPath))
-            throw new ArgumentException("Path is null or empty", nameof(fullPath));
-
-        fullPath = NormalizePath(fullPath);
-        
-        var root = RootPath; // Run.RootPath; should already be normalized
-        if (!fullPath.StartsWith(root, PathUtils.PathComparison ))
-        {
-            throw new InvalidOperationException(
-                $"ScanSession received path '{fullPath}' which is outside scan root '{root}'. " +
-                "Scanner must pass absolute paths under the scan root.");
-        }
-
-        var shouldFlush = false;
-
-        // Fast path: we already know this path (from repo or this session)
-        if (_dirPathIndex.TryGetValue(fullPath, out var existingId))
-        {
-            UpdateExistingDir(existingId, status, errorMessage, ref shouldFlush);
-
-            if (shouldFlush)
-                _ = FlushProgressAsync();
-
-            return existingId;
-        }
-
-        // Build the chain of unknown paths from leaf up to the first known ancestor
-        var toCreate = new Stack<string>();
-        var current  = fullPath;
-
-        while (true)
-        {
-            if (_dirPathIndex.ContainsKey(current))
-                break;
-
-            toCreate.Push(current);
-
-            var parentPath = Path.GetDirectoryName(current);
-            if (string.IsNullOrEmpty(parentPath) || PathUtils.PathComparer.Equals(parentPath, current))
-                break;
-
-            current = NormalizePath(parentPath);
-        }
-        
-        long? parentId = null;
-        // If we stopped because we hit a known parent, remember its FileId
-        if (_dirPathIndex.TryGetValue(current, out var knownParentId))
-            parentId = knownParentId;
-
-        // Create missing parents and the leaf
-        while (toCreate.Count > 0)
-        {
-            var path = toCreate.Pop();
-            var name = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(name))
-            {
-                // Root cases like "C:\" or "/"
-                name = path;
-            }
-
-            var isLeaf = PathUtils.PathComparer.Equals(path, fullPath);
-
-            // For new leaf: default status is Enumerated if not provided.
-            // For parents: Status.None and no error message.
-            var effectiveStatus = isLeaf
-                ? (status ?? ScanEntryStatus.Enumerated)
-                : ScanEntryStatus.None;
-
-            var effectiveError = isLeaf ? errorMessage : null;
-            
-            var id = _repo.AllocateDirId_NoLock();
-
-            var dir = new DirRecord
-            {
-                DirId            = id,
-                ParentDirId         = parentId,
-                Name             = name,
-                LastSeenScanSequence = ScanSequence,
-                Status           = effectiveStatus,
-                ErrorMessage     = effectiveError
-            };
-            
-            parentId = id;
-
-            _dirsById[id] = dir;
-
-            lock (_bufferLock)
-            {
-                _pendingDirs.Add(dir);
-                _dirPathIndex[path] = id;
-
-                if (_pendingDirs.Count >= _maxDirsBeforeFlush)
-                    shouldFlush = true;
-            }
-        }
-
-        var leafId = parentId!.Value;
-        
-        if (shouldFlush)
-            _ = FlushProgressAsync();
-
-        return leafId;
-    }
-
-    private void UpdateExistingDir(
-        long             id,
-        ScanEntryStatus? status,
-        string?          errorMessage,
-        ref bool         shouldFlush)
-    {
-        if (!_dirsById.TryGetValue(id, out var existing))
-            return;
-        
-        var newStatus = status ?? existing.Status;
-        var newError  = errorMessage ?? existing.ErrorMessage;
-
-        var updated = existing with
-        {
-            LastSeenScanSequence = ScanSequence,
-            Status           = newStatus,
-            ErrorMessage     = newError
-        };
-
-        _dirsById[id] = updated;
-
+        bool shouldFlush = false;
         lock (_bufferLock)
         {
-            _pendingDirs.Add(updated);
+            if (IsNewDir(dir.DirId))
+            {
+                dir = dir with
+                {
+                    DirId = _repo.AllocateDirId()
+                };
+            }
+            _pendingDirs[dir.DirId] = dir with {LastSeenScanSequence = ScanSequence};
 
             if (_pendingDirs.Count >= _maxDirsBeforeFlush)
                 shouldFlush = true;
         }
+
+        if (shouldFlush)
+            _ = FlushProgressAsync();
+        
+        return dir.DirId;
     }
 
-    // ---------------------------------------------------------------------
-    // File upsert (path-based)
-    // ---------------------------------------------------------------------
-
-    public void AddOrUpdateFile(
-        string fullFilePath,
-        long?            size         = null,
-        HashKey?         hash         = null,
-        DateTimeOffset?  modified     = null,
-        DateTimeOffset?  created      = null,
-        ScanEntryStatus? status       = null,
-        string? errorMessage = null)
+    public void AddOrUpdateFile(ref FileRecord file)
     {
-        if (string.IsNullOrWhiteSpace(fullFilePath))
-            throw new ArgumentException("File path is null or empty", nameof(fullFilePath));
-
-        fullFilePath = NormalizePath(fullFilePath);
-
-        var dirPath = Path.GetDirectoryName(fullFilePath);
-        if (string.IsNullOrEmpty(dirPath))
-            dirPath = RootPath;
-
-        // Ensure directory chain exists and leaf dir is at least Enumerated
-        var dirId = AddOrUpdateDirectory(dirPath, ScanEntryStatus.Enumerated);
-        var name  = Path.GetFileName(fullFilePath);
-        if (string.IsNullOrEmpty(name))
-            name = fullFilePath;
-
-        var shouldFlush = false;
+        bool shouldFlush = false;
 
         lock (_bufferLock)
         {
-            FileRecord file;
-
-            if (_filesByPath.TryGetValue(fullFilePath, out var existing))
+            if (IsNewFile(file.FileId))
             {
-                var newSize    = size    ?? existing.Size;
-                var newHash    = hash    ?? existing.Hash;
-                var newMod     = modified ?? existing.Modified;
-                var newCreated = created  ?? existing.Created;
-                var newStatus  = status   ?? existing.Status;
-                var newError   = errorMessage ?? existing.ErrorMessage;
-
-                file = existing with
-                {
-                    DirId                = dirId,
-                    Name                 = name,
-                    Size                 = newSize,
-                    Hash                 = newHash,
-                    Modified             = newMod,
-                    Created              = newCreated,
-                    LastSeenScanSequence = ScanSequence,
-                    Status               = newStatus,
-                    ErrorMessage         = newError
-                };
+                file = file with { FileId = _repo.AllocateFileId() };
             }
-            else
-            {
-                var effectiveSize    = size    ?? 0L;
-                var effectiveHash    = hash    ?? default(HashKey);
-                var effectiveMod     = modified ?? default(DateTimeOffset);
-                var effectiveCreated = created  ?? default(DateTimeOffset);
-                var effectiveStatus  = status   ?? ScanEntryStatus.Enumerated;
-
-                file = new FileRecord
-                {
-                    FileId               = _repo.AllocateFileId_NoLock(),
-                    DirId                = dirId,
-                    Name                 = name,
-                    Size                 = effectiveSize,
-                    Hash                 = effectiveHash,
-                    Modified             = effectiveMod,
-                    Created              = effectiveCreated,
-                    LastSeenScanSequence = ScanSequence,
-                    Status               = effectiveStatus,
-                    ErrorMessage        = errorMessage
-                };
-            }
-
-            _filesByPath[fullFilePath] = file;
-            _pendingFiles.Add(file);
+            _pendingFiles[file.FileId] = file with {LastSeenScanSequence = ScanSequence};
 
             if (_pendingFiles.Count >= _maxFilesBeforeFlush)
                 shouldFlush = true;
         }
-
+        
         if (shouldFlush)
             _ = FlushProgressAsync();
+        
     }
 
-    // ---------------------------------------------------------------------
-    // Deletion APIs
-    // ---------------------------------------------------------------------
+    bool IsNewDir(long dirId) => dirId <= 0;
 
-    public void MarkDirectoryDeleted(DirRecord dir)
-    {
-        lock (_bufferLock)
-        {
-            _pendingDirTombstones.Add(dir with {Status = ScanEntryStatus.Deleted});
-        }
-    }
-
-    public void MarkFileDeleted(FileRecord file)
-    {
-        lock (_bufferLock)
-        {
-            _pendingFileTombstones.Add(file with {Status = ScanEntryStatus.Deleted});
-        }
-    }
+    bool IsNewFile(long fileId) => fileId <= 0;
     
     // ---------------------------------------------------------------------
     // Flush
@@ -370,26 +129,17 @@ public sealed class ScanSession : IScanSession
 
             lock (_bufferLock)
             {
-                if (_pendingDirs.Count == 0 &&
-                    _pendingFiles.Count == 0 &&
-                    _pendingDirTombstones.Count == 0 &&
-                    _pendingFileTombstones.Count == 0)
-                {
+                if (_pendingDirs.Count == 0 && _pendingFiles.Count == 0)
                     return;
-                }
 
-                dirsToFlush = new List<DirRecord>(_pendingDirs.Count + _pendingDirTombstones.Count);
-                filesToFlush = new List<FileRecord>(_pendingFiles.Count + _pendingFileTombstones.Count);
+                dirsToFlush = new List<DirRecord>(_pendingDirs.Count);
+                filesToFlush = new List<FileRecord>(_pendingFiles.Count);
                 
-                dirsToFlush.AddRange(_pendingDirs);
-                dirsToFlush.AddRange(_pendingDirTombstones);
-                filesToFlush.AddRange(_pendingFiles);
-                filesToFlush.AddRange(_pendingFileTombstones);
+                dirsToFlush.AddRange(_pendingDirs.Values);
+                filesToFlush.AddRange(_pendingFiles.Values);
 
                 _pendingDirs.Clear();
                 _pendingFiles.Clear();
-                _pendingDirTombstones.Clear();
-                _pendingFileTombstones.Clear();
             }
 
             var delta = new RepoDelta
@@ -426,4 +176,18 @@ public sealed class ScanSession : IScanSession
         _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
         _finished = true;
     }
+
+    // public DirRecord? GetDirRecord(long dirId)
+    // {
+    //     _snapshot.Dirs.TryGetValue(dirId, out DirRecord? dirRecord);
+    //     
+    //     return dirRecord;
+    // }
+
+    // public FileRecord? GetFileRecord(long fileId)
+    // {
+    //     _snapshot.Files.TryGetValue(fileId, out FileRecord? fileRecord);
+    //     
+    //     return fileRecord;
+    // }
 }

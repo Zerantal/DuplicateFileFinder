@@ -1,8 +1,8 @@
 ﻿using Bench;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core;
 using NLog;
-using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
 var log = LogManager.GetCurrentClassLogger();
 var root = args.Length > 1 && args[0] == "--root" ? args[1] : args.FirstOrDefault() ?? ".";
@@ -16,13 +16,13 @@ var repoDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.L
 if (Directory.Exists(repoDir))
     Directory.Delete(repoDir, true);
 
-var repo = await Repo.OpenAsync(repoDir);
-var finder = new DuplicateFileFinder(repo);
+var host = await RepoHost.OpenAsync(repoDir);
+var finder = new DuplicateFileFinder(host);
 
 log.Info($"Bench location: {root}", root);
 using (TimingLog.Start("Folder scan", root))
 {
-    await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
+    await finder.FullScanAsync(root);
 }
 
-await repo.CompactAsync();
+await host.Repo.CompactAsync();

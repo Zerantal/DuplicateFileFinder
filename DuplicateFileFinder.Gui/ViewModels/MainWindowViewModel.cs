@@ -99,7 +99,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             //     Console.WriteLine(issue.ToString());
 
             var dialogService = new DialogService();
-            var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(repo);
+            var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(host);
             var scanCoordinator = new ScanCoordinator(repo, scanEngine, dialogService);
         
             mainWindowVm = new MainWindowViewModel(host, scanCoordinator, dialogService);

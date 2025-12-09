@@ -9,6 +9,7 @@ namespace DuplicateFileFinderLib.IO;
 public readonly record struct FsEntry(
     bool IsDirectory,
     string FullPath,
+    string Name,        // top level name
     long Length,
     DateTimeOffset CreationTimeUtc,
     DateTimeOffset ModifiedTimeUtc);
@@ -69,6 +70,7 @@ public sealed class FileEnumerator : IFileEnumerator
                 (ref FileSystemEntry fe) => new FsEntry(
                     fe.IsDirectory,
                     fe.ToFullPath(),
+                    fe.FileName.ToString(),
                     fe.Length,
                     fe.CreationTimeUtc,
                     fe.LastWriteTimeUtc),
@@ -149,7 +151,14 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             token.ThrowIfCancellationRequested();
             DirectoryInfo di = new DirectoryInfo(d);
-            buffer.Add(new FsEntry(true, d, 0, di.CreationTimeUtc, di.LastWriteTimeUtc ));
+            var topLevelDirectoryName = Path.GetDirectoryName(Path.GetPathRoot(d));
+            buffer.Add(new FsEntry(
+                true,
+                d,
+                topLevelDirectoryName ?? d,
+                0,
+                di.CreationTimeUtc,
+                di.LastWriteTimeUtc ));
         }
 
         // Step 2: files
@@ -168,6 +177,7 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             token.ThrowIfCancellationRequested();
 
+            string filename;
             long len;
             DateTimeOffset creationTimeUtc;
             DateTimeOffset modifiedTimeUtc;
@@ -175,6 +185,7 @@ public sealed class FileEnumerator : IFileEnumerator
             {
                 var fi = new FileInfo(f);
                 len = fi.Length;
+                filename = fi.Name;
                 creationTimeUtc = fi.CreationTimeUtc;
                 modifiedTimeUtc = fi.LastWriteTimeUtc;
             }
@@ -188,7 +199,7 @@ public sealed class FileEnumerator : IFileEnumerator
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, len, creationTimeUtc, modifiedTimeUtc));
+                buffer.Add(new FsEntry(false, f, filename,  len, creationTimeUtc, modifiedTimeUtc));
         }
     }
 

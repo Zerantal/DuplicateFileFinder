@@ -42,18 +42,22 @@ public static class RepoStore
         Directory.CreateDirectory(rootsFolder);
 
         var path = GetRootSnapshotPath(repoPath, snapshot.ScanRootId);
+        var tmpPath = path + ".tmp";
 
-        await using var fs = new FileStream(
-            path,
-            FileMode.Create,
-            FileAccess.Write,
-            FileShare.Read | FileShare.Delete,
-            bufferSize: 8192,
-            useAsync: true);
+        await using (var fs = new FileStream(
+                         tmpPath,
+                         FileMode.Create,
+                         FileAccess.Write,
+                         FileShare.None,
+                         bufferSize: 81920,
+                         useAsync: true))
+        {
+            await MemoryPackSerializer.SerializeAsync(fs, snapshot, cancellationToken: ct).ConfigureAwait(false);
+
+            await fs.FlushAsync(ct).ConfigureAwait(false);
+        }
         
-        await MemoryPackSerializer.SerializeAsync(fs, snapshot, cancellationToken: ct).ConfigureAwait(false);
-        
-        await fs.FlushAsync(ct).ConfigureAwait(false);
+        File.Move(tmpPath, path, overwrite: true);
     }
 
     public static async Task<ScanRootSnapshotOnDisk?> LoadScanRootSnapshotAsync(
@@ -64,6 +68,7 @@ public static class RepoStore
         var path = GetRootSnapshotPath(repoPath, scanRootId);
         if (!File.Exists(path))
             return null;
+        
 
         await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         return await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotOnDisk>(fs, cancellationToken: ct)

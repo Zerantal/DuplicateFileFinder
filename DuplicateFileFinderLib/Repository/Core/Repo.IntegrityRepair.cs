@@ -57,12 +57,10 @@ public sealed partial class Repo
             // ------------------------------------
             // 2. Fix RUN_ROOT_MISSING (recreate ScanRoots)
             // ------------------------------------
-            var rootsById = Enumerable.ToDictionary<KeyValuePair<long, ScanRoot>, long, ScanRoot>(_scanRoots, kv => kv.Key, kv => kv.Value);
+            var rootsById = _scanRoots.ToDictionary<KeyValuePair<long, ScanRoot>, long, ScanRoot>(kv => kv.Key, kv => kv.Value);
 
-            for (int i = 0; i < _scanRuns.Count; i++)
+            foreach (var run in _scanRuns)
             {
-                var run = _scanRuns[i];
-
                 if (run.ScanRootId == 0)
                     continue;
 
@@ -101,7 +99,7 @@ public sealed partial class Repo
             // ------------------------------------
             // 3. Bind ROOT_DIRID_EMPTY (ScanRoot.DirId)
             // ------------------------------------
-            foreach (var (id, root) in Enumerable.ToArray(_scanRoots))
+            foreach (var (id, root) in _scanRoots.ToArray())
             {
                 if (root.DirId != 0)
                     continue;
@@ -124,8 +122,8 @@ public sealed partial class Repo
                     if (string.IsNullOrEmpty(leafName))
                         leafName = canonical;
 
-                    var candidates = Enumerable
-                        .Where(_dirs.Values, d => string.Equals(d.Name, leafName, StringComparison.Ordinal))
+                    var candidates = _dirs.Values
+                        .Where(d => string.Equals(d.Name, leafName, StringComparison.Ordinal))
                         .Select(d => d.DirId)
                         .ToList();
 
@@ -207,35 +205,46 @@ public sealed partial class Repo
             // ------------------------------------
             // 5. Remove ScanRoots with no remaining runs
             // ------------------------------------
-            var runsByRootId = Enumerable.GroupBy(_scanRuns, r => r.ScanRootId)
+            var runsByRootId = _scanRuns
+                .GroupBy(r => r.ScanRootId)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             var newRoots = new Dictionary<long, ScanRoot>();
             foreach (var (id, root) in _scanRoots)
             {
+                if (root.IsDeleted)
+                {
+                    // Soft-deleted roots are valid even with no runs; keep them.
+                    newRoots[id] = root;
+                    continue;
+                }
+
                 if (runsByRootId.TryGetValue(id, out var runs) && runs.Count > 0)
                 {
                     newRoots[id] = root;
                 }
                 else
                 {
-                    // no runs -> we'll drop this root and its snapshot file (later)
+                    // legacy/root-with-no-runs case: drop it
                     changedScanRoots = true;
                 }
             }
 
             _scanRoots = newRoots;
 
+
             // ------------------------------------
             // 6. Deduplicate ScanRoots per RootPath
             // ------------------------------------
-            var rootsByPath = Enumerable
-                .GroupBy<ScanRoot, string>(_scanRoots.Values, r => r.RootPath, StringComparer.Ordinal)
+            var liveRoots    = _scanRoots.Values.Where(r => !r.IsDeleted).ToList();
+            var deletedRoots = _scanRoots.Values.Where(r => r.IsDeleted).ToList();
+
+            var rootsByPath = liveRoots
+                .GroupBy(r => r.RootPath, StringComparer.Ordinal)
                 .ToList();
 
             var canonicalRoots   = new Dictionary<long, ScanRoot>();
             var rootIdRemap      = new Dictionary<long, long>(); // oldId -> canonicalId
-            var rootIdsToDelete  = new HashSet<long>();
 
             foreach (var grp in rootsByPath)
             {
@@ -267,7 +276,6 @@ public sealed partial class Repo
                         continue;
 
                     rootIdRemap[r.RootId] = canonical.RootId;
-                    rootIdsToDelete.Add(r.RootId);
                 }
             }
 
@@ -294,12 +302,15 @@ public sealed partial class Repo
                 foreach (var run in newRuns) _scanRunIndex.Add(run.ScanSequence, run);
                 changedScanRuns = true;
             }
-
-            if (rootIdsToDelete.Count > 0 || canonicalRoots.Count != _scanRoots.Count)
+            
+            // finally, add back deleted roots unchanged
+            foreach (var deleted in deletedRoots)
             {
-                _scanRoots      = canonicalRoots;
-                changedScanRoots = true;
+                canonicalRoots[deleted.RootId] = deleted;
             }
+
+            _scanRoots      = canonicalRoots;
+
 
             // ------------------------------------
             // 7. Delete orphan per-root snapshot files

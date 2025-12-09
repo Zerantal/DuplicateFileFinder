@@ -20,6 +20,7 @@ public sealed partial class Repo
         public string Code { get; init; } = "";
         public string Message { get; init; } = "";
         public string? FilePath { get; init; }
+        // ReSharper disable once UnusedAutoPropertyAccessor.Global
         public Exception? Exception { get; init; }
 
         public override string ToString()
@@ -29,8 +30,8 @@ public sealed partial class Repo
 
     /// <summary>
     /// Validate the integrity of this repo.
-    /// - Shallow mode checks in-memory referential integrity and on-disk presence.
-    /// - Deep mode rebuilds state from store (per-root snapshots + deltas) and compares with in-memory.
+    /// - Shallow operation checks in-memory referential integrity and on-disk presence.
+    /// - Deep operation rebuilds state from store (per-root snapshots + deltas) and compares with in-memory.
     /// </summary>
     public IReadOnlyList<RepoIntegrityIssue> ValidateIntegrity(
         bool deepConsistencyCheck = false,
@@ -108,7 +109,7 @@ public sealed partial class Repo
         // ----------------------------------------------------
 
         // 2a. ScanRoots -> Dirs
-        foreach (var root in scanRoots.Values)
+        foreach (var root in scanRoots.Values.Where(r => !r.IsDeleted))
         {
             if (root.DirId == 0)
             {
@@ -203,6 +204,7 @@ public sealed partial class Repo
 
         // 3a. duplicate ScanRoots for same RootPath
         var rootsByPath = scanRoots.Values
+            .Where(r => !r.IsDeleted)
             .GroupBy(r => r.RootPath, StringComparer.Ordinal)
             .ToList();
 
@@ -224,7 +226,7 @@ public sealed partial class Repo
         var runsByRootId = scanRuns.GroupBy(r => r.ScanRootId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        foreach (var root in scanRoots.Values)
+        foreach (var root in scanRoots.Values.Where(r => !r.IsDeleted))
         {
             if (!runsByRootId.TryGetValue(root.RootId, out var runs) || runs.Count == 0)
             {
@@ -236,34 +238,7 @@ public sealed partial class Repo
                 });
             }
         }
-
-        // 3c. orphan runs: scan sequence never appears on any dir/file
-        var usedSequences = new HashSet<long>();
-        foreach (var d in dirs.Values)
-        {
-            if (d.LastSeenScanSequence > 0)
-                usedSequences.Add(d.LastSeenScanSequence);
-        }
-
-        foreach (var f in files.Values)
-        {
-            if (f.LastSeenScanSequence > 0)
-                usedSequences.Add(f.LastSeenScanSequence);
-        }
-
-        foreach (var run in scanRuns)
-        {
-            if (!usedSequences.Contains(run.ScanSequence))
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Info,
-                    Code     = "RUN_ORPHAN_NO_REFERENCES",
-                    Message  = $"ScanRun {run.ScanSequence} (rootPath={run.RootPath}) is not referenced by any DirRecord/FileRecord."
-                });
-            }
-        }
-
+        
         // ----------------------------------------------------
         // 4. Log files: naming + basic deserialization
         // ----------------------------------------------------
@@ -379,7 +354,7 @@ public sealed partial class Repo
                     {
                         Severity = RepoIntegritySeverity.Warning,
                         Code     = "ROOT_SNAPSHOT_BAD_NAME",
-                        Message  = $"Snapshot file '{fileName}' does not parse as Guid in 'N' format.",
+                        Message  = $"Snapshot file '{fileName}' …does not parse as a long root id.",
                         FilePath = path
                     });
                 }
@@ -387,7 +362,7 @@ public sealed partial class Repo
         }
 
         // missing snapshots for known roots
-        foreach (var root in scanRoots.Values)
+        foreach (var root in scanRoots.Values.Where(r => !r.IsDeleted))
         {
             if (!snapshotFilesById.TryGetValue(root.RootId, out var path))
             {

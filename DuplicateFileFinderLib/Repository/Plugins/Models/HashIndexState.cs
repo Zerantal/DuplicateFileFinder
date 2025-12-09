@@ -1,6 +1,7 @@
+using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models.Plugins;
+namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 [MemoryPackable]
 internal sealed partial record HashIndexState

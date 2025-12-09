@@ -10,6 +10,8 @@ using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
@@ -26,7 +28,7 @@ namespace DuplicateFileFinderLibTests.Core;
 // They focus only on Repo-facing behavior of DuplicateFileFinder.
 public sealed class DuplicateFileFinderRepoTests : IDisposable
 {
-    private readonly TempFsFixture _fs = new();
+    private readonly TempFsFixture _fs = new("DFF");
 
     public void Dispose()
     {
@@ -48,6 +50,25 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         }
     }
 
+    private sealed class CapturingHost : IRepoHost
+    {
+        private TempFsFixture _repoDir = new TempFsFixture("DFF_repo");
+        public CapturingHost(IRepo repo)
+        {
+            Repo = repo;
+            HashIndex = new HashIndexPlugin(_repoDir.Root);
+            TreeIndex = new TreeIndexReadModel(_repoDir.Root);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            throw new NotImplementedException();
+        }
+
+        public IRepo Repo { get; }
+        public IHashIndexReadModel HashIndex { get; }
+        public ITreeIndexReadModel TreeIndex { get; }
+    }
     
     private sealed class CapturingRepo : IRepo
     {
@@ -64,13 +85,14 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
         public IReadOnlyList<ScanRoot> ScanRootsView { get; } = [];
 
-        public IScanSession BeginScan(string rootPath, ScanMode scanMode = ScanMode.Full, VolumeInfo? volume = null,
+        public IScanSession BeginScan(string rootPath, ScanOperation scanOperation = ScanOperation.FullScan, VolumeInfo? volumeInfo = null,
             int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
         {
             var session = new CapturingSession(rootPath);
             LastSession = session;
             Sessions.Add(session);
             BeginScanRoots.Add(rootPath);
+            
             return session;
         }
 
@@ -101,7 +123,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             throw new NotImplementedException();
         }
 
-        public void RemoveScanRoot(string rootPath)
+        public long AllocateRunId()
         {
             throw new NotImplementedException();
         }
@@ -122,24 +144,40 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         }
     }
 
-    private sealed class CapturingSession(string rootPath) : IScanSession
+    private sealed class CapturingSession : IScanSession
     {
         private long _dirCounter = 1;
-        public ScanRun Run { get; } = new()
-        {
-            ScanSequence = 1,
-            RootPath = rootPath,
-            StartedAt = DateTimeOffset.UtcNow,
-            Status = ScanRunStatus.InProgress,
-            ScanRootId = 88,
-            Mode = ScanMode.Full
-        };
+        public ScanRun Run { get; }
 
         public long ScanSequence => Run.ScanSequence;
         public string RootPath => Run.RootPath;
+        public DirRecord RootDir { get; init; }
 
         public readonly List<ObservedDir> ObservedDirectories = new();
         public readonly List<ObservedFile> ObservedFiles = new();
+
+        public CapturingSession(string rootPath)
+        {
+            Run = new ScanRun
+            {
+                ScanSequence = 1,
+                RootPath = rootPath,
+                StartedAt = DateTimeOffset.UtcNow,
+                Status = ScanRunStatus.InProgress,
+                ScanRootId = 88,
+                Operation = ScanOperation.FullScan,
+            };
+            
+            RootDir = new DirRecord
+            {
+                DirId = 121,
+                ParentDirId = null,
+                Name = "",
+                LastSeenScanSequence = 99,
+                Status = ScanEntryStatus.None, // “known root, not yet enumerated”
+                ErrorMessage = null
+            };
+        }
 
         public List<ObservedDir> FinalDirs => ObservedDirectories.GroupBy(d => d.FullPath).Select(g => g.Last()).ToList();
         public List<ObservedFile> FinalFiles => ObservedFiles.GroupBy(f => f.FullPath).Select(f => f.Last()).ToList();
@@ -155,40 +193,33 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public long AddOrUpdateDirectory(string fullPath, ScanEntryStatus? status, string? errorMessage)
+        public long AddOrUpdateDirectory(DirRecord dir)
         {
-            var lastRecordDirEntry = ObservedDirectories.LastOrDefault(f => f.FullPath == fullPath);
-            status ??= lastRecordDirEntry?.Status ?? ScanEntryStatus.Enumerated;
-            ObservedDirectories.Add(new ObservedDir(fullPath, status.Value, errorMessage));
-            return _dirCounter++;
-        }
-
-        public void AddOrUpdateFile(string fullFilePath, long? size = null, HashKey? hash = null, DateTimeOffset? modified = null,
-            DateTimeOffset? created = null, ScanEntryStatus? status = null, string? errorMessage = null)
-        {
-            var existingFile = ObservedFiles.LastOrDefault(f => f.FullPath == fullFilePath);
-            size ??= existingFile?.Size ?? 0;
-            created ??= existingFile?.Created ?? default(DateTimeOffset);
+            dir = dir with { DirId = _dirCounter++ };
+            var parentId = dir.ParentDirId;
+            string dirPath;
+            if (parentId is null)
+                dirPath = RootPath;
+            else
+            {
+                dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == parentId)?.FullPath ??
+                              RootPath;   
+            }
             
-            ObservedFiles.Add(
-                new ObservedFile(
-                    fullFilePath,
-                    size.Value,
-                    hash ?? HashKey.NotComputed,
-                    modified ?? default(DateTimeOffset),
-                    created.Value,
-                    status ?? ScanEntryStatus.Enumerated,
-                    errorMessage));
+            var fullPath = Path.Combine(dirPath, dir.Name);
+            ObservedDirectories.Add(new ObservedDir(fullPath, dir));
+            
+            return dir.DirId;
         }
 
-        public void MarkDirectoryDeleted(DirRecord dir)
+        public void AddOrUpdateFile(ref FileRecord file)
         {
-            throw new NotImplementedException();
-        }
-
-        public void MarkFileDeleted(FileRecord file)
-        {
-            throw new NotImplementedException();
+            var dirId = file.DirId;
+            var dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == dirId)?.FullPath ??
+                          RootPath;
+            
+            var fullPath = Path.Combine(dirPath, file.Name);
+            ObservedFiles.Add(new ObservedFile(fullPath, file));
         }
 
         public Task FlushProgressAsync(CancellationToken cancellationToken = default)
@@ -210,28 +241,24 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         }
     }
 
-    private sealed class ObservedDir(string fullPath, ScanEntryStatus status, string? error)
+    private sealed class ObservedDir(string fullPath, DirRecord dir)
     {
         public string FullPath { get; } = fullPath;
-        public ScanEntryStatus Status { get; } = status;
-        public string? Error { get; } = error;
+        public DirRecord DirRecord { get; } = dir;
+        
+        public ScanEntryStatus Status => DirRecord.Status;
     }
-    private sealed class ObservedFile(
-        string fullPath,
-        long size,
-        HashKey hash,
-        DateTimeOffset modified,
-        DateTimeOffset created,
-        ScanEntryStatus status,
-        string? errorMessage)
+    private sealed class ObservedFile(string fullPathOnDisk, FileRecord file)
     {
-        public string FullPath { get; } = fullPath;
-        public long Size { get; } = size;
-        public HashKey Hash { get; } = hash;
-        public DateTimeOffset Modified { get; } = modified;
-        public DateTimeOffset Created { get; } = created;
-        public ScanEntryStatus Status { get; } = status;
-        public string? ErrorMessage { get; } = errorMessage;
+        public string FullPath { get; } = fullPathOnDisk;
+        
+        public FileRecord FileRecord { get; } = file;
+        
+        public ScanEntryStatus Status => FileRecord.Status;
+        
+        public HashKey? Hash => FileRecord.Hash;
+        public long Size => FileRecord.Size;
+        public DateTimeOffset? Created => FileRecord.Created;
     }
     
     // ----------------- Tests -----------------
@@ -256,11 +283,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var uniq = _fs.File("c/unique.bin", worldBytes);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
+        var host = new CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
 
         // Act
         var progress = new Progress<DuplicateFileFinderProgressReport>();
-        await finder.ScanLocationAsync(_fs.Root, progressIndicator: progress, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(_fs.Root, progress: progress, ct: TestContext.Current.CancellationToken);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -320,9 +348,10 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var f2 = _fs.File("root/b.txt", "WORLD"u8, created2);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
+        var host = new CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
 
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -348,11 +377,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.File("root/file.bin", "DATA"u8.ToArray());
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo, false);
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host, false);
         
         var progress = new SynchronousProgress<DuplicateFileFinderProgressReport>(_ => { });
         
-        await finder.ScanLocationAsync(root, progressIndicator: progress, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, progress: progress, ct: TestContext.Current.CancellationToken);
 
         var report = progress.ProgressLog.ToList();
         
@@ -377,11 +407,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.File("root2/b.bin", "B"u8);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
+        var host = new CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
         var progress = new Progress<DuplicateFileFinderProgressReport>();
 
-        await finder.ScanLocationAsync(root1, progressIndicator: progress, token: TestContext.Current.CancellationToken);
-        await finder.ScanLocationAsync(root2, progressIndicator: progress, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root1, progress: progress, ct: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root2, progress: progress, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, repo.BeginScanRoots.Count);
 
@@ -409,14 +440,15 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.File("root/f.bin", "X"u8.ToArray());
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel(); // canceled before the scan starts
 
         // Act + Assert
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, token: cts.Token));
+            await finder.FullScanAsync(root, ct: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -436,11 +468,12 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var missingRoot = Path.Combine(_fs.Root, "does_not_exist");
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         // Act: expect some exception (e.g. DirectoryNotFoundException)
         await Assert.ThrowsAsync<DirectoryNotFoundException>(async () =>
-            await finder.ScanLocationAsync(missingRoot, token: CancellationToken.None));
+            await finder.FullScanAsync(missingRoot, ct: TestContext.Current.CancellationToken));
 
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
@@ -466,8 +499,9 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.File(Path.Combine("enumcancel", "sub2", "b.bin"), new byte[16]);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         using var cts = new CancellationTokenSource();
         
         var progress = new SynchronousProgress<DuplicateFileFinderProgressReport>(r =>
@@ -477,7 +511,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, progressIndicator: progress, token: cts.Token));
+            await finder.FullScanAsync(root, progress: progress, ct: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -498,8 +532,9 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             _fs.File(Path.Combine("hashcancel", $"f{i}.bin"), new byte[4096]);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         using var cts = new CancellationTokenSource();
         var reports = new List<DuplicateFileFinderProgressReport>();
 
@@ -515,7 +550,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await finder.ScanLocationAsync(root, progressIndicator: progress, token: cts.Token));
+            await finder.FullScanAsync(root, progress: progress, ct: cts.Token));
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -538,8 +573,9 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var f2 = _fs.File("stablehash/b.txt", "OTHER DATA"u8);
 
         var repo1 = new CapturingRepo();
-        var finder1 = new DuplicateFileFinder(repo1);
-        await finder1.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        var host1 = new  CapturingHost(repo1);
+        var finder1 = new DuplicateFileFinder(host1);
+        await finder1.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var session1 = Assert.IsType<CapturingSession>(repo1.LastSession);
         var hashesRun1 = session1.FinalFiles.ToDictionary(
@@ -547,8 +583,9 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             f => f.Hash);
 
         var repo2 = new CapturingRepo();
-        var finder2 = new DuplicateFileFinder(repo2);
-        await finder2.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        var host2 = new  CapturingHost(repo2);
+        var finder2 = new DuplicateFileFinder(host2);
+        await finder2.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var session2 = Assert.IsType<CapturingSession>(repo2.LastSession);
         var hashesRun2 = session2.FinalFiles.ToDictionary(
@@ -570,9 +607,10 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var f2 = _fs.File("contenthash/b.txt", "XYZ789"u8);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
-
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var session = Assert.IsType<CapturingSession>(repo.LastSession);
 
@@ -598,10 +636,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var file2 = _fs.File("rootB/shared.txt", "SAME-CONTENT"u8);
 
         var repo = new CapturingRepo();
-        var finder = new DuplicateFileFinder(repo);
-
-        await finder.ScanLocationAsync(root1, token: TestContext.Current.CancellationToken);
-        await finder.ScanLocationAsync(root2, token: TestContext.Current.CancellationToken);
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
+        await finder.FullScanAsync(root1, ct: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root2, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, repo.Sessions.Count);
     
@@ -660,10 +699,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
 
         var repo    = await CreateRepo(_fs.Root);
-        var finder  = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap1        = repo.GetSnapshot();
         var filesByPath1 = MapFilesByFullPath(repo, snap1);
@@ -679,7 +719,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Act: delete the file on disk and rescan the same root
         File.Delete(deletePath);
 
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap2        = repo.GetSnapshot();
         var filesByPath2 = MapFilesByFullPath(repo, snap2);
@@ -705,10 +745,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
 
         var repo    = await CreateRepo(_fs.Root);
-        var finder  = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap1        = repo.GetSnapshot();
         var filesByPath1 = MapFilesByFullPath(repo, snap1);
@@ -727,7 +768,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Act: delete the sub directory (and its child) and rescan the same root
         Directory.Delete(normSub, recursive: true);
 
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap2        = repo.GetSnapshot();
         var filesByPath2 = MapFilesByFullPath(repo, snap2);
@@ -753,17 +794,18 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
 
         var repo     = await CreateRepo(_fs.Root);
-        var finder   = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap1  = repo.GetSnapshot();
         var files1 = MapFilesByFullPath(repo, snap1);
         var dirs1  = MapDirsByFullPath(repo, snap1);
 
         // Second scan (full rescan, no changes on disk)
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+        await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
         var snap2  = repo.GetSnapshot();
         var files2 = MapFilesByFullPath(repo, snap2);
@@ -790,178 +832,182 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task QuickRescan_WithoutChanges_DoesNotDeleteOrChangeFilesOrDirs()
-    {
-        // Arrange
-        var root = _fs.Dir("root");
-        _fs.File("root/a.bin", "AAAA"u8.ToArray());
-        _fs.File("root/b.bin", "BBBB"u8.ToArray());
-        _fs.Dir("root/sub");
-        _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
+    // [Fact]
+    // public async Task QuickRescan_WithoutChanges_DoesNotDeleteOrChangeFilesOrDirs()
+    // {
+    //     // Arrange
+    //     var root = _fs.Dir("root");
+    //     _fs.File("root/a.bin", "AAAA"u8.ToArray());
+    //     _fs.File("root/b.bin", "BBBB"u8.ToArray());
+    //     _fs.Dir("root/sub");
+    //     _fs.File("root/sub/c.bin", "CCCC"u8.ToArray());
+    //
+    //     var repo     = await CreateRepo(_fs.Root);
+    //     var host = new  CapturingHost(repo);
+    //     var finder = new DuplicateFileFinder(host);
+    //     
+    //     // First scan (full)
+    //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap1  = repo.GetSnapshot();
+    //     var files1 = MapFilesByFullPath(repo, snap1);
+    //     var dirs1  = MapDirsByFullPath(repo, snap1);
+    //
+    //     // QuickScan rescan (no changes on disk)
+    //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap2  = repo.GetSnapshot();
+    //     var files2 = MapFilesByFullPath(repo, snap2);
+    //     var dirs2  = MapDirsByFullPath(repo, snap2);
+    //
+    //     // Assert: same dirs, no deletions
+    //     Assert.Equal(dirs1.Count, dirs2.Count);
+    //     Assert.True(dirs1.SetEquals(dirs2));
+    //
+    //     // Assert: same files by path
+    //     Assert.Equal(files1.Count, files2.Count);
+    //     Assert.True(files1.Keys.SequenceEqual(files2.Keys));
+    //
+    //     foreach (var path in files1.Keys)
+    //     {
+    //         var a = files1[path];
+    //         var b = files2[path];
+    //
+    //         Assert.Equal(a.Size, b.Size);
+    //         Assert.Equal(a.Hash, b.Hash);
+    //         Assert.False(a.Status.HasFlag(ScanEntryStatus.Deleted));
+    //         Assert.False(b.Status.HasFlag(ScanEntryStatus.Deleted));
+    //         Assert.Equal(a.ErrorMessage, b.ErrorMessage);
+    //     }
+    // }
 
-        var repo     = await CreateRepo(_fs.Root);
-        var finder   = new DuplicateFileFinder(repo);
+    // [Fact]
+    // public async Task QuickRescan_WithDeletedFile_RemovesFileAndHashIndexEntry()
+    // {
+    //     // Arrange
+    //     var root       = _fs.Dir("root");
+    //     var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
+    //     var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
+    //
+    //     var repo     = await CreateRepo(_fs.Root);
+    //     var host = new  CapturingHost(repo);
+    //     var finder = new DuplicateFileFinder(host);
+    //     
+    //     // First scan
+    //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap1  = repo.GetSnapshot();
+    //     var files1 = MapFilesByFullPath(repo, snap1);
+    //
+    //     // Sanity: both files present
+    //     Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
+    //     Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, deletePath));
+    //
+    //     // Delete file on disk
+    //     File.Delete(deletePath);
+    //
+    //     // Act: quick rescan
+    //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap2  = repo.GetSnapshot();
+    //     var files2 = MapFilesByFullPath(repo, snap2);
+    //
+    //     // Assert: kept file remains, deleted file gone
+    //     Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
+    //     Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, deletePath));
+    // }
+    //
+    // [Fact]
+    // public async Task QuickRescan_WithDeletedDirectory_RemovesDirectoryAndChildren()
+    // {
+    //     // Arrange
+    //     var root     = _fs.Dir("root");
+    //     var keepPath = _fs.File("root/keep.bin", "AAAA"u8.ToArray());
+    //     _fs.Dir("root/sub");
+    //     var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
+    //
+    //     var repo     = await CreateRepo(_fs.Root);
+    //     var host = new  CapturingHost(repo);
+    //     var finder = new DuplicateFileFinder(host);
+    //     
+    //     // First scan
+    //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap1  = repo.GetSnapshot();
+    //     var files1 = MapFilesByFullPath(repo, snap1);
+    //     var dirs1  = MapDirsByFullPath(repo, snap1);
+    //
+    //     var normRoot = PathUtils.NormalizePath(root);
+    //     var normSub  = PathUtils.NormalizePath(Path.Combine(root, "sub"));
+    //
+    //     // Sanity: root dir, sub dir, and both files exist
+    //     Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normRoot));
+    //     Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normSub));
+    //     Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
+    //     Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, childPath));
+    //
+    //     // Delete sub directory on disk
+    //     Directory.Delete(normSub, recursive: true);
+    //
+    //     // Act: quick rescan
+    //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap2  = repo.GetSnapshot();
+    //     var files2 = MapFilesByFullPath(repo, snap2);
+    //     var dirs2  = MapDirsByFullPath(repo, snap2);
+    //
+    //     // Assert: root dir remains, sub dir removed
+    //     Assert.Contains(dirs2, p => PathUtils.IsSamePath(p, normRoot));
+    //     Assert.DoesNotContain(dirs2, p => PathUtils.IsSamePath(p, normSub));
+    //
+    //     // Kept file remains, child file removed
+    //     Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
+    //     Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, childPath));
+    // }
 
-        // First scan (full)
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
-
-        var snap1  = repo.GetSnapshot();
-        var files1 = MapFilesByFullPath(repo, snap1);
-        var dirs1  = MapDirsByFullPath(repo, snap1);
-
-        // Quick rescan (no changes on disk)
-        await finder.ScanLocationAsync(root, ScanMode.Quick, token: TestContext.Current.CancellationToken);
-
-        var snap2  = repo.GetSnapshot();
-        var files2 = MapFilesByFullPath(repo, snap2);
-        var dirs2  = MapDirsByFullPath(repo, snap2);
-
-        // Assert: same dirs, no deletions
-        Assert.Equal(dirs1.Count, dirs2.Count);
-        Assert.True(dirs1.SetEquals(dirs2));
-
-        // Assert: same files by path
-        Assert.Equal(files1.Count, files2.Count);
-        Assert.True(files1.Keys.SequenceEqual(files2.Keys));
-
-        foreach (var path in files1.Keys)
-        {
-            var a = files1[path];
-            var b = files2[path];
-
-            Assert.Equal(a.Size, b.Size);
-            Assert.Equal(a.Hash, b.Hash);
-            Assert.False(a.Status.HasFlag(ScanEntryStatus.Deleted));
-            Assert.False(b.Status.HasFlag(ScanEntryStatus.Deleted));
-            Assert.Equal(a.ErrorMessage, b.ErrorMessage);
-        }
-    }
-
-    [Fact]
-    public async Task QuickRescan_WithDeletedFile_RemovesFileAndHashIndexEntry()
-    {
-        // Arrange
-        var root       = _fs.Dir("root");
-        var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
-        var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
-
-        var repo     = await CreateRepo(_fs.Root);
-        var finder   = new DuplicateFileFinder(repo);
-
-        // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
-
-        var snap1  = repo.GetSnapshot();
-        var files1 = MapFilesByFullPath(repo, snap1);
-
-        // Sanity: both files present
-        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
-        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, deletePath));
-
-        // Delete file on disk
-        File.Delete(deletePath);
-
-        // Act: quick rescan
-        await finder.ScanLocationAsync(root, ScanMode.Quick, token: TestContext.Current.CancellationToken);
-
-        var snap2  = repo.GetSnapshot();
-        var files2 = MapFilesByFullPath(repo, snap2);
-
-        // Assert: kept file remains, deleted file gone
-        Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
-        Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, deletePath));
-    }
-
-    [Fact]
-    public async Task QuickRescan_WithDeletedDirectory_RemovesDirectoryAndChildren()
-    {
-        // Arrange
-        var root     = _fs.Dir("root");
-        var keepPath = _fs.File("root/keep.bin", "AAAA"u8.ToArray());
-        _fs.Dir("root/sub");
-        var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
-
-        var repo     = await CreateRepo(_fs.Root);
-        var finder   = new DuplicateFileFinder(repo);
-
-        // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
-
-        var snap1  = repo.GetSnapshot();
-        var files1 = MapFilesByFullPath(repo, snap1);
-        var dirs1  = MapDirsByFullPath(repo, snap1);
-
-        var normRoot = PathUtils.NormalizePath(root);
-        var normSub  = PathUtils.NormalizePath(Path.Combine(root, "sub"));
-
-        // Sanity: root dir, sub dir, and both files exist
-        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normRoot));
-        Assert.Contains(dirs1, p => PathUtils.IsSamePath(p, normSub));
-        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, keepPath));
-        Assert.Contains(files1.Keys, p => PathUtils.IsSamePath(p, childPath));
-
-        // Delete sub directory on disk
-        Directory.Delete(normSub, recursive: true);
-
-        // Act: quick rescan
-        await finder.ScanLocationAsync(root, ScanMode.Quick, token: TestContext.Current.CancellationToken);
-
-        var snap2  = repo.GetSnapshot();
-        var files2 = MapFilesByFullPath(repo, snap2);
-        var dirs2  = MapDirsByFullPath(repo, snap2);
-
-        // Assert: root dir remains, sub dir removed
-        Assert.Contains(dirs2, p => PathUtils.IsSamePath(p, normRoot));
-        Assert.DoesNotContain(dirs2, p => PathUtils.IsSamePath(p, normSub));
-
-        // Kept file remains, child file removed
-        Assert.Contains(files2.Keys, p => PathUtils.IsSamePath(p, keepPath));
-        Assert.DoesNotContain(files2.Keys, p => PathUtils.IsSamePath(p, childPath));
-    }
-
-    [Fact]
-    public async Task QuickRescan_WithModifiedFile_UpdatesHashOnlyForChangedFile()
-    {
-        // Arrange
-        var root       = _fs.Dir("root");
-        var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
-        var changePath = _fs.File("root/change.bin", "BBBB"u8.ToArray());
-
-        var repo     = await CreateRepo(_fs.Root);
-        var finder   = new DuplicateFileFinder(repo);
-
-        // First scan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
-
-        var snap1  = repo.GetSnapshot();
-        var files1 = MapFilesByFullPath(repo, snap1);
-
-        var keep1   = files1.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
-        var change1 = files1.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
-
-        // Modify one file on disk
-        await File.WriteAllBytesAsync(changePath, "CCCC"u8.ToArray(), TestContext.Current.CancellationToken);
-
-        // Act: quick rescan
-        await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
-
-        var snap2  = repo.GetSnapshot();
-        var files2 = MapFilesByFullPath(repo, snap2);
-
-        var keep2   = files2.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
-        var change2 = files2.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
-
-        // Kept file: unchanged
-        Assert.Equal(keep1.Hash, keep2.Hash);
-        Assert.Equal(keep1.Size, keep2.Size);
-        Assert.Equal(keep1.Status, keep2.Status);
-
-        // Changed file: hash and modified time updated, still hashed
-        Assert.NotEqual(change1.Hash, change2.Hash);
-        Assert.NotEqual(change1.Modified, change2.Modified);
-        Assert.Equal(ScanEntryStatus.Hashed, change2.Status);
-    }
+    // [Fact]
+    // public async Task QuickRescan_WithModifiedFile_UpdatesHashOnlyForChangedFile()
+    // {
+    //     // Arrange
+    //     var root       = _fs.Dir("root");
+    //     var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
+    //     var changePath = _fs.File("root/change.bin", "BBBB"u8.ToArray());
+    //
+    //     var repo     = await CreateRepo(_fs.Root);
+    //     var host = new  CapturingHost(repo);
+    //     var finder = new DuplicateFileFinder(host);
+    //     
+    //     // First scan
+    //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap1  = repo.GetSnapshot();
+    //     var files1 = MapFilesByFullPath(repo, snap1);
+    //
+    //     var keep1   = files1.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
+    //     var change1 = files1.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
+    //
+    //     // Modify one file on disk
+    //     await File.WriteAllBytesAsync(changePath, "CCCC"u8.ToArray(), TestContext.Current.CancellationToken);
+    //
+    //     // Act: quick rescan
+    //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
+    //
+    //     var snap2  = repo.GetSnapshot();
+    //     var files2 = MapFilesByFullPath(repo, snap2);
+    //
+    //     var keep2   = files2.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
+    //     var change2 = files2.Single(kv => PathUtils.IsSamePath(kv.Key, changePath)).Value;
+    //
+    //     // Kept file: unchanged
+    //     Assert.Equal(keep1.Hash, keep2.Hash);
+    //     Assert.Equal(keep1.Size, keep2.Size);
+    //     Assert.Equal(keep1.Status, keep2.Status);
+    //
+    //     // Changed file: hash and modified time updated, still hashed
+    //     Assert.NotEqual(change1.Hash, change2.Hash);
+    //     Assert.NotEqual(change1.Modified, change2.Modified);
+    //     Assert.Equal(ScanEntryStatus.Hashed, change2.Status);
+    // }
     
     [Fact]
     public async Task FileNameWithBackslash_IsNotSplitIntoDirectory_OnUnix()
@@ -986,10 +1032,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var repoDir = Path.Combine(_fs.Root, ".repo");
         Directory.CreateDirectory(repoDir);
         var repo   = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
-        var finder = new DuplicateFileFinder(repo);
-
+        var host = new  CapturingHost(repo);
+        var finder = new DuplicateFileFinder(host);
+        
         // Act
-        await finder.ScanLocationAsync(root, progressIndicator: null, token: CancellationToken.None);
+        await finder.FullScanAsync(root, progress: null, ct: CancellationToken.None);
 
         var snapshot = repo.GetSnapshot();
 

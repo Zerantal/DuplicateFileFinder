@@ -12,10 +12,11 @@ public enum ScanRunStatus : byte
     Cancelled  = 3
 }
 
-public enum ScanMode : byte
+public enum ScanOperation : byte
 {
-    Full  = 0,   // Enumerate & compute hashes of all files/dirs in scan root           
-    Quick = 1    // Enumerate & compute hashes of files where a change has been detected
+    FullScan  = 0,  // Enumerate & compute hashes of all files/dirs in scan root           
+    QuickScan = 1,  // Enumerate & compute hashes of files where a change has been detected
+    ScanRemoval = 2 // Remove scan root + all dirs/files under scan root
 }
 
 [MemoryPackable]
@@ -28,6 +29,6 @@ public sealed partial record ScanRun
     [MemoryPackOrder(4)] public DateTimeOffset? FinishedAt          { get; init; }
     [MemoryPackOrder(5)] public required ScanRunStatus Status       { get; init; }
     [MemoryPackOrder(6)] public string? ErrorMessage                { get; init; }
-    [MemoryPackOrder(7)] public ScanMode Mode                       { get; init; } = ScanMode.Full;
+    [MemoryPackOrder(7)] public ScanOperation Operation                       { get; init; } = ScanOperation.FullScan;
 
 }

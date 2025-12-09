@@ -7,7 +7,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    internal long AllocateRunId()
+    public long AllocateRunId()
     {
         lock (_sync)
         {
@@ -45,11 +45,27 @@ public sealed partial class Repo
         }
     }
 
+    internal long AllocateDirId()
+    {
+        lock (_sync)
+        {
+            return AllocateDirId_NoLock();
+        }
+    }
+    
     internal long AllocateDirId_NoLock()
     {
         var id = Meta.NextDirId;
         Meta = Meta with { NextDirId = id + 1 };
         return id;
+    }
+
+    internal long AllocateFileId()
+    {
+        lock (_sync)
+        {
+            return AllocateFileId_NoLock();
+        }
     }
 
     internal long AllocateFileId_NoLock()
@@ -202,12 +218,15 @@ public sealed partial class Repo
     }
     
     // Find existing ScanRoot by canonical path or create a new one.
-    private ScanRoot FindOrCreateScanRoot_NoLock(string normalizedRootPath)
+    private ScanRoot FindOrCreateScanRoot_NoLock(string? volumePath, string relativeRootPath)
     {
-        foreach (var root in _scanRoots.Values)
+        foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
         {
-            if (string.Equals(root.RootPath, normalizedRootPath, StringComparison.Ordinal))
+            if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
+                string.Equals(root.RootPath,  relativeRootPath, StringComparison.Ordinal))
+            {
                 return root;
+            }
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -215,7 +234,8 @@ public sealed partial class Repo
         var newRoot = new ScanRoot
         {
             RootId        = AllocateRootId_NoLock(),
-            RootPath      = normalizedRootPath,
+            VolumePath     = volumePath,
+            RootPath       = relativeRootPath,   // now relative to VolumePath
             DirId         = 0,
             CreatedAt     = now,
             LastScannedAt = now,
@@ -224,11 +244,12 @@ public sealed partial class Repo
             IsRotational  = null,
             FileSystemType = null,
             DevicePath    = null,
-            DeviceModel   = null
+            DeviceModel   = null,
+            IsDeleted     = false,
+            DeletedAtUtc  = null
         };
 
         _scanRoots[newRoot.RootId] = newRoot;
-        
         SyncMetaFile_NoLock();
         _ = PersistMetaAsync();
 
@@ -241,11 +262,11 @@ public sealed partial class Repo
         {
             if (!_scanRoots.TryGetValue(scanRootId, out var root))
                 return;
-
+    
             // Already bound to this dir: nothing to do
             if (root.DirId == dirId)
                 return;
-
+    
             // First-time bind, or rebind if it was Guid.Empty
             if (root.DirId == 0 || root.DirId == dirId)
             {

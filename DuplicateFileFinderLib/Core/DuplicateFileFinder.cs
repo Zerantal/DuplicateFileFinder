@@ -4,552 +4,74 @@ using System.Runtime.InteropServices;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.IO.Platforms;
-using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
-using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
 
 public sealed class DuplicateFileFinder
 {
-    private readonly IChecksumPipeline _checksums;
-    private readonly IFileEnumerator _fs;
+    private readonly FullScanOperation _fullScan;
+    private readonly QuickScanOperation _quickScan;
+    private readonly RemoveRootOperation _removeRoot;
 
-    private readonly IRepo _repo;
-    
     private readonly bool _throttleProgress = true;
-    
-    private readonly IVolumeInfoProvider? _volumeInfoProvider;
-    
-    private int _hashDegreeOfParallelism;
 
-    /// <summary>
-    /// Internal representation of a file that needs hashing.
-    /// </summary>
-    private readonly record struct FileToHash(
-        string         Path,
-        long           Size,                // ReSharper disable once NotAccessedPositionalProperty.Local
-        DateTimeOffset CreatedUtc,         // ReSharper disable once NotAccessedPositionalProperty.Local
-        DateTimeOffset ModifiedUtc); 
+    public DuplicateFileFinder(IRepoHost host) : this(host, null)
+    {
+    }
 
-    public DuplicateFileFinder(
-        IRepo repo,
+    internal DuplicateFileFinder(
+        IRepoHost host,
         IVolumeInfoProvider? volumeInfoProvider = null,
         IFileEnumerator? fs = null,
         IChecksumPipeline? checksums = null)
     {
-        if (volumeInfoProvider is not null)
-            _volumeInfoProvider = volumeInfoProvider;
-        else
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                _volumeInfoProvider = new WindowsVolumeInfoProvider();
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                _volumeInfoProvider = new LinuxVolumeInfoProvider();
-        
-        _fs = fs ?? new FileEnumerator();
-        _checksums = checksums ?? new ChecksumPipelineMD5();
-        _repo = repo;
-        _hashDegreeOfParallelism = Environment.ProcessorCount;
+        fs ??= new FileEnumerator();
+        checksums ??= new ChecksumPipelineMD5();
+
+        if (volumeInfoProvider is null && RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            volumeInfoProvider = new WindowsVolumeInfoProvider();
+        if (volumeInfoProvider is null && RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            volumeInfoProvider = new LinuxVolumeInfoProvider();
+
+        _fullScan = new FullScanOperation(host, fs, checksums, volumeInfoProvider);
+        _quickScan = new QuickScanOperation(host, fs, checksums, volumeInfoProvider);
+        _removeRoot = new RemoveRootOperation(host);
     }
-    
-    internal DuplicateFileFinder(IRepo repo, bool throttleProgress)
-        : this(repo: repo)
+
+    internal DuplicateFileFinder(IRepoHost host, bool throttleProgress)
+        : this(host)
     {
         _throttleProgress = throttleProgress;
     }
 
-    // ------------ Public scanning API ----------------
-
-    public async Task ScanLocationAsync(
-        string location,
-        ScanMode mode = ScanMode.Full,
-        IProgress<DuplicateFileFinderProgressReport>? progressIndicator = null,
-        CancellationToken token = default)
-    {
-        location = PathUtils.NormalizePath(location);
-
-        var progress = _throttleProgress && progressIndicator is not null
-            ? new ThrottledProgress(progressIndicator)
-            : progressIndicator;
-
-        // Get volume info - best effort
-        VolumeInfo? vInfo = null;
-        try
-        {
-            vInfo = _volumeInfoProvider?.GetVolumeInfoForPath(location);
-        }
-        catch
-        {
-            // ignored
-        }
-
-        _hashDegreeOfParallelism = vInfo is { IsRotational: true } ? 1 : Environment.ProcessorCount;
-        
-        var session = _repo.BeginScan(location, mode, vInfo);
-
-        try
-        {
-            // 0.5) Bail on error reading scan location
-            if (!Directory.Exists(location))
-            {
-                string msg = $"Root scan path does not exist: {location}";
-                throw new DirectoryNotFoundException(msg);
-            }
-            
-            // 1) Enumerate filesystem and record into repo
-            QuickRescanState? quickState = null;
-            if (mode == ScanMode.Quick)
-            {
-                var snapshot = _repo.GetSnapshot();
-                quickState = BuildQuickRescanState(snapshot, location);
-            }
-
-            List<FileToHash> filesToHash;
-            using (PhaseScope.Begin(ScanPhase.Enumerating))
-            using (TimingLog.StartPhase(ScanPhase.Enumerating))
-            {
-                filesToHash = await EnumeratePhaseAsync(
-                    rootPath: location,
-                    progress: progress,
-                    session: session,
-                    quickState: quickState,
-                    token: token);
-            }
-
-            // 2) Hash all non-zero files
-            using (PhaseScope.Begin(ScanPhase.Hashing))
-            using (TimingLog.StartPhase(ScanPhase.Hashing))
-            {
-                await RunHashingAsync(filesToHash, progress, session, token);
-            }
-            
-            // Deletion detection (quick rescan only)
-            if (quickState is not null)
-            {
-                ApplyQuickRescanDeletions(quickState, session);
-            }
-
-            await session.CompleteAsync(token);
-            Report(progress, ScanPhase.Completed, "Finished Scanning", 1.0, running: false);
-            await _repo.CompactAsync(ct: token);
-        }
-        catch (OperationCanceledException)
-        {
-            await session.FailAsync("Scan cancelled.", true, token);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            await session.FailAsync(ex.Message, false, token);
-            throw;
-        }
-        finally
-        {
-            await session.DisposeAsync();
-        }
-    }
-
-
-    // ------------ Enumeration phase ----------------
-    
-    private async Task<List<FileToHash>> EnumeratePhaseAsync(
+    public Task FullScanAsync(
         string rootPath,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        IScanSession session,
-        QuickRescanState? quickState,
-        CancellationToken token)
+        IProgress<DuplicateFileFinderProgressReport>? progress = null,
+        CancellationToken ct = default)
     {
-        var filesToHash   = new List<FileToHash>();
-        var dirsToVisit   = new Stack<string>();
-        long foldersVisited = 0;
-
-        var prevFiles = quickState?.PreviousFiles;
-        var prevDirs  = quickState?.PreviousDirs;
-
-        dirsToVisit.Push(rootPath);
-
-        while (dirsToVisit.Count > 0)
-        {
-            token.ThrowIfCancellationRequested();
-
-            var dir = dirsToVisit.Pop();
-            var normDir = PathUtils.NormalizePath(dir);
-
-            foldersVisited++;
-
-            Report(
-                progress,
-                ScanPhase.Enumerating,
-                $"Scanning {normDir}",
-                indeterminate: true,
-                processed: foldersVisited);
-            
-            // Mark this directory as seen, if it existed previously
-            prevDirs?.Remove(normDir);
-
-            session.AddOrUpdateDirectory(normDir);
-            TimingLog.Counter("folders");
-
-            foreach (var e in _fs.EnumerateChildren(normDir, token))
-            {
-                if (e.IsDirectory)
-                {
-                    dirsToVisit.Push(e.FullPath);
-                    continue;
-                }
-
-                var fullPath = PathUtils.NormalizePath(e.FullPath);
-                
-                // Quick-rescan: try to reuse existing hash
-                if (TryReuseExistingFile(
-                        fullPath,
-                        e.Length,
-                        e.CreationTimeUtc,
-                        e.ModifiedTimeUtc,
-                        prevFiles,
-                        session))
-                {
-                    prevFiles?.Remove(fullPath);
-                    continue;
-                }
-
-                // Normal path: record as enumerated, hash not computed yet.
-                session.AddOrUpdateFile(
-                    fullFilePath: fullPath,
-                    size: e.Length,
-                    hash: HashKey.NotComputed,
-                    modified: e.ModifiedTimeUtc,
-                    created: e.CreationTimeUtc,
-                    status: ScanEntryStatus.Enumerated);
-
-                // Only non-zero files are hashed
-                if (e.Length > 0)
-                {
-                    filesToHash.Add(new FileToHash(
-                        fullPath,
-                        e.Length,
-                        e.CreationTimeUtc,
-                        e.ModifiedTimeUtc));
-                }
-                
-                TimingLog.Counter("files");
-            }
-
-            // Give the scheduler a chance occasionally in large trees
-            if ((foldersVisited & 0xFF) == 0)
-                await Task.Yield();
-        }
-
-        return filesToHash;
+        return _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
     }
 
-    private static bool TryReuseExistingFile(
-        string fullPath,
-        long size,
-        DateTimeOffset createdUtc,
-        DateTimeOffset modifiedUtc,
-        Dictionary<string, FileRecord>? previousFilesByPath,
-        IScanSession session)
+    public Task QuickScanAsync(
+        string rootPath,
+        IProgress<DuplicateFileFinderProgressReport>? progress = null,
+        CancellationToken ct = default)
     {
-        if (previousFilesByPath is null)
-            return false;
-
-        if (!previousFilesByPath.TryGetValue(fullPath, out var prev))
-            return false;
-
-        // Must be a previously hashed, error-free file
-        if (prev.Status != ScanEntryStatus.Hashed)
-            return false;
-        if (!prev.Hash.IsComputed)
-            return false;
-        if (!string.IsNullOrEmpty(prev.ErrorMessage))
-            return false;
-
-        // Size and modified timestamp must match
-        if (prev.Size != size)
-            return false;
-        if (prev.Modified != modifiedUtc)
-            return false;
-
-        // ignore creation time mismatch
-
-        // Reuse the hash, mark as hashed in the new scan
-        session.AddOrUpdateFile(
-            fullFilePath: fullPath,
-            size: size,
-            hash: prev.Hash,
-            modified: modifiedUtc,
-            created: createdUtc,
-            status: ScanEntryStatus.Hashed);
-
-        return true;
+        return _quickScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
     }
 
-    private sealed class QuickRescanState
+    public void RemoveScanRoot(long scanRootId)
     {
-        public Dictionary<string, FileRecord> PreviousFiles { get; }
-        public Dictionary<string, DirRecord>  PreviousDirs  { get; }
-
-        public QuickRescanState(
-            Dictionary<string, FileRecord> previousFiles,
-            Dictionary<string, DirRecord>  previousDirs)
-        {
-            PreviousFiles = previousFiles;
-            PreviousDirs  = previousDirs;
-        }
+        _removeRoot.Execute(scanRootId);
     }
 
-    private QuickRescanState BuildQuickRescanState(RepoViewSnapshot snapshot, string rootPath)
+    // helper
+    private IProgress<DuplicateFileFinderProgressReport>? ThrottledProgress(
+        IProgress<DuplicateFileFinderProgressReport>? progress = null)
     {
-        var rootNormalized = PathUtils.NormalizePath(rootPath);
-
-        var files = new Dictionary<string, FileRecord>(PathUtils.PathComparer);
-        var dirs  = new Dictionary<string, DirRecord>(PathUtils.PathComparer);
-
-        foreach (var dir in snapshot.Dirs.Values)
-        {
-            var dirPath = _repo.GetFullDirPath(dir.DirId);
-            var norm    = PathUtils.NormalizePath(dirPath);
-
-            if (!norm.StartsWith(rootNormalized, PathUtils.PathComparison))
-                continue;
-
-            dirs[norm] = dir;
-        }
-
-        foreach (var file in snapshot.Files.Values)
-        {
-            var dirPath = _repo.GetFullDirPath(file.DirId);
-            var full    = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
-
-            if (!full.StartsWith(rootNormalized, PathUtils.PathComparison))
-                continue;
-
-            files[full] = file;
-        }
-
-        return new QuickRescanState(files, dirs);
+        return _throttleProgress && progress is not null
+            ? new ThrottledProgress(progress)
+            : progress;
     }
-
-    private void ApplyQuickRescanDeletions(QuickRescanState quickState, IScanSession session)
-    {
-        // Files that remained in the map are now missing on disk
-        foreach (var file in quickState.PreviousFiles.Values)
-        {
-            session.MarkFileDeleted(file);
-        }
-
-        // Directories that remained are missing; this naturally includes whole subtrees.
-        foreach (var dir in quickState.PreviousDirs.Values)
-        {
-            session.MarkDirectoryDeleted(dir);
-        }
-    }
-
-
-    
-    // ------------ Hashing phase ----------------
-    
-    // Inside DuplicateFileFinder
-
-    private async Task RunHashingAsync(
-        IReadOnlyList<FileToHash> filesToHash,
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        IScanSession session,
-        CancellationToken token)
-    {
-        Report(progress, ScanPhase.Hashing, "Computing checksums...");
-
-        var total = filesToHash.Count;
-        if (total == 0)
-        {
-            Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
-            return;
-        }
-        
-        var result = await HashingRunner.HashFilesAsync(
-            filesToHash,
-            _checksums,
-            _hashDegreeOfParallelism,
-            progress,
-            token).ConfigureAwait(false);
-
-        HashingRunner.ApplyHashResults(filesToHash, result, session);
-        HashingRunner.RecordHashingStats(filesToHash, result);
-
-        Report(
-            progress,
-            ScanPhase.Hashing,
-            "Hashing complete.",
-            percent: 1.0,
-            processed: total,
-            total: total);
-    }
-    
-    
-    // ------------ Progress helper ----------------
-
-    private static void Report(
-        IProgress<DuplicateFileFinderProgressReport>? progress,
-        ScanPhase phase,
-        string message,
-        double percent = 0.0,
-        bool indeterminate = false,
-        long processed = 0,
-        long total = 0,
-        bool running = true)
-    {
-        progress?.Report(new DuplicateFileFinderProgressReport
-        {
-            Phase = phase,
-            StatusMessage = message,
-            PercentComplete = percent,
-            IsIndeterminate = indeterminate,
-            Processed = processed,
-            Total = total,
-            IsRunning = running
-        });
-    }
-    
-    // ---------- HashingHelper -----------
-    private static class HashingRunner
-    {
-        internal sealed class Result
-        {
-            public Result(HashKey[] hashes, string?[] errors, bool[] ok)
-            {
-                Hashes = hashes;
-                Errors = errors;
-                Ok     = ok;
-            }
-
-            public HashKey[] Hashes { get; }
-            public string?[] Errors { get; }
-            public bool[]    Ok     { get; }
-
-            // ReSharper disable once UnusedMember.Local
-            public int Total => Hashes.Length;
-        }
-
-        public static async Task<Result> HashFilesAsync(
-            IReadOnlyList<FileToHash> files,
-            IChecksumPipeline pipeline,
-            int hashDegreeOfParallelism,
-            IProgress<DuplicateFileFinderProgressReport>? progress,
-            CancellationToken token)
-        {
-            var total = files.Count;
-            var hashes = new HashKey[total];
-            var errors = new string?[total];
-            var ok     = new bool[total];
-
-            var dop       = Math.Max(1, hashDegreeOfParallelism);
-            var semaphore = new SemaphoreSlim(dop);
-            var tasks     = new Task[total];
-            long processed = 0;
-
-            for (int i = 0; i < total; i++)
-            {
-                int idx  = i;
-                var file = files[idx];
-
-                await semaphore.WaitAsync(token).ConfigureAwait(false);
-
-                tasks[idx] = Task.Run(async () =>
-                {
-                    try
-                    {
-                        token.ThrowIfCancellationRequested();
-
-                        var hashKey = await pipeline
-                            .ComputeFileHashAsync(file.Path, token)
-                            .ConfigureAwait(false);
-
-                        hashes[idx] = hashKey;
-                        ok[idx]     = true;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        hashes[idx] = HashKey.CannotCompute;
-                        errors[idx] = ex.Message;
-                        ok[idx]     = false;
-                    }
-                    finally
-                    {
-                        var done = Interlocked.Increment(ref processed);
-                        var pct  = Math.Min(1.0, (double)done / total);
-
-                        DuplicateFileFinder.Report(
-                            progress,
-                            ScanPhase.Hashing,
-                            done == total
-                                ? "Finished hashing."
-                                : $"Hashing files... ({done}/{total})",
-                            pct,
-                            processed: done,
-                            total: total);
-
-                        semaphore.Release();
-                    }
-                }, token);
-            }
-
-            await Task.WhenAll(tasks).ConfigureAwait(false);
-
-            return new Result(hashes, errors, ok);
-        }
-
-        public static void ApplyHashResults(
-            IReadOnlyList<FileToHash> files,
-            Result result,
-            IScanSession session)
-        {
-            for (int i = 0; i < files.Count; i++)
-            {
-                var file  = files[i];
-                var hash  = result.Hashes[i];
-                var error = result.Errors[i];
-
-                if (result.Ok[i])
-                {
-                    session.AddOrUpdateFile(
-                        fullFilePath: file.Path,
-                        hash: hash,
-                        status: ScanEntryStatus.Hashed);
-                }
-                else
-                {
-                    session.AddOrUpdateFile(
-                        fullFilePath: file.Path,
-                        hash: hash,
-                        status: ScanEntryStatus.Error,
-                        errorMessage: error);
-                }
-            }
-        }
-
-        public static void RecordHashingStats(
-            IReadOnlyList<FileToHash> files,
-            Result result)
-        {
-            long bytes = 0;
-            int count  = 0;
-
-            for (int i = 0; i < files.Count; i++)
-            {
-                if (!result.Ok[i]) continue;
-                count++;
-                bytes += files[i].Size;
-            }
-
-            TimingLog.Counter("files_hashed",  count);
-            TimingLog.Counter("bytes_hashed",  bytes);
-        }
-    }
-
 }

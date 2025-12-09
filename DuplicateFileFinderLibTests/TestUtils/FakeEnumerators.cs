@@ -15,9 +15,11 @@ public sealed class TestEnumerateCanceler(int yieldBeforeSignal, int totalToYiel
         {
             token.ThrowIfCancellationRequested();
             if (i == yieldBeforeSignal) signal.Set();
+            var name = $"f{i}.bin";
             yield return new FsEntry(IsDirectory: false,
-                FullPath: Path.Combine(dir, $"f{i}.bin"),
+                FullPath: Path.Combine(dir, name ),
                 Length: 1,
+                Name: name,
                 CreationTimeUtc: DateTimeOffset.Now,
                 ModifiedTimeUtc: DateTimeOffset.Now);
         }
@@ -32,9 +34,11 @@ public sealed class TestEnumeratorThrower(int throwOnIndex) : IFileEnumerator
         {
             token.ThrowIfCancellationRequested();
             if (i == throwOnIndex) throw new IOException("Injected iterator failure");
+            var name = $"f{i}.bin";
             yield return new FsEntry(
                 false, 
-                Path.Combine(dir, $"f{i}.bin"),
+                FullPath: Path.Combine(dir, name),
+                name,
                 1,
                 DateTimeOffset.Now,
                 DateTimeOffset.Now);

@@ -42,8 +42,9 @@ public sealed class LinuxVolumeInfoProviderTests
         """;
 
         var devicePath = "/dev/sdd1";
+        var volumePath = "/";
 
-        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath)!;
+        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath, volumePath)!;
 
         Assert.Equal("partuuid:3333-4444", info.VolumeId);      // PARTUUID wins for VolumeId
         Assert.Equal("wwn:0x500123456789abcd", info.DeviceId);  // WWN wins for DeviceId
@@ -80,8 +81,9 @@ public sealed class LinuxVolumeInfoProviderTests
         """;
 
         var devicePath = "/dev/sdc1";
+        var volumePath = "/home";
 
-        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath)!;
+        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath, volumePath)!;
 
         Assert.Equal("serial:USB123456", info.DeviceId);   // no WWN -> serial
         Assert.Equal("uuid:aaaa-bbbb", info.VolumeId);     // no PARTUUID -> UUID
@@ -115,8 +117,9 @@ public sealed class LinuxVolumeInfoProviderTests
         """;
 
         var devicePath = "/dev/sdb1";
+        var volumePath = "/var";
 
-        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath)!;
+        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath, volumePath)!;
 
         Assert.Null(info.DeviceId);          // no WWN or Serial
         Assert.Null(info.VolumeId);          // no PARTUUID or UUID
@@ -143,8 +146,9 @@ public sealed class LinuxVolumeInfoProviderTests
         """;
 
         var devicePath = "/dev/sdz1"; // not present
+        var volumePath = "";
 
-        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath)!;
+        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath, volumePath)!;
 
         Assert.Null(info.DeviceId);
         Assert.Null(info.VolumeId);
@@ -160,8 +164,9 @@ public sealed class LinuxVolumeInfoProviderTests
     {
         var json = "{ not valid json";
         var devicePath = "/dev/sdd1";
+        var volumePath = "";
 
-        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath)!;
+        var info = LinuxVolumeInfoProvider.BuildVolumeInfoFromLsblkJson(json, devicePath, volumePath)!;
 
         Assert.Equal(devicePath, info.DevicePath);
         Assert.Null(info.DeviceId);

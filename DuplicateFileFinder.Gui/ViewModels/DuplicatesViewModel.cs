@@ -9,6 +9,7 @@ using DuplicateFileFinder.Gui.Util;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
@@ -17,7 +18,7 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly IHashIndexReadModel _hashIndexService;
     private readonly IRepo _repo;
     
-    // Full universe of duplicate sets keyed by hash
+    // FullScan universe of duplicate sets keyed by hash
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
     // Guid DirId -> DirRecord (for folder tree construction)
@@ -168,7 +169,7 @@ public partial class DuplicatesViewModel : ObservableObject
         }
 
         // Use actual scan roots as the visible roots
-        foreach (var scanRoot in _repo.ScanRootsView)
+        foreach (var scanRoot in _repo.ScanRootsView.Where( r => !r.IsDeleted))
         {
             if (!_dirs.TryGetValue(scanRoot.DirId, out var rootDir))
                 continue;
@@ -181,6 +182,7 @@ public partial class DuplicatesViewModel : ObservableObject
             node.Parent = null;
             node.ShowFullPath = true;                 // you can also use scanRoot.DisplayName if preferred
             node.OnRootRemoved = n => FolderRoots.Remove(n);
+            node.ScanRootId = scanRoot.RootId;
 
             InsertRootSorted(node);
         }
@@ -196,7 +198,7 @@ public partial class DuplicatesViewModel : ObservableObject
         string fullPath;
         
         if (isScanRoot && scanRoot != null)
-            fullPath = scanRoot.RootPath;
+            fullPath = scanRoot.VolumePath != null ? Path.Combine(scanRoot.VolumePath, scanRoot.RootPath) : scanRoot.RootPath;
         else
             fullPath = _repo.GetFullDirPath(dir.DirId);
 

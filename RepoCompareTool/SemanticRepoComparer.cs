@@ -258,8 +258,8 @@ public static class SemanticRepoComparer
             var hashA = HashToString(a.Hash);
             var hashB = HashToString(b.Hash);
 
-            var createdA = a.Created.ToUniversalTime().ToString("o");
-            var createdB = b.Created.ToUniversalTime().ToString("o");
+            var createdA = a.Created?.ToUniversalTime().ToString("o");
+            var createdB = b.Created?.ToUniversalTime().ToString("o");
 
             var sizeA = a.Size;
             var sizeB = b.Size;
@@ -286,7 +286,7 @@ public static class SemanticRepoComparer
             if (createdA != createdB)
             {
                 changed = true;
-                fileSection.Add(SideBySide("Created", createdA, createdB));
+                fileSection.Add(SideBySide("Created", createdA!, createdB!));
             }
 
             if (statusA != statusB)

@@ -86,7 +86,7 @@ public sealed class FileEnumeratorTests : IDisposable
         var realFile = _fs.File("realFile.txt", "DATA"u8.ToArray());
 
         // We'll *attempt* to create a symlink "link{Dir,File}" pointing at "real{Dir,File}".
-        // If symlinks are not allowed (e.g. Windows without dev mode / admin),
+        // If symlinks are not allowed (e.g. Windows without dev operation / admin),
         // we'll just skip the "assert it's excluded" part rather than fail.
         var linkDir = PathUtil.P(_fs.Root, "linkDir");
         var linkFile = PathUtil.P(_fs.Root, "linkFile.txt");

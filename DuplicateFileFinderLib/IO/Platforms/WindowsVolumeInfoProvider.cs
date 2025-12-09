@@ -35,6 +35,7 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
             return new VolumeInfo
             {
                 DevicePath      = root,
+                VolumePath      = "",
                 VolumeId        = null,
                 DeviceId        = null,
                 Label           = null,
@@ -50,6 +51,7 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
             return new VolumeInfo
             {
                 DevicePath      = root,
+                VolumePath      = "",
                 VolumeId        = null,
                 DeviceId        = null,
                 Label           = SafeGetVolumeLabel(driveInfo),
@@ -71,6 +73,7 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
         return new VolumeInfo
         {
             DevicePath      = devicePath,
+            VolumePath      = "",
             VolumeId        = volumeId,
             DeviceId        = deviceId,        // e.g. "\\\\.\\PHYSICALDRIVE0"
             DeviceModel     = deviceModel,     // e.g. "Samsung SSD 980 ..."
