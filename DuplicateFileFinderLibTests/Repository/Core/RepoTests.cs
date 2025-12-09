@@ -257,8 +257,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
         public async Task SaveSnapshot_And_ReplayDeltas_RestoreState()
         {
             IRepo repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
-
-            var dirId = 11;
+            
             var fileId1 = 22;
             var fileId2 = 33;
 
@@ -270,16 +269,17 @@ namespace DuplicateFileFinderLibTests.Repository.Core
             new Random(2).NextBytes(hashBytes2);
             var hash2 = new HashKey(hashBytes2);
 
-            var seq = (repo as Repo)!.AllocateRunId();
+            // Ensure there is a ScanRoot for this logical path so SaveScanSnapshots
+            // actually writes a per-root snapshot containing dir + file1.
+            var rootPath = "/root";
+            var session = repo.BeginScan(rootPath);
+            var initRootDir = session.RootDir;
+            var dirId = initRootDir.DirId;
             
-            var dir = new DirRecord
+            var dir = initRootDir with 
             {
-                DirId = dirId,
                 ParentDirId = null,
-                Name = "root",
-                LastSeenScanSequence = seq,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
+                Status = ScanEntryStatus.Enumerated
             };
 
             var file1 = new FileRecord
@@ -291,28 +291,23 @@ namespace DuplicateFileFinderLibTests.Repository.Core
                 Hash = hash1,
                 Modified = DateTimeOffset.UtcNow,
                 Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = seq,
+                LastSeenScanSequence = session.ScanSequence,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
             };
-
+            
             // Delta 1: dir + file1
             await repo.CommitDeltaAsync(new RepoDelta
             {
-                ScanSequence = seq,
+                ScanSequence = session.ScanSequence,
                 Dirs = [dir],
                 Files = [file1]
             }, TestContext.Current.CancellationToken);
 
-            // Ensure there is a ScanRoot for this logical path so SaveScanSnapshots
-            // actually writes a per-root snapshot containing dir + file1.
-            var rootPath = "/root";
-            _ = repo.BeginScan(rootPath);
-
             repo.SaveScanSnapshots(); // snapshot baseline (captures dir + file1)
 
             // Delta 2: add file2 after snapshot
-            seq = (repo as Repo)!.AllocateRunId();
+            var seq = (repo as Repo)!.AllocateRunId();
             var file2 = new FileRecord
             {
                 FileId = fileId2,

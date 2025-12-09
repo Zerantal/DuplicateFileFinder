@@ -1,8 +1,8 @@
 using DuplicateFileFinderLib.Repository.Core;
-using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
-using DuplicateFileFinderLib.Repository.Models.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using MemoryPack;
+using HashIndexState = DuplicateFileFinderLib.Repository.Plugins.Models.HashIndexState;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
@@ -33,35 +33,11 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         Directory.CreateDirectory(_dataDirectory);
     }
 
-    protected override ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
-    {
-        switch (evt)
-        {
-            case BootstrapEvent bootstrap:
-                HandleBootstrap(bootstrap);
-                SignalReady();
-                break;
-
-            case DeltaCommittedEvent deltaEvt:
-                HandleDelta(deltaEvt);
-                break;
-
-            case CompactedEvent compacted:
-                HandleCompacted(compacted);
-                break;
-
-            case ScanRunCompletedEvent _:
-                break;
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
     // ---------------------------------------------------------------------
     // Event handlers
     // ---------------------------------------------------------------------
 
-    private void HandleBootstrap(BootstrapEvent evt)
+    protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
         // Try to load persisted index that matches this generation/log sequence.
         if (!TryLoadState(evt.Generation, evt.NextLogSequence - 1))
@@ -87,7 +63,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         }
     }
 
-    private void HandleDelta(DeltaCommittedEvent evt)
+    protected override void OnDeltaCommittedEvent(DeltaCommittedEvent evt)
     {
         ApplyDeltaToIndex(evt.Delta);
         lock (_lock)
@@ -95,11 +71,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             _lastIndexedGeneration = evt.Generation;
             _lastIndexedLogSequence = evt.NextLogSequence - 1;
         }
-
-        // SaveState();
     }
 
-    private void HandleCompacted(CompactedEvent evt)
+    protected override void OnCompactedEvent(CompactedEvent evt)
     {
         // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
         RebuildFromSnapshot(evt.Snapshot);

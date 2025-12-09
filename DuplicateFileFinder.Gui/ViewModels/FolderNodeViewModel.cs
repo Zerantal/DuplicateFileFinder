@@ -17,6 +17,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     private string _name;
     private bool _showFullPath;
     private bool _isExpanded;
+    private long _scanRootId = -1;
 
     // Dummy child used to show the expand arrow before children are loaded.
     private static readonly FolderNodeViewModel DummyChild =
@@ -26,8 +27,9 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         long dirId,
         string name,
         string fullPath,
-        IScanCoordinator scanCoordinator)
-        : this(dirId, name, fullPath, scanCoordinator, isDummy: false)
+        IScanCoordinator scanCoordinator,
+        long scanRootId = -1)
+        : this(dirId, name, fullPath, scanCoordinator, isDummy: false, scanRootId: scanRootId)
     {
     }
 
@@ -36,12 +38,14 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         string name,
         string fullPath,
         IScanCoordinator? scanCoordinator,
-        bool isDummy)
+        bool isDummy,
+        long scanRootId = -1)
     {
         DirId = dirId;
         _name = name;
         _fullPath = fullPath;
         _scanCoordinator = scanCoordinator;
+        ScanRootId = scanRootId;
         _isDummy = isDummy;
     }
 
@@ -119,6 +123,12 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     internal bool HasDummyChild =>
         Children.Count == 1 && ReferenceEquals(Children[0], DummyChild);
 
+    public long ScanRootId
+    {
+        get => _scanRootId;
+        set => _scanRootId = value;
+    }
+
     internal void ClearChildren() => Children.Clear();
 
     [RelayCommand]
@@ -127,7 +137,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         if (_isDummy || _scanCoordinator is null)
             return;
 
-        await _scanCoordinator.RunScanWithDialogAsync(FullPath, ScanMode.Quick);
+        await _scanCoordinator.RunScanWithDialogAsync(FullPath, ScanOperation.QuickScan);
     }
 
     [RelayCommand]
@@ -142,13 +152,13 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     [RelayCommand]
     private async Task RemoveRootAsync()
     {
-        if (_isDummy || _scanCoordinator is null)
+        if (_isDummy ||  ScanRootId < 0 || _scanCoordinator is null)
             return;
 
         if (!IsScanRoot)
             return;
-
-        await _scanCoordinator.RemoveScanRootAsync(FullPath);
+        
+        await _scanCoordinator.RemoveScanRoot(ScanRootId);
         OnRootRemoved?.Invoke(this);
     }
 

@@ -86,50 +86,13 @@ public sealed partial class Repo
             Dirs = dirs
         };
     }
-    
-
-    public void RemoveScanRoot(string rootPath)
-    {
-        rootPath = PathUtils.NormalizePath(rootPath);
-        var snap = GetSnapshot();
-
-        var dirsToDelete = new List<DirRecord>();
-        var filesToDelete = new List<FileRecord>();
-
-        var seq = AllocateRunId();
-        foreach (var dir in snap.Dirs.Values)
-        {
-            var dirPath = GetFullDirPath(dir.DirId);
-            var normalized = PathUtils.NormalizePath(dirPath);
-            if (normalized.StartsWith(rootPath, PathUtils.PathComparison)) dirsToDelete.Add(dir);
-        }
-
-        foreach (var file in snap.Files.Values)
-        {
-            var dirPath = GetFullDirPath(file.DirId);
-            var full = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
-            if (full.StartsWith(rootPath, PathUtils.PathComparison)) filesToDelete.Add(file);
-        }
-
-        if (dirsToDelete.Count == 0 && filesToDelete.Count == 0)
-            return;
-
-        var delta = new RepoDelta
-        {
-            ScanSequence = seq,
-            Dirs = dirsToDelete,
-            Files = filesToDelete
-        };
-
-        CommitDelta(delta);
-    }
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
 
     public IScanSession BeginScan(
         string rootPath,
-        ScanMode scanMode,
-        VolumeInfo? vInfo,
+        ScanOperation scanOperation,
+        VolumeInfo? volumeInfo,
         int maxFilesBeforeFlush,
         int maxDirsBeforeFlush)
     {
@@ -137,77 +100,47 @@ public sealed partial class Repo
             throw new ArgumentException("Root path is null or empty.", nameof(rootPath));
 
         var normalizedRootPath = PathUtils.NormalizePath(rootPath);
-
+        string relativeRootPath;
+        if (string.IsNullOrWhiteSpace(volumeInfo?.VolumePath))
+            relativeRootPath = normalizedRootPath;
+        else
+            relativeRootPath = PathUtils.NormalizePath(Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
+        
         ScanRun run;
+        ScanRoot scanRoot;
         RepoDelta? rootDelta = null;
-        Dictionary<long, DirRecord> existingDirs;
+        // Dictionary<long, DirRecord> existingDirs;
+        DirRecord rootDir;
 
         lock (_sync)
         {
             var runId = AllocateRunId_NoLock();
+            
+            scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
 
-            // Find or create the ScanRoot for this logical path
-            var scanRoot = FindOrCreateScanRoot_NoLock(normalizedRootPath);
-
-            // Ensure ScanRoot.DirId is bound to a real DirRecord in _dirs.
+            // Create dummy dir record if no dir record is associated with the scan root.
             if (scanRoot.DirId == 0 || !_dirs.ContainsKey(scanRoot.DirId))
             {
-                // Try to reuse an existing dir whose full path matches the root path
-                long? existingRootDirId = null;
+                var rootDirId = AllocateDirId_NoLock();
 
-                foreach (var kv in _dirs)
+                rootDir = new DirRecord
                 {
-                    var full = GetFullDirPath(kv.Key);
-                    if (PathUtils.IsSamePath(full, normalizedRootPath))
-                    {
-                        existingRootDirId = kv.Key;
-                        break;
-                    }
-                }
+                    DirId = rootDirId,
+                    ParentDirId = null,
+                    Name = "",
+                    LastSeenScanSequence = runId,
+                    Status = ScanEntryStatus.None, // “known root, not yet enumerated”
+                    ErrorMessage = null
+                };
 
-                if (existingRootDirId is { } reuseId)
-                {
-                    scanRoot = scanRoot with { DirId = reuseId };
-                }
-                else
-                {
-                    // No existing dir corresponds to this root – create a dummy root dir.
-                    var trimmed = normalizedRootPath.TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar);
+                _dirs[rootDirId] = rootDir;
 
-                    var name = Path.GetFileName(trimmed);
-                    if (string.IsNullOrEmpty(name))
-                        name = normalizedRootPath; // fallback for "/" or drive roots
-                    
-                    var rootDirId = AllocateDirId_NoLock();
-
-                    var rootDir = new DirRecord
-                    {
-                        DirId = rootDirId,
-                        ParentDirId = null,
-                        Name = name,
-                        LastSeenScanSequence = runId,
-                        Status = ScanEntryStatus.None, // “known root, not yet enumerated”
-                        ErrorMessage = null
-                    };
-
-                    _dirs[rootDirId] = rootDir;
-
-                    scanRoot = scanRoot with { DirId = rootDirId};
-                    _scanRoots[scanRoot.RootId] = scanRoot;
-
-                    // Build a tiny delta to persist the root dir
-                    rootDelta = new RepoDelta
-                    {
-                        ScanSequence = runId,
-                        Dirs = new List<DirRecord> { rootDir }
-                    };
-                }
+                scanRoot = scanRoot with { DirId = rootDirId};
                 _scanRoots[scanRoot.RootId] = scanRoot;
             }
-
-            if (vInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, vInfo);
+            else rootDir = _dirs[scanRoot.DirId];
+            
+            if (volumeInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
 
             run = new ScanRun
             {
@@ -218,20 +151,21 @@ public sealed partial class Repo
                 FinishedAt = null,
                 Status = ScanRunStatus.InProgress,
                 ErrorMessage = null,
-                Mode = scanMode
+                Operation = scanOperation
             };
 
             _scanRuns.Add(run);
             _scanRunIndex[runId] = run;
             SaveMeta_NoLock();
             
-            existingDirs = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
+            // existingDirs = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
         }
 
         if (rootDelta is not null)
             CommitDelta(rootDelta);
 
-        return new ScanSession(this, run, existingDirs, maxFilesBeforeFlush, maxDirsBeforeFlush);
+        // return new ScanSession(this, run,  scanRoot, existingDirs, maxFilesBeforeFlush, maxDirsBeforeFlush);
+        return new ScanSession(this, run, rootDir, maxFilesBeforeFlush, maxDirsBeforeFlush);
     }
 
     // -------- CommitDelta: progressive, with log id --------
@@ -304,10 +238,12 @@ public sealed partial class Repo
         var cursor = node; 
         while (true)
         {
-            parts.Add(cursor.Name);
-
+            if (!string.IsNullOrEmpty(cursor.Name))
+                parts.Add(cursor.Name);
+            
             if (cursor.ParentDirId is { } parentId)
             {
+                
                 if (!_dirs.TryGetValue(parentId, out cursor))
                     // Console.WriteLine($"parentId {parentId} not found in repo. Dir = {node}");
                     // return node.Name;
@@ -320,7 +256,9 @@ public sealed partial class Repo
                 var scanRoot = _scanRoots.Values.FirstOrDefault(r => r.DirId == cursor.DirId);
                 if (scanRoot is not null)
                 {
-                    parts.AddRange(scanRoot.RootPath.Split('/', StringSplitOptions.RemoveEmptyEntries)[..^1].Reverse());
+                    parts.AddRange(scanRoot.RootPath.Split('/', StringSplitOptions.RemoveEmptyEntries).Reverse());
+                    if (scanRoot.VolumePath is not null)
+                        parts.AddRange(scanRoot.VolumePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Reverse());
                 }
 
                 break;

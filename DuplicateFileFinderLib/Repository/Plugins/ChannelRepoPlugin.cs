@@ -53,8 +53,36 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
             // TODO: graceful shutdown
         }
     }
+    
+    protected virtual ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
+    {
+        switch (evt)
+        {
+            case BootstrapEvent bootstrap:
+                OnBootstrapEvent(bootstrap);
+                SignalReady();
+                break;
 
-    protected abstract ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct);
+            case DeltaCommittedEvent deltaEvt:
+                OnDeltaCommittedEvent(deltaEvt);
+                break;
+
+            case CompactedEvent compacted:
+                OnCompactedEvent(compacted);
+                break;
+
+            case ScanRunCompletedEvent  scanRunCompleted:
+                OnScanRunCompletedEvent(scanRunCompleted);
+                break;
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
+    protected virtual void OnDeltaCommittedEvent(DeltaCommittedEvent evt) { }
+    protected virtual void OnCompactedEvent(CompactedEvent evt) { }
+    protected virtual void OnScanRunCompletedEvent(ScanRunCompletedEvent scanRunCompleted) { }
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
     {

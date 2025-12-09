@@ -19,21 +19,24 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
         var fullPath = Path.GetFullPath(rootPath);
 
         // 1. Resolve the device node for this path (e.g. /dev/sdd1)
-        var devicePath = ProbeDeviceWithFindmnt(fullPath)
-                         ?? ProbeDeviceFromMountinfo(fullPath);
+        var pathProbe = ProbeDeviceWithFindmnt(fullPath);
 
-        if (string.IsNullOrEmpty(devicePath)) return null;
-        
+        if (!pathProbe.HasValue) return null;
+        var devicePath = pathProbe.Value.devicePath;
+        var volumePath = pathProbe.Value.volumePath;
+        if (string.IsNullOrEmpty(devicePath) || string.IsNullOrEmpty(volumePath)) return null;
+
         devicePath = NormalizeDevicePath(devicePath);
 
         // 2. Call lsblk once and build VolumeInfo from its JSON
         var lsblkJson = RunLsblkJson();
-        if (string.IsNullOrWhiteSpace(lsblkJson)) return new VolumeInfo { DevicePath = devicePath };
+        if (string.IsNullOrWhiteSpace(lsblkJson))
+            return new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
 
-        return BuildVolumeInfoFromLsblkJson(lsblkJson, devicePath);
+        return BuildVolumeInfoFromLsblkJson(lsblkJson, devicePath, volumePath);
     }
 
-    // ---------- Device resolution (findmnt + /proc/*) ----------
+    // ---------- Device resolution - findmnt ----------
 
     private static string NormalizeDevicePath(string devicePath)
     {
@@ -50,8 +53,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
         return trimmed;
     }
 
-    
-    private static string? ProbeDeviceWithFindmnt(string path)
+
+    private static (string? devicePath, string? volumePath)? ProbeDeviceWithFindmnt(string path)
     {
         try
         {
@@ -65,7 +68,7 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
             };
 
             psi.ArgumentList.Add("-no");
-            psi.ArgumentList.Add("SOURCE");
+            psi.ArgumentList.Add("SOURCE,TARGET");
             psi.ArgumentList.Add("--target");
             psi.ArgumentList.Add(path);
 
@@ -80,76 +83,16 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                 return null;
 
             var line = output.Trim();
-            return string.IsNullOrEmpty(line) ? null : line;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+            if (string.IsNullOrEmpty(line)) return null;
+            var strList = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            string? devicePath = null;
+            string? volumePath = null;
+            if (strList.Length > 0)
+                devicePath = strList[0];
+            if (strList.Length > 1)
+                volumePath = strList[1];
 
-    private static string? ProbeDeviceFromMountinfo(string path)
-    {
-        try
-        {
-            var full = Path.GetFullPath(path);
-            var bestMatchLen = -1;
-            string? bestSource = null;
-
-            // Prefer /proc/self/mountinfo, fall back to /proc/mounts
-            var mountInfoPath = "/proc/self/mountinfo";
-            if (!File.Exists(mountInfoPath))
-                mountInfoPath = "/proc/mounts";
-
-            foreach (var line in File.ReadLines(mountInfoPath))
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                // We want: <source> <target> ...  — /proc/mounts format is simpler;
-                // /proc/self/mountinfo is more complex but source/target still appear early.
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3)
-                    continue;
-
-                string source;
-                string target;
-
-                if (mountInfoPath.EndsWith("mountinfo", StringComparison.Ordinal))
-                {
-                    // mountinfo format:
-                    //   30 24 8:17 / /mnt/external_vm_storage rw,relatime - ext4 /dev/sdd1 ...
-                    // so:  source is field after '-', target is field 4
-                    var dashIndex = Array.IndexOf(parts, "-");
-                    if (dashIndex < 0 || dashIndex + 2 >= parts.Length || parts.Length <= 4)
-                        continue;
-
-                    target = parts[4]; // mountpoint (e.g. /mnt/external_vm_storage)
-                    source = parts[dashIndex + 2]; // filesystem source (e.g. /dev/sdd1)
-                }
-                else
-                {
-                    // /proc/mounts format:
-                    //   <source> <target> <fstype> <options> ...
-                    source = parts[0];
-                    target = parts[1];
-                }
-
-                if (!target.StartsWith("/", StringComparison.Ordinal))
-                    continue;
-
-                if (!full.StartsWith(target, StringComparison.Ordinal))
-                    continue;
-
-                var len = target.Length;
-                if (len > bestMatchLen)
-                {
-                    bestMatchLen = len;
-                    bestSource = source;
-                }
-            }
-
-            return bestSource;
+            return (devicePath, volumePath);
         }
         catch
         {
@@ -200,12 +143,12 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
     ///     construct a VolumeInfo with identity, model, fs info, rotational flag.
     ///     Exposed as internal for unit tests.
     /// </summary>
-    internal static VolumeInfo? BuildVolumeInfoFromLsblkJson(string json, string devicePath)
+    internal static VolumeInfo? BuildVolumeInfoFromLsblkJson(string json, string devicePath, string volumePath)
     {
         if (string.IsNullOrWhiteSpace(devicePath)) return null;
-        if (string.IsNullOrWhiteSpace(json)) return new VolumeInfo { DevicePath = devicePath };
+        if (string.IsNullOrWhiteSpace(json)) return new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
 
-        var volInfo = new VolumeInfo { DevicePath = devicePath };
+        var volInfo = new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
 
         LsblkRoot? root;
         try
@@ -230,11 +173,11 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                 ? node
                 : currentDisk;
 
-            bool pathMatches = string.Equals(node.Path, devicePath, StringComparison.OrdinalIgnoreCase);
-            bool nameMatches = !string.IsNullOrEmpty(devName) &&
-                               (string.Equals(node.Name, devName, StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(node.KName, devName, StringComparison.OrdinalIgnoreCase));
-            
+            var pathMatches = string.Equals(node.Path, devicePath, StringComparison.OrdinalIgnoreCase);
+            var nameMatches = !string.IsNullOrEmpty(devName) &&
+                              (string.Equals(node.Name, devName, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(node.KName, devName, StringComparison.OrdinalIgnoreCase));
+
             if (pathMatches || nameMatches)
             {
                 partitionNode ??= node;
@@ -290,7 +233,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
             FileSystemType = fsType,
             DevicePath = devicePath,
             IsRotational = rota,
-            DeviceModel = hwModel
+            DeviceModel = hwModel,
+            VolumePath = volumePath
         };
     }
 

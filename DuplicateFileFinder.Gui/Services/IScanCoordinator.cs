@@ -20,11 +20,11 @@ public interface IScanCoordinator
 
     public Task RunScanWithDialogAsync(
         string rootPath,
-        ScanMode mode = ScanMode.Full,
+        ScanOperation operation = ScanOperation.FullScan,
         CancellationToken cancellationToken = default);
 
 
-    public Task RemoveScanRootAsync(string rootPath);
+    public Task RemoveScanRoot(long scanRootId);
 
     public void CancelScan();
 }

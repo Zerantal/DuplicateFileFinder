@@ -9,7 +9,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 ///     The persistent database of all scanned files across all scan locations.
 ///     Uses a snapshot + append-only delta log for durability.
 /// </summary>
-public sealed partial class Repo : IRepo
+public sealed partial class Repo : IRepo, IRepoInternal
 {
     private const int RepoSchemaVersion = 6;
     
@@ -61,5 +61,18 @@ public sealed partial class Repo : IRepo
         _scanRunIndex.Clear();
         foreach (var run in _scanRuns)
             _scanRunIndex[run.ScanSequence] = run;
+    }
+    
+    public void DeleteScanRoot(long scanRootId)
+    {
+        lock (_sync)
+        {
+            if (_scanRoots.TryGetValue(scanRootId, out var scanRoot))
+            {
+                scanRoot = scanRoot with { IsDeleted = true, DirId = 0, DeletedAtUtc = DateTimeOffset.UtcNow };
+                _scanRoots[scanRootId] = scanRoot;
+            }
+            SaveMeta_NoLock();
+        }
     }
 }

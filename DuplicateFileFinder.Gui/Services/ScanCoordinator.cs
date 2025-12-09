@@ -37,13 +37,13 @@ public sealed class ScanCoordinator : IScanCoordinator
 
     public async Task RunScanWithDialogAsync(
         string rootPath,
-        ScanMode mode = ScanMode.Full,
+        ScanOperation operation = ScanOperation.FullScan,
         CancellationToken cancellationToken = default)
     {
         // Ensure we start from UI thread; if not, hop there once.
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            await Dispatcher.UIThread.InvokeAsync(() => RunScanWithDialogAsync(rootPath, mode, cancellationToken));
+            await Dispatcher.UIThread.InvokeAsync(() => RunScanWithDialogAsync(rootPath, operation, cancellationToken));
             return;
         }
 
@@ -51,7 +51,7 @@ public sealed class ScanCoordinator : IScanCoordinator
             return;
 
         IsScanning = true;
-        Log.Info("Starting {mode} scan of {root}", mode, rootPath);
+        Log.Info("Starting {operation} scan of {root}", operation, rootPath);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -82,12 +82,22 @@ public sealed class ScanCoordinator : IScanCoordinator
         {
             try
             {
-                await _finder.ScanLocationAsync(
-                        rootPath,
-                        mode,
-                        progress,
-                        _cts.Token)
-                    .ConfigureAwait(false);
+                if (operation == ScanOperation.FullScan)
+                {
+                    await _finder.FullScanAsync(
+                            rootPath,
+                            progress,
+                            _cts.Token)
+                        .ConfigureAwait(false);
+                }
+                else if (operation == ScanOperation.QuickScan)
+                {
+                    await _finder.QuickScanAsync(
+                            rootPath,
+                            progress,
+                            _cts.Token)
+                        .ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -137,22 +147,13 @@ public sealed class ScanCoordinator : IScanCoordinator
             throw new OperationCanceledException();
     }
 
-    public Task RemoveScanRootAsync(string rootPath)
+    public Task RemoveScanRoot(long scanRootId)
     {
-        _repo.RemoveScanRoot(rootPath);
-
-        // Raise completion on UI thread so handlers can touch UI safely.
-        if (Dispatcher.UIThread.CheckAccess())
-            ScanCompleted?.Invoke(
-                this,
-                new ScanCompletedEventArgs(rootPath, false, null));
-        else
-            Dispatcher.UIThread.Post(() =>
-            {
-                ScanCompleted?.Invoke(
-                    this,
-                    new ScanCompletedEventArgs(rootPath, false, null));
-            });
+        _finder.RemoveScanRoot(scanRootId);
+        
+        ScanCompleted?.Invoke(
+            this,
+            new ScanCompletedEventArgs(scanRootId.ToString(), false, null));
 
         return Task.CompletedTask;
     }

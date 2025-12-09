@@ -43,6 +43,6 @@ public sealed partial class DuplicateSetRow : ObservableObject
                 r.FileId,
                 r.Name,
                 _pathResolver(r), r.Size,
-                r.Modified)));
+                r.Modified!.Value)));
     }
 }

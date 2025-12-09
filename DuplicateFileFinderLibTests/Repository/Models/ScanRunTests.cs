@@ -18,7 +18,7 @@ public sealed class ScanRunTests
             FinishedAt = new DateTimeOffset(2024, 2, 3, 5, 6, 7, TimeSpan.Zero),
             Status = ScanRunStatus.Completed,
             ErrorMessage = "none",
-            Mode = ScanMode.Full,
+            Operation = ScanOperation.FullScan,
             ScanRootId = 84,
         };
 
@@ -31,7 +31,7 @@ public sealed class ScanRunTests
         Assert.Equal(original.FinishedAt, roundTripped.FinishedAt);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
-        Assert.Equal(original.Mode, roundTripped.Mode);
+        Assert.Equal(original.Operation, roundTripped.Operation);
         Assert.Equal(original.ScanRootId, roundTripped.ScanRootId);
     }
 
@@ -43,8 +43,8 @@ public sealed class ScanRunTests
         Assert.Equal(2, (byte)ScanRunStatus.Failed);
         Assert.Equal(3, (byte)ScanRunStatus.Cancelled);
         
-        Assert.Equal(0, (byte)ScanMode.Full);
-        Assert.Equal(1, (byte)ScanMode.Quick);
+        Assert.Equal(0, (byte)ScanOperation.FullScan);
+        Assert.Equal(1, (byte)ScanOperation.QuickScan);
         
     }
 }

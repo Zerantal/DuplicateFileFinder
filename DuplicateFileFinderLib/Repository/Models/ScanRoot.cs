@@ -25,4 +25,7 @@ public partial record ScanRoot
     // to be updated on each scan (may change for removable media)
     [MemoryPackOrder(10)] public string? DevicePath               { get; init; }
     [MemoryPackOrder(11)] public string? DeviceModel              { get; init; }
+    [MemoryPackOrder(12)] public string? VolumePath               { get; init; }
+    [MemoryPackOrder(13)] public bool IsDeleted                   { get; init; } = false;
+    [MemoryPackOrder(14)] public DateTimeOffset? DeletedAtUtc     { get; init; }
 }

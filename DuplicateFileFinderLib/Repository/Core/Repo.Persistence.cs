@@ -44,18 +44,22 @@ public sealed partial class Repo
     {
         // dirs
         foreach (var d in delta.Dirs)
+        {
             if (d.Status == ScanEntryStatus.Deleted)
                 _dirs.Remove(d.DirId);
             else
                 _dirs[d.DirId] = d;
+        }
 
         // files
         foreach (var f in delta.Files)
+        {
             if (f.Status == ScanEntryStatus.Deleted)
                 _files.Remove(f.FileId);
             else
                 _files[f.FileId] = f;
-        
+        }
+
     }
 
 
