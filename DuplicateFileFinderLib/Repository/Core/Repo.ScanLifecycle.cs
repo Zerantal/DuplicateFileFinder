@@ -1,7 +1,6 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
-using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -52,8 +51,8 @@ public sealed partial class Repo
             return AllocateDirId_NoLock();
         }
     }
-    
-    internal long AllocateDirId_NoLock()
+
+    private long AllocateDirId_NoLock()
     {
         var id = Meta.NextDirId;
         Meta = Meta with { NextDirId = id + 1 };
@@ -68,14 +67,14 @@ public sealed partial class Repo
         }
     }
 
-    internal long AllocateFileId_NoLock()
+    private long AllocateFileId_NoLock()
     {
         var id = Meta.NextFileId;
         Meta = Meta with { NextFileId = id + 1 };
         return id;
     }
 
-    internal long AllocateRootId_NoLock()
+    private long AllocateRootId_NoLock()
     {
         var id = Meta.NextScanRootId;
         Meta = Meta with { NextScanRootId = id + 1 };
@@ -162,12 +161,6 @@ public sealed partial class Repo
             SyncMetaFile_NoLock();
             _ = PersistMetaAsync();
         }
-    }
-    
-    private bool IsUnderRoot(long dirId, string rootPath)
-    {
-        var path = GetFullDirPath(dirId);
-        return path.StartsWith(rootPath, PathUtils.PathComparison);
     }
     
     // Find existing ScanRoot by canonical path or create a new one.

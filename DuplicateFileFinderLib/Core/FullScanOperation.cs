@@ -1,4 +1,3 @@
-using System.Collections;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;

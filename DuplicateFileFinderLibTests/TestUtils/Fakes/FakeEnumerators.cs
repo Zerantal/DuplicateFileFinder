@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading;
 using DuplicateFileFinderLib.IO;
 
-namespace DuplicateFileFinderLibTests.TestUtils;
+namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
 
 public sealed class TestEnumerateCanceler(int yieldBeforeSignal, int totalToYield, ManualResetEventSlim signal)
     : IFileEnumerator

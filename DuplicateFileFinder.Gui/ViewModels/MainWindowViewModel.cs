@@ -91,8 +91,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             var host = await RepoHost.OpenAsync(repoDir);
 
-            var repo = host.Repo;
-
             // // Integrity check still works the same
             // var issues = repo.ValidateIntegrity();
             // foreach (var issue in issues)
@@ -100,7 +98,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             var dialogService = new DialogService();
             var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(host);
-            var scanCoordinator = new ScanCoordinator(repo, scanEngine, dialogService);
+            var scanCoordinator = new ScanCoordinator(scanEngine, dialogService);
         
             mainWindowVm = new MainWindowViewModel(host, scanCoordinator, dialogService);
 

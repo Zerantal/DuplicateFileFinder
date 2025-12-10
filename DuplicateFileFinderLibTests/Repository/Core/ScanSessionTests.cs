@@ -12,13 +12,14 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Util;
+using DuplicateFileFinderLibTests.TestUtils.Fakes;
 using Moq;
 using Xunit;
 using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
 namespace DuplicateFileFinderLibTests.Repository.Core;
 
-public sealed class ScanSessionTests : IDisposable
+public sealed partial class ScanSessionTests : IDisposable
 {
     private readonly string _repoDir;
 
@@ -832,10 +833,10 @@ public sealed class ScanSessionTests : IDisposable
         Assert.Equal(parentDirId, dirEntry.parentDirId);
         Assert.Equal("sub", dirEntry.dirEntry.Name);
 
-        var addedFile = Assert.Single(session.Files);
-        Assert.Equal(existingFileId, addedFile.FileId);
-        Assert.Equal(parentDirId, addedFile.DirId);
-        Assert.Equal("a.txt", addedFile.Name);
+        var addedFile = Assert.Single(session.ObservedFiles);
+        Assert.Equal(existingFileId, addedFile.FileRecord.FileId);
+        Assert.Equal(parentDirId, addedFile.FileRecord.DirId);
+        Assert.Equal("a.txt", addedFile.FileRecord.Name);
     }
 
     [Fact]
@@ -902,10 +903,9 @@ public sealed class ScanSessionTests : IDisposable
         Assert.Equal(parentDirId, entry.parentDirId);
 
         // And since there are no files here, no calls to AddOrUpdateFile.
-        Assert.Empty(session.Files);
+        Assert.Empty(session.ObservedFiles);
     }
-
-
+    
     // -------------------------------------------------------------
     // Fakes
     // -------------------------------------------------------------
@@ -928,8 +928,7 @@ public sealed class ScanSessionTests : IDisposable
             return FilesDict.GetValueOrDefault(fileId);
         }
     }
-
-
+    
     private sealed class FakeTreeIndex : ITreeIndexReadModel
     {
         // parentDirId -> (id, name)
@@ -973,68 +972,6 @@ public sealed class ScanSessionTests : IDisposable
         {
             dir = PathUtils.NormalizePath(dir);
             _entriesByDir[dir] = entries.ToList();
-        }
-    }
-
-    private sealed class CapturingScanSession : IScanSession
-    {
-        private List<DirRecord> Directories { get; } = new();
-        public List<FileRecord> Files { get; } = new();
-
-        private ScanRun Run => new()
-        {
-            ScanRootId = 1,
-            ScanSequence = 1,
-            RootPath = "/root",
-            Status = ScanRunStatus.InProgress,
-            StartedAt = DateTimeOffset.UtcNow
-        };
-
-        public DirRecord RootDir { get; init; } = new()
-        {
-            DirId = 1,
-            ParentDirId = null,
-            Name = string.Empty,
-            Status = ScanEntryStatus.None
-        };
-
-        public long ScanSequence => Run.ScanSequence;
-
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public long AddOrUpdateDirectory(DirRecord dir)
-        {
-            Directories.Add(dir);
-            // Ensure we always return a non-zero id
-            if (dir.DirId == 0)
-                dir = dir with { DirId = Directories.Count + 1000 };
-
-            return dir.DirId;
-        }
-
-        public void AddOrUpdateFile(ref FileRecord file)
-        {
-            Files.Add(file);
-            if (file.FileId == 0)
-                file = file with { FileId = Files.Count + 2000 };
-        }
-
-        public Task FlushProgressAsync(CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
-
-        public Task CompleteAsync(CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
-
-        public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
         }
     }
 }

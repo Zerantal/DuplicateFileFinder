@@ -15,6 +15,7 @@ using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils;
+using DuplicateFileFinderLibTests.TestUtils.Fakes;
 using Xunit;
 using Repo = DuplicateFileFinderLib.Repository.Core.Repo;
 
@@ -53,7 +54,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
     private sealed class CapturingHost : IRepoHost
     {
-        private TempFsFixture _repoDir = new TempFsFixture("DFF_repo");
+        private readonly TempFsFixture _repoDir = new TempFsFixture("DFF_repo");
         public CapturingHost(IRepo repo)
         {
             Repo = repo;
@@ -73,8 +74,8 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
     private sealed class FakeRepoView : IRepoView
     {
-        public IReadOnlyDictionary<long, DirRecord> Dirs { get; }
-        public IReadOnlyDictionary<long, FileRecord> Files { get; }
+        public IReadOnlyDictionary<long, DirRecord> Dirs { get; } = new Dictionary<long, DirRecord>();
+        public IReadOnlyDictionary<long, FileRecord> Files { get; } = new Dictionary<long, FileRecord>();
         public DirRecord? TryGetDir(long dirId)
         {
             return null;
@@ -86,12 +87,11 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         }
     }
     
-    
     private sealed class CapturingRepo : IRepo
     {
         public readonly List<string> BeginScanRoots = new();
-        public readonly List<CapturingSession> Sessions = new();
-        public CapturingSession? LastSession { get; private set; }
+        public readonly List<CapturingScanSession> Sessions = new();
+        public CapturingScanSession? LastSession { get; private set; }
         public bool CompactIfNeededCalled { get; private set; }
         
         public bool CompactAsyncCalled { get; private set; }
@@ -104,7 +104,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public IScanSession BeginScan(string rootPath, ScanOperation scanOperation = ScanOperation.FullScan, VolumeInfo? volumeInfo = null,
             int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)
         {
-            var session = new CapturingSession(rootPath);
+            var session = new CapturingScanSession(rootPath);
             LastSession = session;
             Sessions.Add(session);
             BeginScanRoots.Add(rootPath);
@@ -159,123 +159,6 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             throw new NotImplementedException();
         }
     }
-
-    private sealed class CapturingSession : IScanSession
-    {
-        private long _dirCounter = 1;
-        public ScanRun Run { get; }
-
-        public long ScanSequence => Run.ScanSequence;
-        public string RootPath => Run.RootPath;
-        public DirRecord RootDir { get; init; }
-
-        public readonly List<ObservedDir> ObservedDirectories = new();
-        public readonly List<ObservedFile> ObservedFiles = new();
-
-        public CapturingSession(string rootPath)
-        {
-            Run = new ScanRun
-            {
-                ScanSequence = 1,
-                RootPath = rootPath,
-                StartedAt = DateTimeOffset.UtcNow,
-                Status = ScanRunStatus.InProgress,
-                ScanRootId = 88,
-                Operation = ScanOperation.FullScan,
-            };
-            
-            RootDir = new DirRecord
-            {
-                DirId = 121,
-                ParentDirId = null,
-                Name = "",
-                LastSeenScanSequence = 99,
-                Status = ScanEntryStatus.None, // “known root, not yet enumerated”
-                ErrorMessage = null
-            };
-        }
-
-        public List<ObservedDir> FinalDirs => ObservedDirectories.GroupBy(d => d.FullPath).Select(g => g.Last()).ToList();
-        public List<ObservedFile> FinalFiles => ObservedFiles.GroupBy(f => f.FullPath).Select(f => f.Last()).ToList();
-        
-        public int FlushCallCount { get; private set; }
-        public int CompleteCallCount { get; private set; }
-        public List<(string? Error, bool Cancelled)> FailCalls { get; } = new();
-        public int DisposeCallCount { get; private set; }
-
-        public ValueTask DisposeAsync()
-        {
-            DisposeCallCount++;
-            return ValueTask.CompletedTask;
-        }
-
-        public long AddOrUpdateDirectory(DirRecord dir)
-        {
-            dir = dir with { DirId = _dirCounter++ };
-            var parentId = dir.ParentDirId;
-            string dirPath;
-            if (parentId is null)
-                dirPath = RootPath;
-            else
-            {
-                dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == parentId)?.FullPath ??
-                              RootPath;   
-            }
-            
-            var fullPath = Path.Combine(dirPath, dir.Name);
-            ObservedDirectories.Add(new ObservedDir(fullPath, dir));
-            
-            return dir.DirId;
-        }
-
-        public void AddOrUpdateFile(ref FileRecord file)
-        {
-            var dirId = file.DirId;
-            var dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == dirId)?.FullPath ??
-                          RootPath;
-            
-            var fullPath = Path.Combine(dirPath, file.Name);
-            ObservedFiles.Add(new ObservedFile(fullPath, file));
-        }
-
-        public Task FlushProgressAsync(CancellationToken cancellationToken = default)
-        {
-            FlushCallCount++;
-            return Task.CompletedTask;
-        }
-
-        public Task CompleteAsync(CancellationToken cancellationToken = default)
-        {
-            CompleteCallCount++;
-            return Task.CompletedTask;
-        }
-
-        public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
-        {
-            FailCalls.Add((errorMessage, cancelled));
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class ObservedDir(string fullPath, DirRecord dir)
-    {
-        public string FullPath { get; } = fullPath;
-        public DirRecord DirRecord { get; } = dir;
-        
-        public ScanEntryStatus Status => DirRecord.Status;
-    }
-    private sealed class ObservedFile(string fullPathOnDisk, FileRecord file)
-    {
-        public string FullPath { get; } = fullPathOnDisk;
-        
-        public FileRecord FileRecord { get; } = file;
-        
-        public ScanEntryStatus Status => FileRecord.Status;
-        
-        public HashKey? Hash => FileRecord.Hash;
-        public long Size => FileRecord.Size;
-        public DateTimeOffset? Created => FileRecord.Created;
-    }
     
     // ----------------- Tests -----------------
 
@@ -306,7 +189,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var progress = new Progress<DuplicateFileFinderProgressReport>();
         await finder.FullScanAsync(_fs.Root, progress: progress, ct: TestContext.Current.CancellationToken);
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         // BeginScan root path is normalized
         Assert.Single(repo.BeginScanRoots);
@@ -369,7 +252,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         var f1Obs = Assert.Single(session.ObservedFiles,
             f => PathUtils.NormalizePath(f.FullPath) == PathUtils.NormalizePath(f1) && f.Status == ScanEntryStatus.Hashed);
@@ -466,7 +349,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
             await finder.FullScanAsync(root, ct: cts.Token));
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         Assert.Equal(0, session.CompleteCallCount);
         Assert.Single(session.FailCalls);
@@ -492,7 +375,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             await finder.FullScanAsync(missingRoot, ct: TestContext.Current.CancellationToken));
 
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         // Assert: fail recorded with cancelled = false, no CompleteAsync
         Assert.Equal(0, session.CompleteCallCount);
@@ -522,14 +405,14 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         
         var progress = new SynchronousProgress<DuplicateFileFinderProgressReport>(r =>
         {
-            if (r.Phase == ScanPhase.Enumerating && r.Processed >= 1)
+            if (r is { Phase: ScanPhase.Enumerating, Processed: >= 1 })
                 cts.Cancel();
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             await finder.FullScanAsync(root, progress: progress, ct: cts.Token));
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         Assert.Equal(0, session.CompleteCallCount);
         Assert.Single(session.FailCalls);
@@ -557,8 +440,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var progress = new Progress<DuplicateFileFinderProgressReport>(r =>
         {
             reports.Add(r);
-            if (r.Phase == ScanPhase.Hashing &&
-                r.Processed > 0 &&
+            if (r is { Phase: ScanPhase.Hashing, Processed: > 0 } &&
                 !cts.IsCancellationRequested)
             {
                 cts.Cancel();
@@ -568,7 +450,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             await finder.FullScanAsync(root, progress: progress, ct: cts.Token));
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         Assert.Equal(0, session.CompleteCallCount);
         Assert.Single(session.FailCalls);
@@ -593,7 +475,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var finder1 = new DuplicateFileFinder(host1);
         await finder1.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var session1 = Assert.IsType<CapturingSession>(repo1.LastSession);
+        var session1 = Assert.IsType<CapturingScanSession>(repo1.LastSession);
         var hashesRun1 = session1.FinalFiles.ToDictionary(
             f => PathUtils.NormalizePath(f.FullPath),
             f => f.Hash);
@@ -603,7 +485,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var finder2 = new DuplicateFileFinder(host2);
         await finder2.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var session2 = Assert.IsType<CapturingSession>(repo2.LastSession);
+        var session2 = Assert.IsType<CapturingScanSession>(repo2.LastSession);
         var hashesRun2 = session2.FinalFiles.ToDictionary(
             f => PathUtils.NormalizePath(f.FullPath),
             f => f.Hash);
@@ -628,7 +510,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var session = Assert.IsType<CapturingSession>(repo.LastSession);
+        var session = Assert.IsType<CapturingScanSession>(repo.LastSession);
 
         Assert.Single(session.ObservedFiles,
             f => PathUtils.NormalizePath(f.FullPath) == PathUtils.NormalizePath(f1) && f.Status == ScanEntryStatus.Enumerated);

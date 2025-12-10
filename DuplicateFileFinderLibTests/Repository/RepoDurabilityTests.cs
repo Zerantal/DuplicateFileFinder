@@ -84,7 +84,7 @@ namespace DuplicateFileFinderLibTests.Repository
             var metaBefore = repo.Meta;
 
             var logDir = Path.Combine(_repoDir, "log");
-            var logFilesBefore = Directory.Exists(logDir)
+            _ = Directory.Exists(logDir)
                 ? Directory.GetFiles(logDir, "*.delta").OrderBy(p => p).ToArray()
                 : [];
 

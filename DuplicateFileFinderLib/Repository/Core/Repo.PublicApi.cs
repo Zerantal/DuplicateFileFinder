@@ -103,7 +103,6 @@ public sealed partial class Repo
             relativeRootPath = PathUtils.NormalizePath(Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
         
         ScanRun run;
-        ScanRoot scanRoot;
         RepoDelta? rootDelta = null;
         // Dictionary<long, DirRecord> existingDirs;
         DirRecord rootDir;
@@ -112,10 +111,10 @@ public sealed partial class Repo
         {
             var runId = AllocateRunId_NoLock();
             
-            scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
+            var scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
 
             // Create dummy dir record if no dir record is associated with the scan root.
-            if (scanRoot.DirId == 0 || !_dirs.ContainsKey(scanRoot.DirId))
+            if (scanRoot.DirId == 0 || !_dirs.TryGetValue(scanRoot.DirId, out var dir))
             {
                 var rootDirId = AllocateDirId_NoLock();
 
@@ -134,7 +133,7 @@ public sealed partial class Repo
                 scanRoot = scanRoot with { DirId = rootDirId};
                 _scanRoots[scanRoot.RootId] = scanRoot;
             }
-            else rootDir = _dirs[scanRoot.DirId];
+            else rootDir = dir;
             
             if (volumeInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
 
@@ -326,8 +325,8 @@ public sealed partial class Repo
                 var emptySnap = new ScanRootSnapshotOnDisk
                 {
                     ScanRootId = root.RootId,
-                    Dirs       = Array.Empty<DirRecord>(),
-                    Files      = Array.Empty<FileRecord>()
+                    Dirs       = [],
+                    Files      = []
                 };
 
                 await RepoStore.SaveScanRootSnapshotAsync(_repoPath, emptySnap, ct)

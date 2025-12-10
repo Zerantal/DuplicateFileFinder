@@ -46,15 +46,13 @@ namespace DuplicateFileFinderLibTests.Repository
 
             // Create at least one ScanRoot so the root loop in CompactAsync runs.
             // We don't care about the operation kind; default is fine.
-            await using (var session = repo.BeginScan(
-                             rootPath: "/fake/root",
-                             scanOperation: default,
-                             volumeInfo: null,
-                             maxFilesBeforeFlush: 10,
-                             maxDirsBeforeFlush: 10))
-            {
-                // No scan activity needed; just ensure the root exists.
-            }
+            repo.BeginScan(
+                rootPath: "/fake/root",
+                scanOperation: default,
+                volumeInfo: null,
+                maxFilesBeforeFlush: 10,
+                maxDirsBeforeFlush: 10);
+            
 
             // Seed a single delta so we have at least one log file.
             var dirId  = repo.AllocateDirId();
@@ -63,8 +61,8 @@ namespace DuplicateFileFinderLibTests.Repository
             var delta = new RepoDelta
             {
                 ScanSequence = 1,
-                Dirs = new[]
-                {
+                Dirs =
+                [
                     new DirRecord
                     {
                         DirId                = dirId,
@@ -73,9 +71,9 @@ namespace DuplicateFileFinderLibTests.Repository
                         LastSeenScanSequence = 1,
                         Status               = ScanEntryStatus.Enumerated
                     }
-                },
-                Files = new[]
-                {
+                ],
+                Files =
+                [
                     new FileRecord
                     {
                         FileId               = fileId,
@@ -87,7 +85,7 @@ namespace DuplicateFileFinderLibTests.Repository
                         LastSeenScanSequence = 1,
                         Status               = ScanEntryStatus.Enumerated
                     }
-                }
+                ]
             };
 
             await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;

@@ -24,10 +24,9 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
         private static IRepoView MakeSnapshot(params FileRecord[] files)
         {
             // Dirs/HashIndex are unused by HashIndexPlugin today; provide minimal stubs.
-            var dirs = new Dictionary<long, DirRecord>();
             var fileDict = files.ToDictionary(f => f.FileId, f => f);
 
-            return new RepoView(dirs, fileDict);
+            return new RepoView(new Dictionary<long, DirRecord>(), fileDict);
         }
 
         private static RepoEvent MakeBootstrapEvent(IRepoView snapshot)
@@ -181,8 +180,8 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
             var delta = new RepoDelta
             {
                 ScanSequence = 2,
-                Dirs         = Array.Empty<DirRecord>(),
-                Files        = new[] { f2 }
+                Dirs         = [],
+                Files        = [f2]
             };
 
             plugin.Post(MakeDeltaCommittedEvent(generation: 1, nextLogSeq: 2, scanSeq: 2, delta));
