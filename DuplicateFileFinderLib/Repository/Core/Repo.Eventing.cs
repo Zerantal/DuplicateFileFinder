@@ -21,7 +21,7 @@ public sealed partial class Repo
 
         lock (_sync)
         {
-            var snapshot = CreateSnapshot_NoLock();
+            var snapshot = GetRepoView_NoLock();
 
             bootstrap = new BootstrapEvent
             {

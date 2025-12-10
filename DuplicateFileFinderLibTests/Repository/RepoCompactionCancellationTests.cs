@@ -93,7 +93,7 @@ namespace DuplicateFileFinderLibTests.Repository
             await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);
 
             // Snapshot state before compaction
-            var snapshotBefore = repo.GetSnapshot();
+            var snapshotBefore = repo.GetRepoView();
 
             var metaBefore = repo.Meta;
             var generationBefore           = metaBefore.Generation;
@@ -131,7 +131,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.Equal(logFilesBefore, logFilesAfter);
 
             // Assert: repo state is unchanged in-memory
-            var snapshotAfter = repo.GetSnapshot();
+            var snapshotAfter = repo.GetRepoView();
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotAfter.Dirs.Keys));
             Assert.True(new HashSet<long>(snapshotBefore.Files.Keys).SetEquals(snapshotAfter.Files.Keys));
 
@@ -151,7 +151,7 @@ namespace DuplicateFileFinderLibTests.Repository
             await repo.DisposeAsync();
 
             var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
-            var snapshotReopened = reopened.GetSnapshot();
+            var snapshotReopened = reopened.GetRepoView();
 
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotReopened.Dirs.Keys));
             Assert.True(new HashSet<long>(snapshotBefore.Files.Keys).SetEquals(snapshotReopened.Files.Keys));

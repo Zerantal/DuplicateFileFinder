@@ -164,53 +164,6 @@ public sealed partial class Repo
         }
     }
     
-    internal void CompleteScanForRoot(long scanSequence, string rootPath)
-    {
-        List<FileRecord> deletedFiles;
-        List<DirRecord>  deletedDirs;
-
-        lock (_sync)
-        {
-            deletedFiles = new List<FileRecord>();
-            deletedDirs  = new List<DirRecord>();
-
-            foreach (var file in _files.Values)
-            {
-                if (!IsUnderRoot(file.DirId, rootPath))
-                    continue;
-
-                if (file.LastSeenScanSequence < scanSequence)
-                    deletedFiles.Add(file with {Status =  ScanEntryStatus.Deleted});
-            }
-            
-            foreach (var dir in _dirs.Values)
-            {
-                if (!IsUnderRoot(dir.DirId, rootPath))
-                    continue;
-
-                if (dir.LastSeenScanSequence < scanSequence)
-                    deletedDirs.Add(dir with {Status = ScanEntryStatus.Deleted});
-            }
-        }
-
-        if (deletedFiles.Count == 0 && deletedDirs.Count == 0)
-        {
-            MarkScanCompleted(scanSequence);
-            return;
-        }
-
-        var tombstoneDelta = new RepoDelta
-        {
-            ScanSequence = scanSequence,
-            Files = deletedFiles,
-            Dirs = deletedDirs
-        };
-
-        CommitDelta(tombstoneDelta);
-        MarkScanCompleted(scanSequence);
-    }
-
-    
     private bool IsUnderRoot(long dirId, string rootPath)
     {
         var path = GetFullDirPath(dirId);

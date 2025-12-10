@@ -1,32 +1,23 @@
+using System.Collections;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Core;
 
-internal class FullScanOperation
+internal class FullScanOperation(
+    IRepoHost host,
+    IFileEnumerator fs,
+    IChecksumPipeline pipeline,
+    IVolumeInfoProvider? volumeInfoProvider)
 {
-    private readonly IVolumeInfoProvider? _volumeInfoProvider;
-    private readonly IRepo _repo;
-    private readonly IFileEnumerator _fs;
-    private readonly IChecksumPipeline _pipeline;
+    private readonly IRepo _repo = host.Repo;
+    private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex;
     private int _hashDegreeOfParallelism;
-
-    public FullScanOperation(
-        IRepoHost host, 
-        IFileEnumerator fs, 
-        IChecksumPipeline pipeline, 
-        IVolumeInfoProvider? volumeInfoProvider)
-    {
-        _repo               = host.Repo;
-        _fs                 = fs;
-        _pipeline           = pipeline;
-        _volumeInfoProvider = volumeInfoProvider;
-        _volumeInfoProvider = volumeInfoProvider;
-    }
 
     public async Task ExecuteAsync(string rootPath, IProgress<DuplicateFileFinderProgressReport>? progress, CancellationToken ct)
     {
@@ -34,7 +25,7 @@ internal class FullScanOperation
 
         // Volume info
         VolumeInfo? vInfo = null;
-        try { vInfo = _volumeInfoProvider?.GetVolumeInfoForPath(rootPath); } catch { /* ignore */ }
+        try { vInfo = volumeInfoProvider?.GetVolumeInfoForPath(rootPath); } catch { /* ignore */ }
 
         _hashDegreeOfParallelism = vInfo is { IsRotational: true } ? 1 : Environment.ProcessorCount;
       
@@ -61,7 +52,7 @@ internal class FullScanOperation
             using (PhaseScope.Begin(ScanPhase.Hashing))
             using (TimingLog.StartPhase(ScanPhase.Hashing))
             {
-                await HashingRunner.RunAsync(filesToHash, session, _pipeline, _hashDegreeOfParallelism, progress, ct);
+                await HashingRunner.RunAsync(filesToHash, session, pipeline, _hashDegreeOfParallelism, progress, ct);
             }
              
             
@@ -86,117 +77,200 @@ internal class FullScanOperation
     }
     
     private async Task<List<HashingRunner.FileToHash>> EnumerateFullAsync(
-         string location, 
-         IProgress<DuplicateFileFinderProgressReport>? progress, 
-         IScanSession session, 
-         CancellationToken token)
-     {
-         var filesToHash   = new List<HashingRunner.FileToHash>();
-         var dirsToVisit   = new Stack<(string fullPath, string name, long dirId)>();
-         long dirsVisited = 0;
-
-         var rootDir = session.RootDir;
-         location = PathUtils.NormalizePath(location);
-
-
-         // update root folder
-         var rootDirId = session.AddOrUpdateDirectory(rootDir with { Status = ScanEntryStatus.Enumerated });
-
-         dirsVisited++;
-         DuplicateFileFinderHelpers.Report(
-             progress,
-             ScanPhase.Enumerating,
-             $"Scanning {location}",
-             indeterminate: true,
-             processed: dirsVisited);
+        string location, 
+        IProgress<DuplicateFileFinderProgressReport>? progress, 
+        IScanSession session, 
+        CancellationToken token)
+    {
+        var repoView = _repo.GetRepoView();
+        var filesToHash   = new List<HashingRunner.FileToHash>();
          
-         await ScanFolder(location, rootDirId, session, filesToHash, dirsToVisit, token);
+        var dirsToVisit = new Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)>();
+        long dirsVisited = 0;
 
-         // recursive scan
-         while (dirsToVisit.Count > 0)
-         {
-             token.ThrowIfCancellationRequested();
+        var rootDir = session.RootDir;
+        location = PathUtils.NormalizePath(location);
+
+        // update root folder
+        var rootDirId = session.AddOrUpdateDirectory(rootDir with { Status = ScanEntryStatus.Enumerated });
+
+        dirsVisited++;
+        DuplicateFileFinderHelpers.Report(
+            progress,
+            ScanPhase.Enumerating,
+            $"Scanning {location}",
+            indeterminate: true,
+            processed: dirsVisited);
+         
+        await ScanFolder(location, rootDirId, session, filesToHash, dirsToVisit, repoView, token);
+
+        // recursive scan
+        while (dirsToVisit.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
              
-             var (dir, name, dirId) = dirsToVisit.Pop();
+            var (dirEntry, parentDirId, existingDirId) = dirsToVisit.Pop();
 
-             var newParentId = session.AddOrUpdateDirectory(new DirRecord
-             {
-                 ParentDirId = dirId,
-                 Name = name,
-                 Status = ScanEntryStatus.Enumerated
-             });
+            var dirRecord = new DirRecord
+            {
+                DirId        = existingDirId,
+                ParentDirId  = parentDirId,
+                Name = dirEntry.Name,
+                Created = dirEntry.CreationTimeUtc,
+                Modified = dirEntry.ModifiedTimeUtc,
+                Status = ScanEntryStatus.Enumerated
+            };
+
+            var newParentId = session.AddOrUpdateDirectory(dirRecord);
              
-             dirsVisited++;
-             DuplicateFileFinderHelpers.Report(
-                 progress,
-                 ScanPhase.Enumerating,
-                 $"Scanning {dir}",
-                 indeterminate: true,
-                 processed: dirsVisited);
+            dirsVisited++;
+            DuplicateFileFinderHelpers.Report(
+                progress,
+                ScanPhase.Enumerating,
+                $"Scanning {dirEntry.FullPath}",
+                indeterminate: true,
+                processed: dirsVisited);
              
-             await ScanFolder(dir, newParentId, session, filesToHash, dirsToVisit, token );
+            await ScanFolder(dirEntry.FullPath, newParentId, session, filesToHash, dirsToVisit, repoView, token );
              
-             // Give the scheduler a chance occasionally in large trees
-             if ((dirsVisited & 0xFF) == 0)
-                 await Task.Yield();
-         }
+            // Give the scheduler a chance occasionally in large trees
+            if ((dirsVisited & 0xFF) == 0)
+                await Task.Yield();
+        }
 
-         return filesToHash;
-     }
-    
-     /// <summary>
-     /// Scan files and directories in single directory (non-recursive)
-     /// </summary>
-     /// <param name="location"></param>
-     /// <param name="parentDirId"></param>
-     /// <param name="session"></param>
-     /// <param name="filesToHash"></param>
-     /// <param name="dirsToVisit"></param>
-     /// <param name="token"></param>
-     private async Task ScanFolder(
-         string location,
-         long parentDirId,
-         IScanSession session,
-         List<HashingRunner.FileToHash> filesToHash,
-         Stack<(string fullPath, string name, long dirId)> dirsToVisit,
-         CancellationToken token)
-     {
-         var normDir = PathUtils.NormalizePath(location);
+        return filesToHash;
+    }
 
-         TimingLog.Counter("folders");
+    /// <summary>
+    /// Scan files and directories in single directory (non-recursive)
+    /// </summary>
+    /// <param name="location"></param>
+    /// <param name="parentDirId"></param>
+    /// <param name="session"></param>
+    /// <param name="filesToHash"></param>
+    /// <param name="dirsToVisit"></param>
+    /// <param name="repoView"></param>
+    /// <param name="token"></param>
+    private Task ScanFolder(
+        string location,
+        long parentDirId,
+        IScanSession session,
+        List<HashingRunner.FileToHash> filesToHash,
+        Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)> dirsToVisit,
+        IRepoView repoView,
+        CancellationToken token = default)
+    {
+        var normDir = PathUtils.NormalizePath(location);
 
-         foreach (var e in _fs.EnumerateChildren(normDir, token))
-         {
-             if (e.IsDirectory)
-             {
-                 dirsToVisit.Push((e.FullPath, e.Name, parentDirId));
-                 continue;
-             }
+        TimingLog.Counter("folders");
 
-             var fullPath = PathUtils.NormalizePath(e.FullPath);
+        var childDirIds  = _treeIndex.GetChildDirIds(parentDirId);
+        var childFileIds = _treeIndex.GetChildFileIds(parentDirId);
 
-             // Normal path: record as enumerated, hash not computed yet.
-             FileRecord file = new FileRecord()
-             {
-                 Created = e.CreationTimeUtc,
-                 DirId = parentDirId,
-                 Modified = e.ModifiedTimeUtc,
-                 Name = e.Name,
-                 Size = e.Length,
-                 Status = ScanEntryStatus.Enumerated,
-                 Hash = HashKey.NotComputed
-             };
-             session.AddOrUpdateFile(ref file);
+        var expectedDirs = new Dictionary<string, long>(PathUtils.PathComparer);
+        foreach (var dirId in childDirIds)
+        {
+            var dir = repoView.TryGetDir(dirId);
+            if (dir is not null)
+                expectedDirs[dir.Name] = dir.DirId;
+        }
 
-             // Only non-zero files are hashed
-             if (e.Length > 0)
-             {
-                 filesToHash.Add(new HashingRunner.FileToHash(
-                     fullPath,
-                     file));
-             }
+        var expectedFiles = new Dictionary<string, long>(PathUtils.PathComparer);
+        foreach (var fileId in childFileIds)
+        {
+            var file = repoView.TryGetFile(fileId);
+            if (file is not null)
+                expectedFiles[file.Name] = file.FileId;
+        }
+         
+        foreach (var e in fs.EnumerateChildren(normDir, token))
+        {
+            if (e.IsDirectory)
+            {
+                // Try to reuse existing DirId from tree index
+                long existingDirId = 0;
+                if (expectedDirs.TryGetValue(e.Name, out var id))
+                {
+                    existingDirId = id;
+                    expectedDirs.Remove(e.Name);
+                }
 
-             TimingLog.Counter("files");
-         }
-     }
+                // Push child dir, carrying both parent and existing id (if any)
+                dirsToVisit.Push((e, parentDirId, existingDirId));
+                continue;
+            }
+
+            var fullPath = PathUtils.NormalizePath(e.FullPath);
+
+            // Try to reuse existing FileId from tree index
+            long existingFileId = 0;
+            if (expectedFiles.TryGetValue(e.Name, out var fileId))
+            {
+                existingFileId = fileId;
+                expectedFiles.Remove(e.Name);
+            }
+
+            // Normal path: record as enumerated, hash not computed yet.
+            FileRecord file = new FileRecord
+            {
+                FileId   = existingFileId,
+                DirId = parentDirId,
+                Name = e.Name,
+                Size = e.Length,
+                Created  = e.CreationTimeUtc,
+                Modified = e.ModifiedTimeUtc,
+                Status = ScanEntryStatus.Enumerated,
+                Hash = HashKey.NotComputed
+            };
+
+            session.AddOrUpdateFile(ref file);
+
+            // Only non-zero files are hashed
+            if (e.Length > 0)
+            {
+                filesToHash.Add(new HashingRunner.FileToHash(
+                    fullPath,
+                    file));
+            }
+
+            TimingLog.Counter("files");
+        }
+         
+        PurgeOldDirs(session, expectedDirs.Values);
+        PurgeOldFiles(session, expectedFiles.Values);
+
+        return Task.CompletedTask;
+    }
+
+    private void PurgeOldDirs(IScanSession session, IEnumerable<long> dirsToRemove)
+    {
+        foreach (var dirId in dirsToRemove)
+        {
+            var subDirs = _treeIndex.GetChildDirIds(dirId);
+            var files = _treeIndex.GetChildFileIds(dirId);
+             
+            PurgeOldDirs(session, subDirs);
+            PurgeOldFiles(session, files);
+
+            var dirRecord = new DirRecord
+            {
+                DirId = dirId,
+                Status = ScanEntryStatus.Deleted
+            };
+            session.AddOrUpdateDirectory(dirRecord);
+        }
+    }
+
+    private void PurgeOldFiles(IScanSession session, IEnumerable<long> filesToRemove)
+    {
+        foreach (var fileId in filesToRemove)
+        {
+            FileRecord file = new FileRecord
+            {
+                FileId = fileId,
+                Status = ScanEntryStatus.Deleted
+            };
+            session.AddOrUpdateFile(ref file);
+        }
+    }
 }

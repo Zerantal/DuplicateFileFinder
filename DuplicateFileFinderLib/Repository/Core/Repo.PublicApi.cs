@@ -66,25 +66,21 @@ public sealed partial class Repo
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
-    
-    public RepoViewSnapshot GetSnapshot()
+
+    public IRepoView GetRepoView()
     {
         lock (_sync)
         {
-            return CreateSnapshot_NoLock();
+            return GetRepoView_NoLock();
         }
     }
 
-    private RepoViewSnapshot CreateSnapshot_NoLock()
+    private IRepoView GetRepoView_NoLock()
     {
-        var files = new Dictionary<long, FileRecord>(_files);
-        var dirs = new Dictionary<long, DirRecord>(_dirs);
+        var filesCopy = new Dictionary<long, FileRecord>(_files);
+        var dirsCopy = new Dictionary<long, DirRecord>(_dirs);
 
-        return new RepoViewSnapshot
-        {
-            Files = files,
-            Dirs = dirs
-        };
+        return new RepoView(dirsCopy, filesCopy);
     }
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
@@ -407,13 +403,13 @@ public sealed partial class Repo
     {
         long generation;
         long nextLogSeq;
-        RepoViewSnapshot snapshot;
+        IRepoView snapshot;
         
         lock (_sync)
         {
             generation = Meta.Generation;
             nextLogSeq = Meta.NextLogSequence;
-            snapshot = CreateSnapshot_NoLock();
+            snapshot = GetRepoView_NoLock();
         }
 
         var evt = new CompactedEvent

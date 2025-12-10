@@ -165,7 +165,7 @@ public sealed class ScanSession : IScanSession
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.CompleteScanForRoot(ScanSequence, Run.RootPath);
+        _repo.MarkScanCompleted(ScanSequence);
         _finished = true;
     }
 
@@ -176,18 +176,4 @@ public sealed class ScanSession : IScanSession
         _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
         _finished = true;
     }
-
-    // public DirRecord? GetDirRecord(long dirId)
-    // {
-    //     _snapshot.Dirs.TryGetValue(dirId, out DirRecord? dirRecord);
-    //     
-    //     return dirRecord;
-    // }
-
-    // public FileRecord? GetFileRecord(long fileId)
-    // {
-    //     _snapshot.Files.TryGetValue(fileId, out FileRecord? fileRecord);
-    //     
-    //     return fileRecord;
-    // }
 }

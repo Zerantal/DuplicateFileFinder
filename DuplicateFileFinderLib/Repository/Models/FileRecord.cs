@@ -6,8 +6,8 @@ namespace DuplicateFileFinderLib.Repository.Models;
 public partial record FileRecord
 {
     [MemoryPackOrder(0)] public long FileId { get; init; } = -1;
-    [MemoryPackOrder(1)] public required long DirId { get; init; }
-    [MemoryPackOrder(2)] public required string Name { get; init; }
+    [MemoryPackOrder(1)] public long DirId { get; init; } = -1;
+    [MemoryPackOrder(2)] public string Name { get; init; } = String.Empty;
     [MemoryPackOrder(3)] public long Size { get; init; }
     [MemoryPackOrder(4)] public HashKey Hash { get; init; }
     [MemoryPackOrder(5)] public DateTimeOffset? Modified { get; init; }

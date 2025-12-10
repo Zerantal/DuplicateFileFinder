@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLibTests.TestUtils;
@@ -20,20 +21,16 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
             return new HashKey(bytes);
         }
 
-        private static RepoViewSnapshot MakeSnapshot(params FileRecord[] files)
+        private static IRepoView MakeSnapshot(params FileRecord[] files)
         {
             // Dirs/HashIndex are unused by HashIndexPlugin today; provide minimal stubs.
             var dirs = new Dictionary<long, DirRecord>();
             var fileDict = files.ToDictionary(f => f.FileId, f => f);
 
-            return new RepoViewSnapshot
-            {
-                Dirs      = dirs,
-                Files     = fileDict,
-            };
+            return new RepoView(dirs, fileDict);
         }
 
-        private static RepoEvent MakeBootstrapEvent(RepoViewSnapshot snapshot)
+        private static RepoEvent MakeBootstrapEvent(IRepoView snapshot)
         {
             return new BootstrapEvent
             {

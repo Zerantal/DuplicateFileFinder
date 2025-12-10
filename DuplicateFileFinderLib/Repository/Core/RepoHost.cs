@@ -29,8 +29,8 @@ public sealed class RepoHost : IRepoHost
         // 2. Create plugins
         var hashIndexDir = Path.Combine(repoDir, nameof(HashIndexPlugin));
         var hashIndex = new HashIndexPlugin(hashIndexDir);
-        var treeIndexDir = Path.Combine(repoDir, nameof(TreeIndexReadModel));
-        var treeIndex = new TreeIndexReadModel(treeIndexDir);
+        var treeIndexDir = Path.Combine(repoDir, nameof(TreeIndexPlugin));
+        var treeIndex = new TreeIndexPlugin(treeIndexDir);
 
         // 3. Bootstrap + subscribe plugins
         repo.RegisterEventSinkWithBootstrap(hashIndex);

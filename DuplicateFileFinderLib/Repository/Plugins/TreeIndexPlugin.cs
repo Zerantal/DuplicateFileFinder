@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
@@ -8,7 +9,7 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 
 
 
-public class TreeIndexReadModel : ChannelRepoPlugin, ITreeIndexReadModel
+public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
     private readonly Lock _lock = new();
 
@@ -21,7 +22,7 @@ public class TreeIndexReadModel : ChannelRepoPlugin, ITreeIndexReadModel
     private long _lastIndexedGeneration;
     private long _lastIndexedLogSequence;
 
-    public TreeIndexReadModel(string dataDirectory)
+    public TreeIndexPlugin(string dataDirectory)
         : base(4096)
     {
         if (string.IsNullOrWhiteSpace(dataDirectory))
@@ -87,7 +88,7 @@ public class TreeIndexReadModel : ChannelRepoPlugin, ITreeIndexReadModel
     // Core index maintenance
     // ---------------------------------------------------------------------
 
-    private void RebuildFromSnapshot(RepoViewSnapshot snapshot)
+    private void RebuildFromSnapshot(IRepoView snapshot)
     {
         var newChildrenDirsByParentId = new Dictionary<long, List<long>>();
         var newChildrenFilesByDirId = new Dictionary<long, List<long>>();

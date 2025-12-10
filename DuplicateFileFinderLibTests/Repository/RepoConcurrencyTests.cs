@@ -97,7 +97,7 @@ namespace DuplicateFileFinderLibTests.Repository
 
             // --- Live snapshot assertions ---
 
-            var snapshot = repo.GetSnapshot();
+            var snapshot = repo.GetRepoView();
 
             // All dirs present
             var expectedDirIds = deltas.Select(d => d.DirId).ToHashSet();
@@ -159,8 +159,8 @@ namespace DuplicateFileFinderLibTests.Repository
 
             await repo.DisposeAsync();
 
-            var reopened = await Repo.OpenAsync(_repoDir);
-            var snapshot2 = reopened.GetSnapshot();
+            var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
+            var snapshot2 = reopened.GetRepoView();
 
             Assert.Equal(snapshot.Dirs.Count, snapshot2.Dirs.Count);
             Assert.Equal(snapshot.Files.Count, snapshot2.Files.Count);
@@ -192,7 +192,7 @@ namespace DuplicateFileFinderLibTests.Repository
         {
             const int deltaCount = 128;
 
-            var repo = await Repo.OpenAsync(_repoDir);
+            var repo = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
             var now = DateTimeOffset.UtcNow;
 
             var deltas = new List<(RepoDelta Delta, long DirId, long FileId)>(deltaCount);
@@ -248,7 +248,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 {
                     while (!cts.Token.IsCancellationRequested)
                     {
-                        var snap = repo.GetSnapshot();
+                        var snap = repo.GetRepoView();
 
                         // Basic invariant: no duplicate keys and no null maps.
                         Assert.NotNull(snap.Dirs);
@@ -282,7 +282,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.Empty(snapshotExceptions);
 
             // Final snapshot sanity check (as in previous test)
-            var snapshot = repo.GetSnapshot();
+            var snapshot = repo.GetRepoView();
 
             var expectedDirIds = deltas.Select(d => d.DirId).ToHashSet();
             Assert.True(expectedDirIds.SetEquals(snapshot.Dirs.Keys));

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
@@ -57,7 +58,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         {
             Repo = repo;
             HashIndex = new HashIndexPlugin(_repoDir.Root);
-            TreeIndex = new TreeIndexReadModel(_repoDir.Root);
+            TreeIndex = new TreeIndexPlugin(_repoDir.Root);
         }
 
         public ValueTask DisposeAsync()
@@ -69,6 +70,22 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public IHashIndexReadModel HashIndex { get; }
         public ITreeIndexReadModel TreeIndex { get; }
     }
+
+    private sealed class FakeRepoView : IRepoView
+    {
+        public IReadOnlyDictionary<long, DirRecord> Dirs { get; }
+        public IReadOnlyDictionary<long, FileRecord> Files { get; }
+        public DirRecord? TryGetDir(long dirId)
+        {
+            return null;
+        }
+
+        public FileRecord? TryGetFile(long fileId)
+        {
+            return null;
+        }
+    }
+    
     
     private sealed class CapturingRepo : IRepo
     {
@@ -79,8 +96,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         
         public bool CompactAsyncCalled { get; private set; }
 
-        public RepoViewSnapshot GetSnapshot()
-            => throw new NotImplementedException("Snapshot not used in these tests.");
+        public IRepoView GetRepoView() => new FakeRepoView();
 
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
         public IReadOnlyList<ScanRoot> ScanRootsView { get; } = [];
@@ -662,7 +678,14 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         return await Repo.OpenAsync(repoDir);
     }
 
-    private static Dictionary<string, FileRecord> MapFilesByFullPath(Repo repo, RepoViewSnapshot snapshot)
+    private static async Task<IRepoHost> CreateHost(string root)
+    {
+        var repoDir = Path.Combine(root, "repo");
+        Directory.CreateDirectory(repoDir);
+        return await RepoHost.OpenAsync(repoDir);
+    }
+
+    private static Dictionary<string, FileRecord> MapFilesByFullPath(IRepo repo, IRepoView snapshot)
     {
         var result = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in snapshot.Files)
@@ -676,7 +699,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         return result;
     }
 
-    private static HashSet<string> MapDirsByFullPath(Repo repo, RepoViewSnapshot snapshot)
+    private static HashSet<string> MapDirsByFullPath(IRepo repo, IRepoView snapshot)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in snapshot.Dirs)
@@ -698,14 +721,15 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var keepPath   = _fs.File("root/keep.bin",   "AAAA"u8.ToArray());
         var deletePath = _fs.File("root/delete.bin", "BBBB"u8.ToArray());
 
-        var repo    = await CreateRepo(_fs.Root);
-        var host = new  CapturingHost(repo);
+        // var repo    = await CreateRepo(_fs.Root);
+        var host = await CreateHost(_fs.Root);
+        var repo = host.Repo;
         var finder = new DuplicateFileFinder(host);
         
         // First scan
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap1        = repo.GetSnapshot();
+        var snap1        = repo.GetRepoView();
         var filesByPath1 = MapFilesByFullPath(repo, snap1);
 
         // Sanity: both files are present after first scan
@@ -721,7 +745,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap2        = repo.GetSnapshot();
+        var snap2        = repo.GetRepoView();
         var filesByPath2 = MapFilesByFullPath(repo, snap2);
 
         // Assert: kept file is still present, deleted file is gone
@@ -744,14 +768,15 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         _fs.Dir("root/sub");
         var childPath = _fs.File("root/sub/child.bin", "CCCC"u8.ToArray());
 
-        var repo    = await CreateRepo(_fs.Root);
-        var host = new  CapturingHost(repo);
+        // var repo    = await CreateRepo(_fs.Root);
+        var host = await CreateHost(_fs.Root);
+        var repo = host.Repo;
         var finder = new DuplicateFileFinder(host);
         
         // First scan
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap1        = repo.GetSnapshot();
+        var snap1        = repo.GetRepoView();
         var filesByPath1 = MapFilesByFullPath(repo, snap1);
         var dirs1        = MapDirsByFullPath(repo, snap1);
 
@@ -770,7 +795,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap2        = repo.GetSnapshot();
+        var snap2        = repo.GetRepoView();
         var filesByPath2 = MapFilesByFullPath(repo, snap2);
         var dirs2        = MapDirsByFullPath(repo, snap2);
 
@@ -800,14 +825,14 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // First scan
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap1  = repo.GetSnapshot();
+        var snap1  = repo.GetRepoView();
         var files1 = MapFilesByFullPath(repo, snap1);
         var dirs1  = MapDirsByFullPath(repo, snap1);
 
         // Second scan (full rescan, no changes on disk)
         await finder.FullScanAsync(root, ct: TestContext.Current.CancellationToken);
 
-        var snap2  = repo.GetSnapshot();
+        var snap2  = repo.GetRepoView();
         var files2 = MapFilesByFullPath(repo, snap2);
         var dirs2  = MapDirsByFullPath(repo, snap2);
 
@@ -849,14 +874,14 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // First scan (full)
     //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
     //
-    //     var snap1  = repo.GetSnapshot();
+    //     var snap1  = repo.GetRepoView();
     //     var files1 = MapFilesByFullPath(repo, snap1);
     //     var dirs1  = MapDirsByFullPath(repo, snap1);
     //
     //     // QuickScan rescan (no changes on disk)
     //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
     //
-    //     var snap2  = repo.GetSnapshot();
+    //     var snap2  = repo.GetRepoView();
     //     var files2 = MapFilesByFullPath(repo, snap2);
     //     var dirs2  = MapDirsByFullPath(repo, snap2);
     //
@@ -896,7 +921,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // First scan
     //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
     //
-    //     var snap1  = repo.GetSnapshot();
+    //     var snap1  = repo.GetRepoView();
     //     var files1 = MapFilesByFullPath(repo, snap1);
     //
     //     // Sanity: both files present
@@ -909,7 +934,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // Act: quick rescan
     //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
     //
-    //     var snap2  = repo.GetSnapshot();
+    //     var snap2  = repo.GetRepoView();
     //     var files2 = MapFilesByFullPath(repo, snap2);
     //
     //     // Assert: kept file remains, deleted file gone
@@ -933,7 +958,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // First scan
     //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
     //
-    //     var snap1  = repo.GetSnapshot();
+    //     var snap1  = repo.GetRepoView();
     //     var files1 = MapFilesByFullPath(repo, snap1);
     //     var dirs1  = MapDirsByFullPath(repo, snap1);
     //
@@ -952,7 +977,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // Act: quick rescan
     //     await finder.ScanLocationAsync(root, ScanOperation.QuickScan, token: TestContext.Current.CancellationToken);
     //
-    //     var snap2  = repo.GetSnapshot();
+    //     var snap2  = repo.GetRepoView();
     //     var files2 = MapFilesByFullPath(repo, snap2);
     //     var dirs2  = MapDirsByFullPath(repo, snap2);
     //
@@ -980,7 +1005,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // First scan
     //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
     //
-    //     var snap1  = repo.GetSnapshot();
+    //     var snap1  = repo.GetRepoView();
     //     var files1 = MapFilesByFullPath(repo, snap1);
     //
     //     var keep1   = files1.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
@@ -992,7 +1017,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
     //     // Act: quick rescan
     //     await finder.ScanLocationAsync(root, token: TestContext.Current.CancellationToken);
     //
-    //     var snap2  = repo.GetSnapshot();
+    //     var snap2  = repo.GetRepoView();
     //     var files2 = MapFilesByFullPath(repo, snap2);
     //
     //     var keep2   = files2.Single(kv => PathUtils.IsSamePath(kv.Key, keepPath)).Value;
@@ -1038,7 +1063,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Act
         await finder.FullScanAsync(root, progress: null, ct: CancellationToken.None);
 
-        var snapshot = repo.GetSnapshot();
+        var snapshot = repo.GetRepoView();
 
         // Find the net9.0 directory in the repo
         var expectedNetDirPath = PathUtils.NormalizePath(netDir);
