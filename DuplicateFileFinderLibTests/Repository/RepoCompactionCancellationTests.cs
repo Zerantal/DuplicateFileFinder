@@ -46,15 +46,13 @@ namespace DuplicateFileFinderLibTests.Repository
 
             // Create at least one ScanRoot so the root loop in CompactAsync runs.
             // We don't care about the operation kind; default is fine.
-            await using (var session = repo.BeginScan(
-                             rootPath: "/fake/root",
-                             scanOperation: default,
-                             volumeInfo: null,
-                             maxFilesBeforeFlush: 10,
-                             maxDirsBeforeFlush: 10))
-            {
-                // No scan activity needed; just ensure the root exists.
-            }
+            repo.BeginScan(
+                rootPath: "/fake/root",
+                scanOperation: default,
+                volumeInfo: null,
+                maxFilesBeforeFlush: 10,
+                maxDirsBeforeFlush: 10);
+            
 
             // Seed a single delta so we have at least one log file.
             var dirId  = repo.AllocateDirId();
@@ -63,8 +61,8 @@ namespace DuplicateFileFinderLibTests.Repository
             var delta = new RepoDelta
             {
                 ScanSequence = 1,
-                Dirs = new[]
-                {
+                Dirs =
+                [
                     new DirRecord
                     {
                         DirId                = dirId,
@@ -73,9 +71,9 @@ namespace DuplicateFileFinderLibTests.Repository
                         LastSeenScanSequence = 1,
                         Status               = ScanEntryStatus.Enumerated
                     }
-                },
-                Files = new[]
-                {
+                ],
+                Files =
+                [
                     new FileRecord
                     {
                         FileId               = fileId,
@@ -87,13 +85,13 @@ namespace DuplicateFileFinderLibTests.Repository
                         LastSeenScanSequence = 1,
                         Status               = ScanEntryStatus.Enumerated
                     }
-                }
+                ]
             };
 
             await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);
 
             // Snapshot state before compaction
-            var snapshotBefore = repo.GetSnapshot();
+            var snapshotBefore = repo.GetRepoView();
 
             var metaBefore = repo.Meta;
             var generationBefore           = metaBefore.Generation;
@@ -131,7 +129,7 @@ namespace DuplicateFileFinderLibTests.Repository
             Assert.Equal(logFilesBefore, logFilesAfter);
 
             // Assert: repo state is unchanged in-memory
-            var snapshotAfter = repo.GetSnapshot();
+            var snapshotAfter = repo.GetRepoView();
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotAfter.Dirs.Keys));
             Assert.True(new HashSet<long>(snapshotBefore.Files.Keys).SetEquals(snapshotAfter.Files.Keys));
 
@@ -151,7 +149,7 @@ namespace DuplicateFileFinderLibTests.Repository
             await repo.DisposeAsync();
 
             var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
-            var snapshotReopened = reopened.GetSnapshot();
+            var snapshotReopened = reopened.GetRepoView();
 
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotReopened.Dirs.Keys));
             Assert.True(new HashSet<long>(snapshotBefore.Files.Keys).SetEquals(snapshotReopened.Files.Keys));

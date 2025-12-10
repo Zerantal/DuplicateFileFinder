@@ -187,7 +187,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
 
             await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);
 
-            var snapshot = repo.GetSnapshot();
+            var snapshot = repo.GetRepoView();
             Assert.Single(snapshot.Dirs);
             var fileRecord = Assert.Single(snapshot.Files).Value;
             
@@ -239,7 +239,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
                 Files = [file]
             }, TestContext.Current.CancellationToken);
 
-            var snapshot1 = repo.GetSnapshot();
+            var snapshot1 = repo.GetRepoView();
             Assert.Single(snapshot1.Files);
 
             // Second delta: delete file
@@ -249,7 +249,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
                 Files = [file with {Status = ScanEntryStatus.Deleted}]
             }, TestContext.Current.CancellationToken);
 
-            var snapshot2 = repo.GetSnapshot();
+            var snapshot2 = repo.GetRepoView();
             Assert.Empty(snapshot2.Files);
         }
 
@@ -331,7 +331,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
             // Reopen: should load baseline + replay delta2
             repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
 
-            var snapshot = repo.GetSnapshot();
+            var snapshot = repo.GetRepoView();
 
             Assert.Equal(2, snapshot.Files.Count);
             Assert.True(snapshot.Files.ContainsKey(fileId1));
@@ -412,97 +412,6 @@ namespace DuplicateFileFinderLibTests.Repository.Core
             // Ensure cache hit path also works
             var pathChild2 = repo.GetFullDirPath(childId);
             Assert.Equal(pathChild, pathChild2);
-        }
-
-        // NOTE: This test requires InternalsVisibleTo("DuplicateFileFinderLib.Tests")
-        // on the main assembly to access CompleteScanForRoot.
-        [Fact]
-        public async Task CompleteScanForRoot_ProducesTombstonesForMissingFiles()
-        {
-            var repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
-
-            var rootId = 11;
-            var subId     = 22;
-            var fileOldId = 33;
-            var fileNewId = 44;
-
-            var rootDir = new DirRecord
-            {
-                DirId               = rootId,
-                ParentDirId         = null,
-                Name             = "root",
-                LastSeenScanSequence = 1,
-                Status           = ScanEntryStatus.Enumerated,
-                ErrorMessage     = null
-            };
-
-            var subDir = new DirRecord
-            {
-                DirId               = subId,
-                ParentDirId         = rootId,
-                Name             = "sub",
-                LastSeenScanSequence = 1,
-                Status           = ScanEntryStatus.Enumerated,
-                ErrorMessage     = null
-            };
-
-            var hashBytes = new byte[16];
-            new Random(111).NextBytes(hashBytes);
-            var hash = new HashKey(hashBytes);
-
-            var oldFile = new FileRecord
-            {
-                FileId                   = fileOldId,
-                DirId                = subId,
-                Name                 = "old.txt",
-                Size                 = 1,
-                Hash                 = hash,
-                Modified             = DateTimeOffset.UtcNow,
-                Created              = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status               = ScanEntryStatus.Enumerated,
-                ErrorMessage         = null
-            };
-
-            // Initial delta: root, sub, old file (seen at sequence 1)
-            repo.CommitDelta(new RepoDelta
-            {
-                ScanSequence = 1,
-                Dirs         = [rootDir, subDir],
-                Files        = [oldFile]
-            });
-
-            // Now simulate a later scan at sequence 2 that only sees a new file, not old one
-            var newFile = new FileRecord
-            {
-                FileId                   = fileNewId,
-                DirId                = subId,
-                Name                 = "new.txt",
-                Size                 = 2,
-                Hash                 = hash,
-                Modified             = DateTimeOffset.UtcNow,
-                Created              = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 2,
-                Status               = ScanEntryStatus.Enumerated,
-                ErrorMessage         = null
-            };
-
-            repo.CommitDelta(new RepoDelta
-            {
-                ScanSequence = 2,
-                Files        = [newFile]
-            });
-
-            // Complete scan: should tombstone the old file under the given root
-            var rootPath = OperatingSystem.IsWindows() ? "root" : "/root";
-            repo.CompleteScanForRoot(2, rootPath);
-
-            // At this point, the snapshot should only have the new file
-            var snapshot = repo.GetSnapshot();
-
-            Assert.Single(snapshot.Files);
-            Assert.True(snapshot.Files.ContainsKey(fileNewId));
-            Assert.False(snapshot.Files.ContainsKey(fileOldId));
         }
         
         [Fact]

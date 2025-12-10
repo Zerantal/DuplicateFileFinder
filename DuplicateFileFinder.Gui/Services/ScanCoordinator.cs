@@ -3,7 +3,6 @@
 using Avalonia.Threading;
 using DuplicateFileFinder.Gui.ViewModels;
 using DuplicateFileFinder.Gui.Views;
-using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
@@ -16,16 +15,11 @@ public sealed class ScanCoordinator : IScanCoordinator
     private readonly IDialogService _dialogService;
     private readonly Dff.DuplicateFileFinder _finder;
 
-    private readonly IRepo _repo;
-
     private CancellationTokenSource? _cts;
 
-    public ScanCoordinator(
-        IRepo repo,
-        Dff.DuplicateFileFinder finder,
+    public ScanCoordinator(Dff.DuplicateFileFinder finder,
         IDialogService dialogService)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
         _finder = finder ?? throw new ArgumentNullException(nameof(finder));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     }

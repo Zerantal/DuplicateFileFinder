@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using MemoryPack;
@@ -90,7 +91,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Core index maintenance
     // ---------------------------------------------------------------------
 
-    private void RebuildFromSnapshot(RepoViewSnapshot snapshot)
+    private void RebuildFromSnapshot(IRepoView snapshot)
     {
         var newIndex = new Dictionary<HashKey, (long size, List<long> list)>();
 

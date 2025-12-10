@@ -80,11 +80,11 @@ namespace DuplicateFileFinderLibTests.Repository
                 await repo.CommitDeltaAsync(delta, TestContext.Current.CancellationToken);
             }
 
-            var snapshotBefore = repo.GetSnapshot();
+            var snapshotBefore = repo.GetRepoView();
             var metaBefore = repo.Meta;
 
             var logDir = Path.Combine(_repoDir, "log");
-            var logFilesBefore = Directory.Exists(logDir)
+            _ = Directory.Exists(logDir)
                 ? Directory.GetFiles(logDir, "*.delta").OrderBy(p => p).ToArray()
                 : [];
 
@@ -98,7 +98,7 @@ namespace DuplicateFileFinderLibTests.Repository
             // Reopen and compare
             var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
 
-            var snapshotAfter = reopened.GetSnapshot();
+            var snapshotAfter = reopened.GetRepoView();
             var metaAfter = reopened.Meta;
 
             // Snapshot equality
@@ -186,7 +186,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 await session.CompleteAsync(TestContext.Current.CancellationToken);
             }
 
-            var snapshotBefore = repo.GetSnapshot();
+            var snapshotBefore = repo.GetRepoView();
 
             // 2. Force snapshot baseline
             repo.SaveScanSnapshots();
@@ -197,7 +197,7 @@ namespace DuplicateFileFinderLibTests.Repository
 
             // 4. Reopen and compare
             var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
-            var snapshotReopened = reopened.GetSnapshot();
+            var snapshotReopened = reopened.GetRepoView();
             var metaReopened = reopened.Meta;
 
             // Snapshot equality

@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using DuplicateFileFinder.Gui.Models;
 using DuplicateFileFinder.Gui.ViewModels;
+using JetBrains.Annotations;
 using FolderNodeViewModel = DuplicateFileFinder.Gui.ViewModels.FolderNodeViewModel;
 
 // using NLog;
@@ -19,6 +20,7 @@ public partial class DuplicatesView : UserControl
 
     private DuplicatesViewModel? Vm => DataContext as DuplicatesViewModel;
     
+    [UsedImplicitly]
     private void OnFolderSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (Vm is null)
@@ -34,6 +36,7 @@ public partial class DuplicatesView : UserControl
         }
     }
     
+    [UsedImplicitly]
     private void OnDuplicateSetPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not DuplicatesViewModel vm)

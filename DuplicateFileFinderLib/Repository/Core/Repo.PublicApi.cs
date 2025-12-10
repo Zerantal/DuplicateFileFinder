@@ -66,25 +66,21 @@ public sealed partial class Repo
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
-    
-    public RepoViewSnapshot GetSnapshot()
+
+    public IRepoView GetRepoView()
     {
         lock (_sync)
         {
-            return CreateSnapshot_NoLock();
+            return GetRepoView_NoLock();
         }
     }
 
-    private RepoViewSnapshot CreateSnapshot_NoLock()
+    private IRepoView GetRepoView_NoLock()
     {
-        var files = new Dictionary<long, FileRecord>(_files);
-        var dirs = new Dictionary<long, DirRecord>(_dirs);
+        var filesCopy = new Dictionary<long, FileRecord>(_files);
+        var dirsCopy = new Dictionary<long, DirRecord>(_dirs);
 
-        return new RepoViewSnapshot
-        {
-            Files = files,
-            Dirs = dirs
-        };
+        return new RepoView(dirsCopy, filesCopy);
     }
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
@@ -107,7 +103,6 @@ public sealed partial class Repo
             relativeRootPath = PathUtils.NormalizePath(Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
         
         ScanRun run;
-        ScanRoot scanRoot;
         RepoDelta? rootDelta = null;
         // Dictionary<long, DirRecord> existingDirs;
         DirRecord rootDir;
@@ -116,10 +111,10 @@ public sealed partial class Repo
         {
             var runId = AllocateRunId_NoLock();
             
-            scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
+            var scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
 
             // Create dummy dir record if no dir record is associated with the scan root.
-            if (scanRoot.DirId == 0 || !_dirs.ContainsKey(scanRoot.DirId))
+            if (scanRoot.DirId == 0 || !_dirs.TryGetValue(scanRoot.DirId, out var dir))
             {
                 var rootDirId = AllocateDirId_NoLock();
 
@@ -138,7 +133,7 @@ public sealed partial class Repo
                 scanRoot = scanRoot with { DirId = rootDirId};
                 _scanRoots[scanRoot.RootId] = scanRoot;
             }
-            else rootDir = _dirs[scanRoot.DirId];
+            else rootDir = dir;
             
             if (volumeInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
 
@@ -330,8 +325,8 @@ public sealed partial class Repo
                 var emptySnap = new ScanRootSnapshotOnDisk
                 {
                     ScanRootId = root.RootId,
-                    Dirs       = Array.Empty<DirRecord>(),
-                    Files      = Array.Empty<FileRecord>()
+                    Dirs       = [],
+                    Files      = []
                 };
 
                 await RepoStore.SaveScanRootSnapshotAsync(_repoPath, emptySnap, ct)
@@ -407,13 +402,13 @@ public sealed partial class Repo
     {
         long generation;
         long nextLogSeq;
-        RepoViewSnapshot snapshot;
+        IRepoView snapshot;
         
         lock (_sync)
         {
             generation = Meta.Generation;
             nextLogSeq = Meta.NextLogSequence;
-            snapshot = CreateSnapshot_NoLock();
+            snapshot = GetRepoView_NoLock();
         }
 
         var evt = new CompactedEvent

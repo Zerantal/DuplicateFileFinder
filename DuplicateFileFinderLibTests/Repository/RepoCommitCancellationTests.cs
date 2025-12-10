@@ -82,7 +82,7 @@ namespace DuplicateFileFinderLibTests.Repository
 
             await repo.CommitDeltaAsync(baseDelta, TestContext.Current.CancellationToken);
 
-            var snapshotBefore   = repo.GetSnapshot();
+            var snapshotBefore   = repo.GetRepoView();
             var logDir           = Path.Combine(_repoDir, "log");
             var logFilesBefore   = Directory.Exists(logDir)
                 ? Directory.GetFiles(logDir, "*.delta").OrderBy(p => p).ToArray()
@@ -132,7 +132,7 @@ namespace DuplicateFileFinderLibTests.Repository
                 () => repo.CommitDeltaAsync(cancelledDelta, cts.Token));
 
             // Assert: no new dirs/files applied
-            var snapshotAfter = repo.GetSnapshot();
+            var snapshotAfter = repo.GetRepoView();
 
             // Same key sets for existing dirs/files
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotAfter.Dirs.Keys));
@@ -170,7 +170,7 @@ namespace DuplicateFileFinderLibTests.Repository
             await repo.DisposeAsync();
 
             var reopened = await Repo.OpenAsync(_repoDir, TestContext.Current.CancellationToken);
-            var snapshotReopened = reopened.GetSnapshot();
+            var snapshotReopened = reopened.GetRepoView();
 
             Assert.True(new HashSet<long>(snapshotBefore.Dirs.Keys).SetEquals(snapshotReopened.Dirs.Keys));
             Assert.True(new HashSet<long>(snapshotBefore.Files.Keys).SetEquals(snapshotReopened.Files.Keys));

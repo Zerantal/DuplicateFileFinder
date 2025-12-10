@@ -94,7 +94,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public IReadOnlyList<FileItem> SelectedItems =>
         _selectedSet?.Items ?? [];
 
-    private void InitializeFromSnapshot(RepoViewSnapshot snapshot)
+    private void InitializeFromSnapshot(IRepoView snapshot)
     {
         _dirs.Clear();
         _folderNodes.Clear();
@@ -109,7 +109,7 @@ public partial class DuplicatesViewModel : ObservableObject
         using (TimingLog.StartPhase("ApplyFilters()")) ApplyFilters();
     }
 
-    private void RebuildDuplicatesAndStats(RepoViewSnapshot snapshot)
+    private void RebuildDuplicatesAndStats(IRepoView snapshot)
     {
         DuplicatesFound = 0;
         WastedBytes = 0;
@@ -300,7 +300,7 @@ public partial class DuplicatesViewModel : ObservableObject
         // After compaction, reload from the repo to reflect any changes
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            var snap = _repo.GetSnapshot();
+            var snap = _repo.GetRepoView();
             InitializeFromSnapshot(snap);
         });
     }
@@ -309,7 +309,7 @@ public partial class DuplicatesViewModel : ObservableObject
     {
         using (TimingLog.StartPhase("LoadFromRepo()"))
         {
-            var snap = _repo.GetSnapshot();
+            var snap = _repo.GetRepoView();
             InitializeFromSnapshot(snap);
         }
     }

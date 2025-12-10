@@ -24,8 +24,8 @@ public static class SemanticRepoComparer
     {
         var diff = new SemanticComparisonResult();
 
-        var snapA = repoA.GetSnapshot();
-        var snapB = repoB.GetSnapshot();
+        var snapA = repoA.GetRepoView();
+        var snapB = repoB.GetRepoView();
 
         CompareMeta(repoPathA, repoPathB, diff);
         CompareScanRoots(repoA, repoB, diff);
@@ -151,8 +151,8 @@ public static class SemanticRepoComparer
     // DIRS: full path + ScanEntryStatus
     // ------------------------------
     private static void CompareDirs(
-        IRepo repoA, RepoViewSnapshot snapA,
-        IRepo repoB, RepoViewSnapshot snapB,
+        IRepo repoA, IRepoView snapA,
+        IRepo repoB, IRepoView snapB,
         SemanticComparisonResult diff)
     {
         var mapA = snapA.Dirs.Values
@@ -207,8 +207,8 @@ public static class SemanticRepoComparer
     // FILES: full path + Size + Hash + Created + Status
     // ------------------------------
     private static void CompareFiles(
-        IRepo repoA, RepoViewSnapshot snapA,
-        IRepo repoB, RepoViewSnapshot snapB,
+        IRepo repoA, IRepoView snapA,
+        IRepo repoB, IRepoView snapB,
         SemanticComparisonResult diff)
     {
         var dirPathsA = snapA.Dirs.Values

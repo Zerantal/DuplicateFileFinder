@@ -1,7 +1,6 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
-using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -52,8 +51,8 @@ public sealed partial class Repo
             return AllocateDirId_NoLock();
         }
     }
-    
-    internal long AllocateDirId_NoLock()
+
+    private long AllocateDirId_NoLock()
     {
         var id = Meta.NextDirId;
         Meta = Meta with { NextDirId = id + 1 };
@@ -68,14 +67,14 @@ public sealed partial class Repo
         }
     }
 
-    internal long AllocateFileId_NoLock()
+    private long AllocateFileId_NoLock()
     {
         var id = Meta.NextFileId;
         Meta = Meta with { NextFileId = id + 1 };
         return id;
     }
 
-    internal long AllocateRootId_NoLock()
+    private long AllocateRootId_NoLock()
     {
         var id = Meta.NextScanRootId;
         Meta = Meta with { NextScanRootId = id + 1 };
@@ -162,59 +161,6 @@ public sealed partial class Repo
             SyncMetaFile_NoLock();
             _ = PersistMetaAsync();
         }
-    }
-    
-    internal void CompleteScanForRoot(long scanSequence, string rootPath)
-    {
-        List<FileRecord> deletedFiles;
-        List<DirRecord>  deletedDirs;
-
-        lock (_sync)
-        {
-            deletedFiles = new List<FileRecord>();
-            deletedDirs  = new List<DirRecord>();
-
-            foreach (var file in _files.Values)
-            {
-                if (!IsUnderRoot(file.DirId, rootPath))
-                    continue;
-
-                if (file.LastSeenScanSequence < scanSequence)
-                    deletedFiles.Add(file with {Status =  ScanEntryStatus.Deleted});
-            }
-            
-            foreach (var dir in _dirs.Values)
-            {
-                if (!IsUnderRoot(dir.DirId, rootPath))
-                    continue;
-
-                if (dir.LastSeenScanSequence < scanSequence)
-                    deletedDirs.Add(dir with {Status = ScanEntryStatus.Deleted});
-            }
-        }
-
-        if (deletedFiles.Count == 0 && deletedDirs.Count == 0)
-        {
-            MarkScanCompleted(scanSequence);
-            return;
-        }
-
-        var tombstoneDelta = new RepoDelta
-        {
-            ScanSequence = scanSequence,
-            Files = deletedFiles,
-            Dirs = deletedDirs
-        };
-
-        CommitDelta(tombstoneDelta);
-        MarkScanCompleted(scanSequence);
-    }
-
-    
-    private bool IsUnderRoot(long dirId, string rootPath)
-    {
-        var path = GetFullDirPath(dirId);
-        return path.StartsWith(rootPath, PathUtils.PathComparison);
     }
     
     // Find existing ScanRoot by canonical path or create a new one.

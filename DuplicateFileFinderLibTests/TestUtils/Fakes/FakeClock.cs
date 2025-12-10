@@ -1,6 +1,6 @@
 using System;
 
-namespace DuplicateFileFinderLibTests.TestUtils;
+namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
 
 public interface IClock { DateTimeOffset UtcNow { get; } }
 

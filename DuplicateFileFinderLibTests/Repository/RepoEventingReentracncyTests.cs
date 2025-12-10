@@ -71,7 +71,7 @@ namespace DuplicateFileFinderLibTests.Repository
                     try
                     {
                         // This takes _sync inside Repo.
-                        var snapshot = _repo.GetSnapshot();
+                        var snapshot = _repo.GetRepoView();
                         // Sanity: snapshot collections non-null.
                         Assert.NotNull(snapshot.Dirs);
                         Assert.NotNull(snapshot.Files);

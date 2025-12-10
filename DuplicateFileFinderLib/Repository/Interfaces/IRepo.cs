@@ -12,7 +12,7 @@ internal interface IRepoInternal
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {
-    RepoViewSnapshot GetSnapshot();
+    IRepoView GetRepoView();
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
 

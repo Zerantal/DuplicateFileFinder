@@ -6,8 +6,8 @@ namespace DuplicateFileFinderLib.Repository.Models;
 public partial record DirRecord
 {
     [MemoryPackOrder(0)] public long DirId { get; init; } = -1;
-    [MemoryPackOrder(1)] public required long? ParentDirId { get; init; }
-    [MemoryPackOrder(2)] public required string Name { get; init; }
+    [MemoryPackOrder(1)] public long? ParentDirId { get; init; } = -1;
+    [MemoryPackOrder(2)] public string Name { get; init; } = string.Empty;
     [MemoryPackOrder(3)] public long LastSeenScanSequence { get; init; } = -1;
     [MemoryPackOrder(4)] public required ScanEntryStatus Status { get; init; }
     [MemoryPackOrder(5)] public string? ErrorMessage { get; init; }
@@ -18,12 +18,6 @@ public partial record DirRecord
     // Possible Extensions:
     // [MemoryPackOrder(7)] ulong? INode {get; init;}   // or FileId on Windows (might need to be byte[])
     // [MemoryPackOrder(8)] ulong? DeviceId ErrorMessage { get; init; }
-
-    public DirRecord()
-    {
-        DirId = -1;
-        LastSeenScanSequence = -1;
-    }
     
     public virtual bool Equals(DirRecord? other)
     {
