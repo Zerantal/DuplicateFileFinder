@@ -5,6 +5,7 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Util;
+using Dff = DuplicateFileFinderLib.Core.DuplicateFileFinderHelpers;
 
 namespace DuplicateFileFinderLib.Core;
 
@@ -235,41 +236,9 @@ internal class FullScanOperation(
             TimingLog.Counter("files");
         }
          
-        PurgeOldDirs(session, expectedDirs.Values);
-        PurgeOldFiles(session, expectedFiles.Values);
+        Dff.PurgeOldDirs(session, _treeIndex, expectedDirs.Values);
+        Dff.PurgeOldFiles(session, expectedFiles.Values);
 
         return Task.CompletedTask;
-    }
-
-    private void PurgeOldDirs(IScanSession session, IEnumerable<long> dirsToRemove)
-    {
-        foreach (var dirId in dirsToRemove)
-        {
-            var subDirs = _treeIndex.GetChildDirIds(dirId);
-            var files = _treeIndex.GetChildFileIds(dirId);
-             
-            PurgeOldDirs(session, subDirs);
-            PurgeOldFiles(session, files);
-
-            var dirRecord = new DirRecord
-            {
-                DirId = dirId,
-                Status = ScanEntryStatus.Deleted
-            };
-            session.AddOrUpdateDirectory(dirRecord);
-        }
-    }
-
-    private void PurgeOldFiles(IScanSession session, IEnumerable<long> filesToRemove)
-    {
-        foreach (var fileId in filesToRemove)
-        {
-            FileRecord file = new FileRecord
-            {
-                FileId = fileId,
-                Status = ScanEntryStatus.Deleted
-            };
-            session.AddOrUpdateFile(ref file);
-        }
     }
 }

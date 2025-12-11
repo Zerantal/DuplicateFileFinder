@@ -64,16 +64,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         }
     }
 
-    protected override void OnDeltaCommittedEvent(DeltaCommittedEvent evt)
-    {
-        ApplyDeltaToIndex(evt.Delta);
-        lock (_lock)
-        {
-            _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = evt.NextLogSequence - 1;
-        }
-    }
-
     protected override void OnCompactedEvent(CompactedEvent evt)
     {
         // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
@@ -132,63 +122,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             _totalDuplicateFileCount = totalDupCount;
             _totalSpaceTakenByDuplicates = totalSpaceDup;
         }
-    }
-
-    private void ApplyDeltaToIndex(RepoDelta delta)
-    {
-        lock (_lock)
-        {
-            // remove / tombstone old files
-            foreach (var file in delta.Files.Where(f => f.Status == ScanEntryStatus.Deleted))
-                if (_hashToFileRecords.TryGetValue(file.Hash, out var group))
-                {
-                    group.list.Remove(file.FileId);
-                    if (group.list.Count == 0)
-                        _hashToFileRecords.Remove(file.Hash);
-                    else
-                        _hashToFileRecords[file.Hash] = group;
-                }
-
-            // add / update files (including re-hashed files)
-            foreach (var file in delta.Files.Where(f =>
-                         f.Status != ScanEntryStatus.Deleted &&
-                         f.Hash != HashKey.NotComputed &&
-                         f.Hash != HashKey.CannotCompute))
-            {
-                if (!_hashToFileRecords.TryGetValue(file.Hash, out var group))
-                {
-                    group = (file.Size, new List<long>());
-                    _hashToFileRecords[file.Hash] = group;
-                }
-
-                if (!group.list.Contains(file.FileId))
-                    group.list.Add(file.FileId);
-
-                _hashToFileRecords[file.Hash] = group;
-            }
-
-            // Recompute stats after applying delta.
-            RecomputeStats_NoLock();
-        }
-    }
-
-    private void RecomputeStats_NoLock()
-    {
-        var totalDupCount = 0;
-        long totalSpaceDup = 0;
-
-        foreach (var group in _hashToFileRecords.Values)
-        {
-            if (group.list.Count <= 1)
-                continue;
-
-            var dupCount = group.list.Count - 1;
-            totalDupCount += dupCount;
-            totalSpaceDup += dupCount * group.size;
-        }
-
-        _totalDuplicateFileCount = totalDupCount;
-        _totalSpaceTakenByDuplicates = totalSpaceDup;
     }
 
     // ---------------------------------------------------------------------
