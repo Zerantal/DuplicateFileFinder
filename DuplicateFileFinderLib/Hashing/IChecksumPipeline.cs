@@ -11,5 +11,7 @@ public interface IChecksumPipeline
     /// Throws on I/O failure.
     /// Caller decides how to handle errors (e.g. mark file as CannotCompute).
     /// </summary>
-    Task<HashKey> ComputeFileHashAsync(string fullPath, CancellationToken token = default);
+    Task<HashKey> ComputeFileHashAsync(string fullPath,  CancellationToken token = default);
+
+    int BufferSize { get; set; }
 }
