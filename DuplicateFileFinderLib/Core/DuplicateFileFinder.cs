@@ -27,12 +27,13 @@ public sealed class DuplicateFileFinder
         IChecksumPipeline? checksums = null)
     {
         fs ??= new FileEnumerator();
-        checksums ??= new ChecksumPipelineMD5();
 
         if (volumeInfoProvider is null && RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             volumeInfoProvider = new WindowsVolumeInfoProvider();
         if (volumeInfoProvider is null && RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             volumeInfoProvider = new LinuxVolumeInfoProvider();
+        
+        checksums ??= new ChecksumPipelineMD5();
 
         _fullScan = new FullScanOperation(host, fs, checksums, volumeInfoProvider);
         _quickScan = new QuickScanOperation(host, fs, checksums, volumeInfoProvider);

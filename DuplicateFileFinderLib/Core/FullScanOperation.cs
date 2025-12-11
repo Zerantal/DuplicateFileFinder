@@ -28,7 +28,10 @@ internal class FullScanOperation(
         try { vInfo = volumeInfoProvider?.GetVolumeInfoForPath(rootPath); } catch { /* ignore */ }
 
         _hashDegreeOfParallelism = vInfo is { IsRotational: true } ? 1 : Environment.ProcessorCount;
-      
+
+        var bufferSize = vInfo is { IsRotational: true } ? 512 * 1024 : 128 * 1024;
+        pipeline.BufferSize = bufferSize;      
+        
         var session = _repo.BeginScan(rootPath, ScanOperation.FullScan, vInfo);
 
         try
