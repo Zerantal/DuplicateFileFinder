@@ -89,7 +89,8 @@ public sealed class ScanCoordinator : IScanCoordinator
                     await _finder.QuickScanAsync(
                             rootPath,
                             progress,
-                            _cts.Token)
+                            skipUnchangedDirectories: false,
+                            ct: _cts.Token)
                         .ConfigureAwait(false);
                 }
             }

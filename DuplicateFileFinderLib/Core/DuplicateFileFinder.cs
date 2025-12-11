@@ -56,6 +56,7 @@ public sealed class DuplicateFileFinder
     public Task QuickScanAsync(
         string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
+        bool skipUnchangedDirectories = true,
         CancellationToken ct = default)
     {
         return _quickScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
