@@ -11,6 +11,7 @@ using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Util;
 using DuplicateFileFinderLibTests.TestUtils.Fakes;
 using Moq;
@@ -953,6 +954,11 @@ public sealed partial class ScanSessionTests : IDisposable
         public void SetChildFiles(long parentId, params long[] files)
         {
             _childFiles[parentId] = files.ToList();
+        }
+
+        public DirAggregateStats GetDirStats(long dirId)
+        {
+            throw new NotImplementedException();
         }
     }
 

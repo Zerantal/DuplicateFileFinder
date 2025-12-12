@@ -66,6 +66,11 @@ public sealed class TreeMapControl : Control
         AvaloniaProperty.Register<TreeMapControl, int>(
             nameof(MaxRectangles),
             25_000);
+    
+    public static readonly StyledProperty<bool> ValuesArePreSummedProperty =
+        AvaloniaProperty.Register<TreeMapControl, bool>(
+            nameof(ValuesArePreSummed),
+            defaultValue: false);
 
     private readonly List<LayoutItem> _layout = new();
     private string? _currentTooltipLabel;
@@ -153,6 +158,12 @@ public sealed class TreeMapControl : Control
         var h = double.IsInfinity(availableSize.Height) ? 200 : availableSize.Height;
         return new Size(w, h);
     }
+    
+    public bool ValuesArePreSummed
+    {
+        get => GetValue(ValuesArePreSummedProperty);
+        set => SetValue(ValuesArePreSummedProperty, value);
+    }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
@@ -162,7 +173,7 @@ public sealed class TreeMapControl : Control
         if (Root == null || finalSize.Width <= 0 || finalSize.Height <= 0)
             return finalSize;
 
-        var total = ComputeTotalValue(Root);
+        var total = ValuesArePreSummed ? Root.Value : ComputeTotalValue(Root);
         if (total <= 0)
             return finalSize;
 

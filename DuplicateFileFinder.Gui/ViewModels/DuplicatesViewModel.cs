@@ -15,6 +15,12 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.ViewModels;
 
+public enum TreeMapMetric
+{
+    TotalBytes,
+    TotalFiles
+}
+
 public partial class DuplicatesViewModel : ObservableObject
 {
     private readonly IHashIndexReadModel _hashIndexService;
@@ -44,6 +50,34 @@ public partial class DuplicatesViewModel : ObservableObject
     // Root node for the TreeMap (file-size based)
     [ObservableProperty] private TreeMapNode? _directoryTreeMapRoot;
     private readonly ITreeIndexReadModel _treeIndex;
+
+    [ObservableProperty] private TreeMapMetric _treeMapMetric = TreeMapMetric.TotalBytes;
+    
+    public bool IsTreeMapMetricBytes
+    {
+        get => TreeMapMetric == TreeMapMetric.TotalBytes;
+        set
+        {
+            if (!value) return;
+            if (TreeMapMetric != TreeMapMetric.TotalBytes)
+                TreeMapMetric = TreeMapMetric.TotalBytes;
+        }
+    }
+
+    public bool IsTreeMapMetricFiles
+    {
+        get => TreeMapMetric == TreeMapMetric.TotalFiles;
+        set
+        {
+            if (!value) return;
+            if (TreeMapMetric != TreeMapMetric.TotalFiles)
+                TreeMapMetric = TreeMapMetric.TotalFiles;
+        }
+    }
+
+// Keep the latest snapshot around so toggling doesn’t re-open the repo.
+    private IRepoView? _lastSnapshot;
+
     
     private sealed record TreeMapBuildOptions
     {
@@ -61,9 +95,6 @@ public partial class DuplicatesViewModel : ObservableObject
         MaxFilesPerDir = 64,
         DirectoriesOnly = false
     };
-
-// BuildDirectoryTreeMap caches (per-build; kept as fields to avoid re-alloc churn if you want)
-    private readonly Dictionary<long, long> _dirTotalBytesCache = new();
 
     public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner)
     {
@@ -122,6 +153,8 @@ public partial class DuplicatesViewModel : ObservableObject
 
     private void InitializeFromSnapshot(IRepoView snapshot)
     {
+        _lastSnapshot = snapshot;
+
         _dirs.Clear();
         _folderNodes.Clear();
         _allSets.Clear();
@@ -343,234 +376,226 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
     
-private void BuildDirectoryTreeMap(IRepoView snapshot)
-{
-    _dirTotalBytesCache.Clear();
-
-    var opts = _treeMapOptions;
-
-    static bool IsLive(ScanEntryStatus s) => s is not (ScanEntryStatus.Deleted or ScanEntryStatus.None);
-
-    long GetDirTotalBytes(long dirId)
+    private void BuildDirectoryTreeMap(IRepoView snapshot)
     {
-        if (_dirTotalBytesCache.TryGetValue(dirId, out var cached))
-            return cached;
+        var opts = _treeMapOptions;
 
-        if (!snapshot.Dirs.TryGetValue(dirId, out var dir) || !IsLive(dir.Status))
-            return _dirTotalBytesCache[dirId] = 0;
+        static bool IsLive(ScanEntryStatus s) => s is not (ScanEntryStatus.Deleted or ScanEntryStatus.None);
 
-        long sum = 0;
-
-        // Direct files in dir
-        foreach (var fileId in _treeIndex.GetChildFileIds(dirId))
-        {
-            if (!snapshot.Files.TryGetValue(fileId, out var f))
-                continue;
-            if (!IsLive(f.Status))
-                continue;
-            if (f.Size > 0)
-                sum += f.Size;
+        long GetDirMetricValue(long dirId)
+        {        
+            var stats = _treeIndex.GetDirStats(dirId);
+            return TreeMapMetric == TreeMapMetric.TotalBytes
+                ? stats.TotalBytes
+                : stats.FileCount;
         }
 
-        // Subdirs (recursive)
-        foreach (var childDirId in _treeIndex.GetChildDirIds(dirId))
+        TreeMapNode BuildDirNode(long dirId, int depth)
         {
-            if (!snapshot.Dirs.TryGetValue(childDirId, out var childDir))
-                continue;
-            if (!IsLive(childDir.Status))
-                continue;
-
-            sum += GetDirTotalBytes(childDirId);
-        }
-
-        _dirTotalBytesCache[dirId] = sum;
-        return sum;
-    }
-
-    TreeMapNode BuildDirNode(long dirId, int depth)
-    {
-        if (!snapshot.Dirs.TryGetValue(dirId, out var dir) || !IsLive(dir.Status))
-        {
-            return new TreeMapNode
+            if (!snapshot.Dirs.TryGetValue(dirId, out var dir) || !IsLive(dir.Status))
             {
-                Label = $"[missing:{dirId}]",
-                IsDirectory = true,
-                Value = 0,
-                Children = []
-            };
-        }
-
-        // Depth cap: stop expanding, return an aggregated leaf
-        if (depth >= opts.MaxDepth)
-        {
-            return new TreeMapNode
-            {
-                Label = dir.Name,
-                IsDirectory = true,
-                Value = GetDirTotalBytes(dirId), // leaf value
-                Children = [],
-                Fill = null
-            };
-        }
-
-        var children = new List<TreeMapNode>();
-
-        // ---- Subdirectories (keep top N by total bytes) ----
-        var subdirs = new List<(long Id, long Bytes)>();
-        foreach (var childDirId in _treeIndex.GetChildDirIds(dirId))
-        {
-            if (!snapshot.Dirs.TryGetValue(childDirId, out var childDir) || !IsLive(childDir.Status))
-                continue;
-
-            subdirs.Add((childDirId, GetDirTotalBytes(childDirId)));
-        }
-
-        subdirs.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
-
-        long otherDirsBytes = 0;
-        int otherDirsCount = 0;
-
-        for (int i = 0; i < subdirs.Count; i++)
-        {
-            var (childId, bytes) = subdirs[i];
-
-            if (i < opts.MaxSubdirsPerDir)
-            {
-                // Only recurse into kept subdirs
-                children.Add(BuildDirNode(childId, depth + 1));
-            }
-            else
-            {
-                otherDirsBytes += bytes;
-                otherDirsCount++;
-            }
-        }
-
-        if (otherDirsCount > 0 && otherDirsBytes > 0)
-        {
-            children.Add(new TreeMapNode
-            {
-                Label = $"Other dirs ({otherDirsCount})",
-                IsDirectory = true,
-                Value = otherDirsBytes,
-                Children = [],
-                Fill = null
-            });
-        }
-
-        // ---- Files (keep top M by size) ----
-        if (!opts.DirectoriesOnly)
-        {
-            var files = new List<FileRecord>();
-            foreach (var fileId in _treeIndex.GetChildFileIds(dirId))
-            {
-                if (!snapshot.Files.TryGetValue(fileId, out var f))
-                    continue;
-                if (!IsLive(f.Status))
-                    continue;
-                if (f.Size <= 0)
-                    continue;
-
-                files.Add(f);
-            }
-
-            files.Sort((a, b) => b.Size.CompareTo(a.Size));
-
-            long otherFilesBytes = 0;
-            int otherFilesCount = 0;
-
-            for (int i = 0; i < files.Count; i++)
-            {
-                var f = files[i];
-                if (i < opts.MaxFilesPerDir)
+                return new TreeMapNode
                 {
-                    children.Add(new TreeMapNode
-                    {
-                        Label = f.Name,
-                        IsDirectory = false,
-                        Value = f.Size,
-                        Children = [],
-                        Fill = null
-                    });
+                    Label = $"[missing:{dirId}]",
+                    IsDirectory = true,
+                    Value = 0,
+                    Children = [],
+                    Fill = null
+                };
+            }
+
+            var dirValue = GetDirMetricValue(dirId);
+
+            // Depth cap: stop expanding, return aggregated leaf (value is already subtree total)
+            if (depth >= opts.MaxDepth)
+            {
+                return new TreeMapNode
+                {
+                    Label = dir.Name,
+                    IsDirectory = true,
+                    Value = dirValue,
+                    Children = [],
+                    Fill = null
+                };
+            }
+
+            var children = new List<TreeMapNode>();
+
+            // ---- Subdirectories (top N by current metric) ----
+            var subdirs = new List<(long Id, long Value)>();
+
+            foreach (var childDirId in _treeIndex.GetChildDirIds(dirId))
+            {
+                if (!snapshot.Dirs.TryGetValue(childDirId, out var childDir) || !IsLive(childDir.Status))
+                    continue;
+
+                var v = GetDirMetricValue(childDirId);
+                if (v <= 0)
+                    continue;
+
+                subdirs.Add((childDirId, v));
+            }
+
+            subdirs.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+            long otherDirsValue = 0;
+            int otherDirsCount = 0;
+
+            for (int i = 0; i < subdirs.Count; i++)
+            {
+                var (childId, v) = subdirs[i];
+
+                if (i < opts.MaxSubdirsPerDir)
+                {
+                    children.Add(BuildDirNode(childId, depth + 1));
                 }
                 else
                 {
-                    otherFilesBytes += f.Size;
-                    otherFilesCount++;
+                    otherDirsValue += v;
+                    otherDirsCount++;
                 }
             }
 
-            if (otherFilesCount > 0 && otherFilesBytes > 0)
+            if (otherDirsCount > 0 && otherDirsValue > 0)
             {
                 children.Add(new TreeMapNode
                 {
-                    Label = $"Other files ({otherFilesCount})",
-                    IsDirectory = false,
-                    Value = otherFilesBytes,
+                    Label = $"Other dirs ({otherDirsCount})",
+                    IsDirectory = true,
+                    Value = otherDirsValue,
                     Children = [],
                     Fill = null
                 });
             }
+
+            // ---- Files (keep top M by size) ----
+            if (!opts.DirectoriesOnly)
+            {
+                var files = new List<FileRecord>();
+
+                foreach (var fileId in _treeIndex.GetChildFileIds(dirId))
+                {
+                    if (!snapshot.Files.TryGetValue(fileId, out var f))
+                        continue;
+                    if (!IsLive(f.Status))
+                        continue;
+                    if (f.Size <= 0)
+                        continue;
+
+                    files.Add(f);
+                }
+
+                // Keep selection stable: sort by size desc regardless of metric
+                files.Sort((a, b) => b.Size.CompareTo(a.Size));
+
+                long otherFilesValue = 0;
+                int otherFilesCount = 0;
+
+                for (int i = 0; i < files.Count; i++)
+                {
+                    var f = files[i];
+
+                    if (i < opts.MaxFilesPerDir)
+                    {
+                        children.Add(new TreeMapNode
+                        {
+                            Label = f.Name,
+                            IsDirectory = false,
+                            Value = TreeMapMetric == TreeMapMetric.TotalBytes ? f.Size : 1,
+                            Children = [],
+                            Fill = null
+                        });
+                    }
+                    else
+                    {
+                        otherFilesCount++;
+                        otherFilesValue += TreeMapMetric == TreeMapMetric.TotalBytes ? f.Size : 1;
+                    }
+                }
+
+                if (otherFilesCount > 0 && otherFilesValue > 0)
+                {
+                    children.Add(new TreeMapNode
+                    {
+                        Label = $"Other files ({otherFilesCount})",
+                        IsDirectory = false,
+                        Value = otherFilesValue,
+                        Children = [],
+                        Fill = null
+                    });
+                }
+            }
+
+            return new TreeMapNode
+            {
+                Label = dir.Name,
+                IsDirectory = true,
+                Value = dirValue,         // pre-summed
+                Children = children,
+                Fill = null
+            };
         }
 
-        return new TreeMapNode
+        // One treemap child per (live) scan root
+        var scanRootNodes = new List<TreeMapNode>();
+
+        foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
         {
-            Label = dir.Name,
+            if (!snapshot.Dirs.TryGetValue(scanRoot.DirId, out var rootDir))
+                continue;
+            if (!IsLive(rootDir.Status))
+                continue;
+
+            var node = BuildDirNode(scanRoot.DirId, depth: 0);
+
+            // Drop empty roots (0 bytes) for a cleaner scan
+            if (node.Value > 0)
+                scanRootNodes.Add(node);
+        }
+
+        if (scanRootNodes.Count == 0)
+        {
+            DirectoryTreeMapRoot = null;
+            return;
+        }
+
+        // Colour each first-level scan-root directory differently (unchanged)
+        var palette = new[]
+        {
+            "#FF4E79A7",
+            "#FF59A14F",
+            "#FFEDC948",
+            "#FFB07AA1",
+            "#FF9C755F",
+            "#FF76B7B2",
+            "#FFE15759"
+        };
+
+        for (int i = 0; i < scanRootNodes.Count; i++)
+            scanRootNodes[i].Fill = new SolidColorBrush(Color.Parse(palette[i % palette.Length]));
+
+        DirectoryTreeMapRoot = new TreeMapNode
+        {
+            Label = "All scan roots",
             IsDirectory = true,
-            Value = 0, // non-leaf: TreeMapControl will aggregate from children
-            Children = children,
+            Value = scanRootNodes.Sum(n => n.Value), // pre-summed dummy root
+            Children = scanRootNodes,
             Fill = null
         };
     }
 
-    // One treemap child per (live) scan root
-    var scanRootNodes = new List<TreeMapNode>();
 
-    foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
+    partial void OnTreeMapMetricChanged(TreeMapMetric value)
     {
-        if (!snapshot.Dirs.TryGetValue(scanRoot.DirId, out var rootDir))
-            continue;
+        // Keep it fast: just rebuild treemap from existing snapshot.
+        if (_lastSnapshot is null)
+            return;
 
-        if (!IsLive(rootDir.Status))
-            continue;
+        using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
+            BuildDirectoryTreeMap(_lastSnapshot);
 
-        // depth starts at 0 per scan root
-        scanRootNodes.Add(BuildDirNode(scanRoot.DirId, depth: 0));
+        // Ensure the RadioButtons update if bound via IsTreeMapMetricX
+        OnPropertyChanged(nameof(IsTreeMapMetricBytes));
+        OnPropertyChanged(nameof(IsTreeMapMetricFiles));
     }
-
-    if (scanRootNodes.Count == 0)
-    {
-        DirectoryTreeMapRoot = null;
-        return;
-    }
-
-    // Colour each first-level scan-root directory differently (unchanged)
-    var palette = new[]
-    {
-        "#FF4E79A7",
-        "#FF59A14F",
-        "#FFEDC948",
-        "#FFB07AA1",
-        "#FF9C755F",
-        "#FF76B7B2",
-        "#FFE15759"
-    };
-
-    for (int i = 0; i < scanRootNodes.Count; i++)
-    {
-        var color = Color.Parse(palette[i % palette.Length]);
-        scanRootNodes[i].Fill = new SolidColorBrush(color);
-    }
-
-    DirectoryTreeMapRoot = new TreeMapNode
-    {
-        Label = "All scan roots",
-        IsDirectory = true,
-        Value = 0,
-        Children = scanRootNodes,
-        Fill = null
-    };
-}
-
-
 }
