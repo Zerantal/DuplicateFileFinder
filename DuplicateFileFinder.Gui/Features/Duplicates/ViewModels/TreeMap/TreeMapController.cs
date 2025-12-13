@@ -56,7 +56,7 @@ public partial class TreeMapController : ObservableObject
             _treeIndex,
             Metric,
             Options,
-            (dirId) => _repo.GetDirPath(dirId));
+            (dirId) => _repo.GetDirPath(dirId, true));
     }
 
     partial void OnMetricChanged(TreeMapMetric value)

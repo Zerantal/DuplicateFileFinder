@@ -43,7 +43,7 @@ public sealed class FileTreeMapElement : RepoTreeMapElement
                 Children =
                 {
                     new TextBlock { Text = name, FontWeight = FontWeight.Bold },
-                    new TextBlock { Text = "Type: _file" },
+                    new TextBlock { Text = "Type: File" },
                     new TextBlock { Text = $"Volume: {volume}" },
                     new TextBlock { Text = $"Path: {path}" },
                     new TextBlock { Text = $"Size: {sizeFormated}" }
