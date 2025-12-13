@@ -86,7 +86,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public ObservableCollection<FolderNodeViewModel> FolderRoots { get; } = [];
 
     // Expose treemap for binding
-    public TreeMapNode? DirectoryTreeMapRoot => _treeMap.Root;
+    public TreeMapNode<ITreeMapNodeElement>? DirectoryTreeMapRoot => _treeMap.Root;
 
     public bool IsTreeMapMetricBytes
     {

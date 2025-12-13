@@ -91,11 +91,11 @@ public sealed class FolderTreeBuilder
                     ? Path.Combine(scanRoot.VolumePath, scanRoot.RootPath)
                     : scanRoot.RootPath;
             else
-                fullPath = _repo.GetFullDirPath(dir.DirId);
+                fullPath = _repo.GetDirPath(dir.DirId);
         }
         else
         {
-            fullPath = _repo.GetFullDirPath(dir.DirId);
+            fullPath = _repo.GetDirPath(dir.DirId);
         }
 
         var node = new FolderNodeViewModel(dir.DirId, dir.Name, fullPath, _scanner)

@@ -14,7 +14,7 @@ public partial class TreeMapController : ObservableObject
     private IRepoView? _lastSnapshot;
     [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
 
-    [ObservableProperty] private TreeMapNode? _root;
+    [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _root;
 
     public TreeMapController(IRepo repo, ITreeIndexReadModel treeIndex)
     {
@@ -55,7 +55,8 @@ public partial class TreeMapController : ObservableObject
             _repo.ScanRootsView,
             _treeIndex,
             Metric,
-            Options);
+            Options,
+            (dirId) => _repo.GetDirPath(dirId));
     }
 
     partial void OnMetricChanged(TreeMapMetric value)
@@ -68,7 +69,8 @@ public partial class TreeMapController : ObservableObject
             _repo.ScanRootsView,
             _treeIndex,
             value,
-            Options);
+            Options,
+            (dirId) =>  _repo.GetDirPath(dirId, true));
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));

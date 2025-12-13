@@ -3,186 +3,99 @@ using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
 public static class TreeMapBuilder
 {
-    private static bool IsLive(ScanEntryStatus s)
-    {
-        return s is not (ScanEntryStatus.Deleted or ScanEntryStatus.None);
-    }
 
-    public static TreeMapNode? Build(
+    public static TreeMapNode<ITreeMapNodeElement>? Build(
         IRepoView snapshot,
         IEnumerable<ScanRoot> scanRoots,
         ITreeIndexReadModel treeIndex,
         TreeMapMetric metric,
-        TreeMapBuildOptions opts)
+        TreeMapBuildOptions opts,
+        Func<long, string> dirRelativePathResolver)
     {
-        long GetDirMetricValue(long dirId)
-        {
-            var stats = treeIndex.GetDirStats(dirId);
-            return metric == TreeMapMetric.TotalBytes
-                ? stats.TotalBytes
-                : stats.FileCount;
-        }
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(scanRoots);
+        ArgumentNullException.ThrowIfNull(treeIndex);
+        ArgumentNullException.ThrowIfNull(dirRelativePathResolver);
 
-        TreeMapNode BuildDirNode(long dirId, int depth)
-        {
-            if (!snapshot.Dirs.TryGetValue(dirId, out var dir) || !IsLive(dir.Status))
-                return new TreeMapNode
-                {
-                    Label = $"[missing:{dirId}]",
-                    IsDirectory = true,
-                    Value = 0,
-                    Children = [],
-                    Fill = null
-                };
+        var liveRoots = GetLiveScanRoots(scanRoots, snapshot);
 
-            var dirValue = GetDirMetricValue(dirId);
-
-            // Depth cap: aggregated leaf (Value is already subtree total)
-            if (depth >= opts.MaxDepth)
-                return new TreeMapNode
-                {
-                    Label = dir.Name,
-                    IsDirectory = true,
-                    Value = dirValue,
-                    Children = [],
-                    Fill = null
-                };
-
-            var children = new List<TreeMapNode>();
-
-            // ---- Subdirectories (top N by selected metric) ----
-            var subdirs = new List<(long Id, long Value)>();
-            foreach (var childDirId in treeIndex.GetChildDirIds(dirId))
-            {
-                if (!snapshot.Dirs.TryGetValue(childDirId, out var childDir) || !IsLive(childDir.Status))
-                    continue;
-
-                var v = GetDirMetricValue(childDirId);
-                if (v <= 0) continue;
-
-                subdirs.Add((childDirId, v));
-            }
-
-            subdirs.Sort((a, b) => b.Value.CompareTo(a.Value));
-
-            long otherDirsValue = 0;
-            var otherDirsCount = 0;
-
-            for (var i = 0; i < subdirs.Count; i++)
-            {
-                var (childId, v) = subdirs[i];
-
-                if (i < opts.MaxSubdirsPerDir)
-                {
-                    children.Add(BuildDirNode(childId, depth + 1));
-                }
-                else
-                {
-                    otherDirsValue += v;
-                    otherDirsCount++;
-                }
-            }
-
-            if (otherDirsCount > 0 && otherDirsValue > 0)
-                children.Add(new TreeMapNode
-                {
-                    Label = $"Other dirs ({otherDirsCount})",
-                    IsDirectory = true,
-                    Value = otherDirsValue,
-                    Children = [],
-                    Fill = null
-                });
-
-            // ---- Files (top M by size; value depends on metric) ----
-            if (!opts.DirectoriesOnly)
-            {
-                var files = new List<FileRecord>();
-
-                foreach (var fileId in treeIndex.GetChildFileIds(dirId))
-                {
-                    if (!snapshot.Files.TryGetValue(fileId, out var f))
-                        continue;
-                    if (!IsLive(f.Status))
-                        continue;
-                    if (f.Size <= 0)
-                        continue;
-
-                    files.Add(f);
-                }
-
-                // stable selection: by size
-                files.Sort((a, b) => b.Size.CompareTo(a.Size));
-
-                long otherFilesValue = 0;
-                var otherFilesCount = 0;
-
-                for (var i = 0; i < files.Count; i++)
-                {
-                    var f = files[i];
-
-                    if (i < opts.MaxFilesPerDir)
-                    {
-                        children.Add(new TreeMapNode
-                        {
-                            Label = f.Name,
-                            IsDirectory = false,
-                            Value = metric == TreeMapMetric.TotalBytes ? f.Size : 1,
-                            Children = [],
-                            Fill = null
-                        });
-                    }
-                    else
-                    {
-                        otherFilesCount++;
-                        otherFilesValue += metric == TreeMapMetric.TotalBytes ? f.Size : 1;
-                    }
-                }
-
-                if (otherFilesCount > 0 && otherFilesValue > 0)
-                    children.Add(new TreeMapNode
-                    {
-                        Label = $"Other files ({otherFilesCount})",
-                        IsDirectory = false,
-                        Value = otherFilesValue,
-                        Children = [],
-                        Fill = null
-                    });
-            }
-
-            return new TreeMapNode
-            {
-                Label = dir.Name,
-                IsDirectory = true,
-                Value = dirValue, // pre-summed subtree total
-                Children = children,
-                Fill = null
-            };
-        }
-
-        var scanRootNodes = new List<TreeMapNode>();
-
-        foreach (var scanRoot in scanRoots.Where(r => !r.IsDeleted))
-        {
-            if (!snapshot.Dirs.TryGetValue(scanRoot.DirId, out var rootDir))
-                continue;
-            if (!IsLive(rootDir.Status))
-                continue;
-
-            var node = BuildDirNode(scanRoot.DirId, 0);
-            if (node.Value > 0)
-                scanRootNodes.Add(node);
-        }
+        var scanRootNodes = BuildScanRootNodes(
+            snapshot,
+            liveRoots,
+            treeIndex,
+            metric,
+            opts,
+            dirRelativePathResolver);
 
         if (scanRootNodes.Count == 0)
             return null;
 
-        // Colour each scan-root differently
+        ApplyScanRootColours(scanRootNodes);
+
+        return BuildDummyRoot(scanRootNodes, metric);
+    }
+
+    // ---------------------------------------------------------------------
+    // Scan root handling
+    // ---------------------------------------------------------------------
+
+    private static List<ScanRoot> GetLiveScanRoots(IEnumerable<ScanRoot> scanRoots, IRepoView snapshot)
+    {
+        var list = new List<ScanRoot>();
+        foreach (var r in scanRoots)
+        {
+            if (r.IsDeleted)
+                continue;
+
+            // if it’s not in snapshot, treat it as missing/stale and skip
+            if (!snapshot.Dirs.ContainsKey(r.DirId))
+                continue;
+
+            list.Add(r);
+        }
+
+        return list;
+    }
+    
+    private static List<TreeMapNode<ITreeMapNodeElement>> BuildScanRootNodes(
+        IRepoView snapshot,
+        IReadOnlyList<ScanRoot> liveRoots,
+        ITreeIndexReadModel treeIndex,
+        TreeMapMetric metric,
+        TreeMapBuildOptions opts,
+        Func<long, string> dirRelativePathResolver)
+    {
+        var nodes = new List<TreeMapNode<ITreeMapNodeElement>>(liveRoots.Count);
+
+        foreach (var root in liveRoots)
+        {
+            // root.DirId is guaranteed live by GetLiveScanRoots
+            var node = BuildDirNode(
+                snapshot,
+                treeIndex,
+                metric,
+                opts,
+                dirRelativePathResolver,
+                scanRoot: root,
+                dirId: root.DirId,
+                depth: 0);
+
+            if (node.Element.Value > 0)
+                nodes.Add(node);
+        }
+
+        return nodes;
+    }
+
+    private static void ApplyScanRootColours(IReadOnlyList<TreeMapNode<ITreeMapNodeElement>> scanRootNodes)
+    {
         var palette = new[]
         {
             "#FF4E79A7",
@@ -196,14 +109,344 @@ public static class TreeMapBuilder
 
         for (var i = 0; i < scanRootNodes.Count; i++)
             scanRootNodes[i].Fill = new SolidColorBrush(Color.Parse(palette[i % palette.Length]));
+    }
 
-        return new TreeMapNode
+    private static TreeMapNode<ITreeMapNodeElement> BuildDummyRoot(IReadOnlyList<TreeMapNode<ITreeMapNodeElement>> scanRootNodes, TreeMapMetric metric)
+    {
+        var total = scanRootNodes.Sum(n => n.Element.Value);
+
+        // Keep the dummy tooltip minimal; you can enrich later if you want.
+        var dummy = new SyntheticTreeMapElement(
+            label: "All scan roots",
+            value: total,
+            typeLabel: "Directory",
+            lines:
+            [
+                ("Metric", metric == TreeMapMetric.TotalBytes ? "Total size" : "Total files"),
+                ("Total", FormatMetric(total, metric))
+            ]);
+        
+        return new TreeMapNode<ITreeMapNodeElement>
         {
-            Label = "All scan roots",
-            IsDirectory = true,
-            Value = scanRootNodes.Sum(n => n.Value),
+            Element = dummy,
             Children = scanRootNodes,
             Fill = null
         };
+    }
+    
+    // ---------------------------------------------------------------------
+    // Directory nodes
+    // ---------------------------------------------------------------------
+
+    private static TreeMapNode<ITreeMapNodeElement> BuildDirNode(
+        IRepoView snapshot,
+        ITreeIndexReadModel treeIndex,
+        TreeMapMetric metric,
+        TreeMapBuildOptions opts,
+        Func<long, string> dirRelativePathResolver,
+        ScanRoot scanRoot,
+        long dirId,
+        int depth)
+    {
+        if (!snapshot.Dirs.TryGetValue(dirId, out var dir))
+            return BuildMissingDirNode(dirId);
+
+        var dirStats = treeIndex.GetDirStats(dirId);
+        var dirValue = GetDirMetricValue(dirStats, metric);
+
+        var relativePath = SafeResolveRelativePath(dirRelativePathResolver, dirId);
+
+        // Depth cap -> aggregated leaf dir node
+        if (depth >= opts.MaxDepth)
+            return MakeDirLeafNode(dir, scanRoot, dirStats, relativePath, dirValue);
+
+        // Build children (subdirs + files + collapsed "Other")
+        var children = new List<TreeMapNode<ITreeMapNodeElement>>();
+
+        AddSubdirectoryNodes(
+            snapshot,
+            treeIndex,
+            metric,
+            opts,
+            dirRelativePathResolver,
+            scanRoot,
+            dirId,
+            depth,
+            children);
+
+        if (!opts.DirectoriesOnly && metric == TreeMapMetric.TotalBytes)
+        {
+            AddFileNodes(
+                snapshot,
+                treeIndex,
+                metric,
+                opts,
+                scanRoot,
+                dirId,
+                relativePath,
+                children);
+        }
+
+        var element = new DirTreeMapElement(
+            dir: dir,
+            scanRoot: scanRoot,
+            dirAggregateStats: dirStats,
+            relativePath: relativePath,
+            value: dirValue);
+
+        return new TreeMapNode<ITreeMapNodeElement>
+        {
+            Element = element,
+            Children = children,
+            Fill = null
+        };
+    }
+
+    private static void AddSubdirectoryNodes(
+        IRepoView snapshot,
+        ITreeIndexReadModel treeIndex,
+        TreeMapMetric metric,
+        TreeMapBuildOptions opts,
+        Func<long, string> dirRelativePathResolver,
+        ScanRoot scanRoot,
+        long parentDirId,
+        int parentDepth,
+        List<TreeMapNode<ITreeMapNodeElement>> childrenOut)
+    {
+        var candidates = GetChildDirCandidates(snapshot, treeIndex, metric, parentDirId);
+
+        candidates.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+        double otherValue = 0;
+        int otherCount = 0;
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var (childId, v) = candidates[i];
+
+            if (i < opts.MaxSubdirsPerDir)
+            {
+                childrenOut.Add(BuildDirNode(
+                    snapshot,
+                    treeIndex,
+                    metric,
+                    opts,
+                    dirRelativePathResolver,
+                    scanRoot,
+                    childId,
+                    parentDepth + 1));
+            }
+            else
+            {
+                otherValue += v;
+                otherCount++;
+            }
+        }
+
+        if (otherCount > 0 && otherValue > 0)
+        {
+            childrenOut.Add(new TreeMapNode<ITreeMapNodeElement>
+            {
+                Element = BuildSyntheticOtherDirs(otherCount, otherValue, metric),
+                Children = [],
+                Fill = null
+            });
+        }
+    }
+
+    private static List<(long DirId, double Value)> GetChildDirCandidates(
+        IRepoView snapshot,
+        ITreeIndexReadModel treeIndex,
+        TreeMapMetric metric,
+        long parentDirId)
+    {
+        var list = new List<(long, double)>();
+
+        foreach (var childDirId in treeIndex.GetChildDirIds(parentDirId))
+        {
+            if (!snapshot.Dirs.ContainsKey(childDirId))
+                continue;
+
+            var stats = treeIndex.GetDirStats(childDirId);
+            var v = GetDirMetricValue(stats, metric);
+            if (v <= 0)
+                continue;
+
+            list.Add((childDirId, v));
+        }
+
+        return list;
+    }
+
+    private static TreeMapNode<ITreeMapNodeElement> MakeDirLeafNode(
+        DirRecord dir,
+        ScanRoot scanRoot,
+        DirAggregateStats stats,
+        string relativePath,
+        double value)
+    {
+        var element = new DirTreeMapElement(dir, scanRoot, stats, relativePath, value);
+
+        return new TreeMapNode<ITreeMapNodeElement>
+        {
+            Element = element,
+            Children = [],
+            Fill = null
+        };
+    }
+
+    private static TreeMapNode<ITreeMapNodeElement> BuildMissingDirNode(long dirId)
+    {
+        var element = new SyntheticTreeMapElement(
+            label: $"[missing:{dirId}]",
+            value: 0,
+            typeLabel: "Directory",
+            lines: [("DirId", dirId.ToString())]);
+
+        return new TreeMapNode<ITreeMapNodeElement>
+        {
+            Element = element,
+            Children = [],
+            Fill = null
+        };
+    }
+
+    private static string SafeResolveRelativePath(Func<long, string> resolver, long dirId)
+    {
+        try
+        {
+            return resolver(dirId);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+    
+    // ---------------------------------------------------------------------
+    // File nodes
+    // ---------------------------------------------------------------------
+
+    private static void AddFileNodes(
+        IRepoView snapshot,
+        ITreeIndexReadModel treeIndex,
+        TreeMapMetric metric,
+        TreeMapBuildOptions opts,
+        ScanRoot scanRoot,
+        long dirId,
+        string dirRelativePath,
+        List<TreeMapNode<ITreeMapNodeElement>> childrenOut)
+    {
+        if (metric != TreeMapMetric.TotalBytes)
+            return;
+
+        var files = GetChildFiles(snapshot, treeIndex, dirId);
+
+        // keep selection stable by size desc
+        files.Sort((a, b) => b.Size.CompareTo(a.Size));
+
+        double otherValue = 0;
+        int otherCount = 0;
+
+        for (var i = 0; i < files.Count; i++)
+        {
+            var f = files[i];
+
+            if (i < opts.MaxFilesPerDir)
+            {
+                childrenOut.Add(BuildFileNode(scanRoot, dirRelativePath, f));
+            }
+            else
+            {
+                otherCount++;
+                otherValue += f.Size;
+            }
+        }
+
+        if (otherCount > 0 && otherValue > 0)
+        {
+            childrenOut.Add(new TreeMapNode<ITreeMapNodeElement>
+            {
+                Element = BuildSyntheticOtherFiles(otherCount, otherValue, metric),
+                Children = [],
+                Fill = null
+            });
+        }
+    }
+
+    private static List<FileRecord> GetChildFiles(IRepoView snapshot, ITreeIndexReadModel treeIndex, long dirId)
+    {
+        var list = new List<FileRecord>();
+
+        foreach (var fileId in treeIndex.GetChildFileIds(dirId))
+        {
+            if (!snapshot.Files.TryGetValue(fileId, out var f))
+                continue;
+            if (f.Size <= 0)
+                continue;
+
+            list.Add(f);
+        }
+
+        return list;
+    }
+
+    private static TreeMapNode<ITreeMapNodeElement> BuildFileNode(
+        ScanRoot scanRoot,
+        string dirRelativePath,
+        FileRecord f)
+    {
+        var element = new FileTreeMapElement(
+            f,
+            scanRoot,
+            dirRelativePath);
+
+        return new TreeMapNode<ITreeMapNodeElement>
+        {
+            Element = element,
+            Children = [],
+            Fill = null
+        };
+    }
+    
+    // ---------------------------------------------------------------------
+    // Metric helpers / synthetic nodes
+    // ---------------------------------------------------------------------
+
+    private static double GetDirMetricValue(DirAggregateStats stats, TreeMapMetric metric)
+        => metric == TreeMapMetric.TotalBytes ? stats.TotalBytes : stats.FileCount;
+
+    private static ITreeMapNodeElement BuildSyntheticOtherDirs(int count, double value, TreeMapMetric metric)
+    {
+        return new SyntheticTreeMapElement(
+            label: $"Other dirs ({count})",
+            value: value,
+            typeLabel: "Directory",
+            lines:
+            [
+                ("Metric", metric == TreeMapMetric.TotalBytes ? "Total size" : "Total files"),
+                ("Total", FormatMetric(value, metric))
+            ]);
+    }
+
+    private static ITreeMapNodeElement BuildSyntheticOtherFiles(int count, double value, TreeMapMetric metric)
+    {
+        return new SyntheticTreeMapElement(
+            label: $"Other files ({count})",
+            value: value,
+            typeLabel: "File",
+            lines:
+            [
+                ("Metric", metric == TreeMapMetric.TotalBytes ? "Total size" : "Total files"),
+                ("Total", FormatMetric(value, metric))
+            ]);
+    }
+
+    private static string FormatMetric(double value, TreeMapMetric metric)
+    {
+        if (metric == TreeMapMetric.TotalBytes)
+            return $"{(long)value:n0} bytes";
+
+        return $"{(long)value:n0} files";
     }
 }

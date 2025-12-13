@@ -10,10 +10,13 @@ namespace DuplicateFileFinder.Gui.Controls.TreeMap;
 
 public sealed class TreeMapControl : Control
 {
+    private readonly Dictionary<TreeMapNode<ITreeMapNodeElement>, double> _valueCache = new();
+    private Control? _currentTooltip;
+    
     // ----------------- Styled properties -----------------
 
-    public static readonly StyledProperty<TreeMapNode?> RootProperty =
-        AvaloniaProperty.Register<TreeMapControl, TreeMapNode?>(nameof(Root));
+    public static readonly StyledProperty<TreeMapNode<ITreeMapNodeElement>?> RootProperty =
+        AvaloniaProperty.Register<TreeMapControl, TreeMapNode<ITreeMapNodeElement>?>(nameof(Root));
 
     public static readonly StyledProperty<int> ShadeLevelsProperty =
         AvaloniaProperty.Register<TreeMapControl, int>(
@@ -74,7 +77,6 @@ public sealed class TreeMapControl : Control
             defaultValue: false);
 
     private readonly List<LayoutItem> _layout = new();
-    private string? _currentTooltipLabel;
     private int _rectCount;
 
     static TreeMapControl()
@@ -89,7 +91,7 @@ public sealed class TreeMapControl : Control
 
     // -------- CLR wrappers --------
 
-    public TreeMapNode? Root
+    public TreeMapNode<ITreeMapNodeElement>? Root
     {
         get => GetValue(RootProperty);
         set => SetValue(RootProperty, value);
@@ -169,12 +171,13 @@ public sealed class TreeMapControl : Control
     protected override Size ArrangeOverride(Size finalSize)
     {
         _layout.Clear();
+        _valueCache.Clear();
         _rectCount = 0;
 
         if (Root == null || finalSize.Width <= 0 || finalSize.Height <= 0)
             return finalSize;
 
-        var total = ValuesArePreSummed ? Root.Value : ComputeTotalValue(Root);
+        var total = GetNodeValue(Root);
         if (total <= 0)
             return finalSize;
 
@@ -208,7 +211,7 @@ public sealed class TreeMapControl : Control
     }
 
     private void EmitRect(
-        TreeMapNode node,
+        TreeMapNode<ITreeMapNodeElement> node,
         Rect bounds,
         int depth,
         Color? inheritedBaseColor,
@@ -242,7 +245,7 @@ public sealed class TreeMapControl : Control
     }
 
     private IEnumerable<ExpandFrame> LayoutChildrenFrames(
-        TreeMapNode node,
+        TreeMapNode<ITreeMapNodeElement> node,
         Rect bounds,
         int depth,
         Color? inheritedBaseColor,
@@ -265,7 +268,7 @@ public sealed class TreeMapControl : Control
         if (inner.Width <= 0 || inner.Height <= 0)
             yield break;
 
-        // Build treemap items (children must have Value set; dirs are aggregated by ComputeTotalValue).
+        // Build treemap items (children must have Value set; dirs are aggregated by GetNodeValue).
         var items = node.Children
             .Select(c => new TreeItem { Node = c, Value = Math.Max(0, c.Value) })
             .Where(i => i.Value > 0)
@@ -305,7 +308,7 @@ public sealed class TreeMapControl : Control
         }
     }
 
-    private IEnumerable<(TreeMapNode Node, Rect Rect)> SquarifyFlat(List<TreeItem> items, Rect rect)
+    private IEnumerable<(TreeMapNode<ITreeMapNodeElement> Node, Rect Rect)> SquarifyFlat(List<TreeItem> items, Rect rect)
     {
         var index = 0;
 
@@ -438,19 +441,32 @@ public sealed class TreeMapControl : Control
     }
 
     // ----------------- Value aggregation -----------------
-
-    private static double ComputeTotalValue(TreeMapNode node)
+    
+    // recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
+    private double GetNodeValue(TreeMapNode<ITreeMapNodeElement> node)
     {
+        if (ValuesArePreSummed)
+            return Math.Max(0, node.Element.Value);
+
+        if (_valueCache.TryGetValue(node, out var cached))
+            return cached;
+
+        double sum;
         if (!node.HasChildren)
-            return Math.Max(0, node.Value);
+        {
+            sum = Math.Max(0, node.Element.Value);
+        }
+        else
+        {
+            sum = 0;
+            foreach (var child in node.Children)
+                sum += GetNodeValue(child);
+        }
 
-        double sum = 0;
-        foreach (var child in node.Children)
-            sum += ComputeTotalValue(child);
-
-        node.Value = sum;
+        _valueCache[node] = sum;
         return sum;
     }
+
 
     // ----------------- Colour handling -----------------
 
@@ -491,7 +507,7 @@ public sealed class TreeMapControl : Control
     ///     Layout a node and squarify its children inside it.
     /// </summary>
     private void LayoutNode(
-        TreeMapNode node,
+        TreeMapNode<ITreeMapNodeElement> node,
         Rect bounds,
         int depth,
         Color? inheritedBaseColor,
@@ -545,11 +561,7 @@ public sealed class TreeMapControl : Control
             return;
 
         var items = node.Children
-            .Select(c => new TreeItem
-            {
-                Node = c,
-                Value = Math.Max(0, c.Value)
-            })
+            .Select(c => new TreeItem { Node = c, Value = Math.Max(0, GetNodeValue(c)) })
             .Where(i => i.Value > 0)
             .ToList();
 
@@ -717,7 +729,7 @@ public sealed class TreeMapControl : Control
             return;
 
         var p = e.GetPosition(this);
-        string? label = null;
+        Control? tip = null;
 
         // Iterate from back so visually “topmost” items win.
         for (var i = _layout.Count - 1; i >= 0; i--)
@@ -725,43 +737,29 @@ public sealed class TreeMapControl : Control
             var item = _layout[i];
             if (item.Rect.Contains(p))
             {
-                label = item.Node.Label;
+                tip = item.Node.Element.CreateToolTip();
                 break;
             }
         }
-
-        if (string.IsNullOrEmpty(label))
+        
+        if (!ReferenceEquals(_currentTooltip, tip))
         {
-            if (_currentTooltipLabel is not null)
-            {
-                _currentTooltipLabel = null;
-                ToolTip.SetTip(this, null);
-            }
-
-            return;
+            _currentTooltip = tip;
+            ToolTip.SetTip(this, tip);
         }
-
-        if (_currentTooltipLabel != label)
-        {
-            _currentTooltipLabel = label;
-            ToolTip.SetTip(this, label);
-        }
+            
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
 
-        if (_currentTooltipLabel is not null)
-        {
-            _currentTooltipLabel = null;
-            ToolTip.SetTip(this, null);
-        }
+        ToolTip.SetTip(this, null);
     }
 
     private sealed class ExpandFrame
     {
-        public required TreeMapNode Node { get; init; }
+        public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
         public required Rect Bounds { get; init; }
         public required int Depth { get; init; }
         public required Color? BaseColor { get; init; }
@@ -773,7 +771,7 @@ public sealed class TreeMapControl : Control
     private sealed class LayoutItem
     {
         public required Rect Rect { get; init; }
-        public required TreeMapNode Node { get; init; }
+        public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
         public required int Depth { get; init; }
         public required IBrush Fill { get; init; }
     }
@@ -782,7 +780,7 @@ public sealed class TreeMapControl : Control
 
     private sealed class TreeItem
     {
-        public required TreeMapNode Node { get; init; }
+        public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
         public required double Value { get; init; }
         public double Area { get; set; }
     }

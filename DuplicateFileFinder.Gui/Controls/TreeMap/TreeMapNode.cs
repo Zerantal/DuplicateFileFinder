@@ -2,24 +2,16 @@ using Avalonia.Media;
 
 namespace DuplicateFileFinder.Gui.Controls.TreeMap;
 
-public sealed class TreeMapNode
+public sealed class TreeMapNode<T> where T : ITreeMapNodeElement
 {
-    /// <summary>Display label (e.g. directory name, group name).</summary>
-    public string Label { get; init; } = string.Empty;
+    public required T Element { get; init; }
+    public required IReadOnlyList<TreeMapNode<T>> Children { get; init; } = [];
 
-    /// <summary>
-    ///     Metric used for area: bytes, etc.
-    ///     For directories, this can be left at 0; the control will sum children.
-    /// </summary>
-    public double Value { get; set; }
+    public double Value => Element.Value;
 
     public IBrush? Fill { get; set; }
 
-    /// <summary>Children in the hierarchy.</summary>
-    public IReadOnlyList<TreeMapNode> Children { get; init; } = [];
-
-    /// <summary>True if this node represents a directory.</summary>
-    public bool IsDirectory { get; init; }
+    public string Label => Element.Label;
 
     public bool HasChildren => Children.Count > 0;
 }

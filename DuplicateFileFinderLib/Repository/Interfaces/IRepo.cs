@@ -26,5 +26,5 @@ public interface IRepo : IDisposable, IAsyncDisposable
     public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default);
     public void SaveScanSnapshots();
     public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default);
-    string GetFullDirPath(long dirId);
+    string GetDirPath(long dirId, bool relativeToVolumePath = false);
 }

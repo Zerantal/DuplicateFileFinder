@@ -127,17 +127,17 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             return Task.CompletedTask;
         }
 
+        public string GetDirPath(long dirId, bool relativeToVolumePath = false)
+        {
+            throw new NotImplementedException();
+        }
+
         public void SaveSnapshot() { }
 
         public void CompactIfNeeded()
             => CompactIfNeededCalled = true;
 
         public void CompactNow() { }
-
-        public string GetFullDirPath(long dirId)
-        {
-            throw new NotImplementedException();
-        }
 
         public long AllocateRunId()
         {
@@ -573,7 +573,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         foreach (var kv in snapshot.Files)
         {
             var file = kv.Value;
-            var dirPath = PathUtils.NormalizePath(repo.GetFullDirPath(file.DirId));
+            var dirPath = PathUtils.NormalizePath(repo.GetDirPath(file.DirId));
             var fullPath = PathUtils.NormalizePath(Path.Combine(dirPath, file.Name));
             result[fullPath] = file;
         }
@@ -586,7 +586,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kv in snapshot.Dirs)
         {
-            var dirPath = PathUtils.NormalizePath(repo.GetFullDirPath(kv.Key));
+            var dirPath = PathUtils.NormalizePath(repo.GetDirPath(kv.Key));
             result.Add(dirPath);
         }
 
@@ -950,7 +950,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // Find the net9.0 directory in the repo
         var expectedNetDirPath = PathUtils.NormalizePath(netDir);
         var netDirRecord = snapshot.Dirs.Values.Single(d =>
-            PathUtils.IsSamePath(repo.GetFullDirPath(d.DirId), expectedNetDirPath));
+            PathUtils.IsSamePath(repo.GetDirPath(d.DirId), expectedNetDirPath));
 
         // Assert 1: no child directory called "TestData" under net9.0
         var childDirNames = snapshot.Dirs.Values
@@ -964,7 +964,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         // full path matches the actual file we created, and it lives directly under net9.0.
         var matchingFile = snapshot.Files.Values.SingleOrDefault(f =>
         {
-            var dirPath = repo.GetFullDirPath(f.DirId);
+            var dirPath = repo.GetDirPath(f.DirId);
             var repoFullPath = Path.Combine(dirPath, f.Name);
             return PathUtils.IsSamePath(repoFullPath, fullPath);
         });

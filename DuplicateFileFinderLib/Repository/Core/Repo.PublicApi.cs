@@ -131,12 +131,12 @@ public sealed partial class Repo
                 _dirs[rootDirId] = rootDir;
 
                 scanRoot = scanRoot with { DirId = rootDirId};
-                _scanRoots[scanRoot.RootId] = scanRoot;
             }
             else rootDir = dir;
             
             if (volumeInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
-
+            _scanRoots[scanRoot.RootId] = scanRoot;
+            
             run = new ScanRun
             {
                 ScanRootId = scanRoot.RootId,
@@ -218,7 +218,7 @@ public sealed partial class Repo
         }
     }
 
-    public string GetFullDirPath(long dirId)
+    public string GetDirPath(long dirId, bool relativeToVolumePath = false)
     {
         // Fast path: return cached value
         if (_dirPathCache.TryGetValue(dirId, out var cached))
@@ -247,6 +247,8 @@ public sealed partial class Repo
             }
             else
             {
+                if (relativeToVolumePath)
+                    break;
                 // root path from scan root
                 var scanRoot = _scanRoots.Values.FirstOrDefault(r => r.DirId == cursor.DirId);
                 if (scanRoot is not null)

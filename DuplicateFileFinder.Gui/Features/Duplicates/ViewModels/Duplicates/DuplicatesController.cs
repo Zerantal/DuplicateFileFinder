@@ -134,7 +134,7 @@ public partial class DuplicatesController : ObservableObject
     {
         string PathResolver(FileRecord f)
         {
-            var dirPath = _repo.GetFullDirPath(f.DirId);
+            var dirPath = _repo.GetDirPath(f.DirId);
             return Path.Combine(dirPath, f.Name);
         }
 

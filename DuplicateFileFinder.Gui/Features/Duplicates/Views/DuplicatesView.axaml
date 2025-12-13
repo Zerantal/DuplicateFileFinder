@@ -173,7 +173,7 @@
                                      GroupName="TreeMapMetric"
                                      IsChecked="{Binding IsTreeMapMetricBytes, Mode=TwoWay}" />
 
-                        <RadioButton Content="Files"
+                        <RadioButton Content="File Count"
                                      GroupName="TreeMapMetric"
                                      IsChecked="{Binding IsTreeMapMetricFiles, Mode=TwoWay}" />
                     </StackPanel>
@@ -182,6 +182,7 @@
                                              PrimaryBorderDepth="2"
                                              ValuesArePreSummed="True"
                                              Margin="0,6,0,0" />
+                    
                 </DockPanel>
             </TabItem>
 
