@@ -3,9 +3,11 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
-using DuplicateFileFinder.Gui.ViewModels;
-using DuplicateFileFinder.Gui.Views;
+using DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
+using DuplicateFileFinder.Gui.Features.Scanning.Views;
+using DuplicateFileFinder.Gui.Features.Shell.Views;
 using NLog;
+using MainWindowViewModel = DuplicateFileFinder.Gui.Features.Shell.ViewModels.MainWindowViewModel;
 
 namespace DuplicateFileFinder.Gui;
 

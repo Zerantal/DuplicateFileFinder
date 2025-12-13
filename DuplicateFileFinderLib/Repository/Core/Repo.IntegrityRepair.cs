@@ -352,7 +352,7 @@ public sealed partial class Repo
     {
         foreach (var kv in _dirs)
         {
-            var full = GetFullDirPath(kv.Key);
+            var full = GetDirPath(kv.Key);
             if (PathUtils.IsSamePath(full, canonicalFullPath))
                 return kv.Key;
         }

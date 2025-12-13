@@ -14,7 +14,7 @@ internal class QuickScanOperation(
     IFileEnumerator fs,
     IChecksumPipeline checksums,
     IVolumeInfoProvider? volumeInfoProvider,
-    bool skipUnchangedDirectories = true)
+    bool skipUnchangedDirectories = false)
 {
     private readonly IRepo _repo = host.Repo;
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex;

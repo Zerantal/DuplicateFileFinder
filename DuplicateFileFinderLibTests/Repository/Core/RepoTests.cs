@@ -138,7 +138,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
             // Close and reopen to force replay from log
             repo = await Repo.OpenAsync(_rootDir, TestContext.Current.CancellationToken);
 
-            var fullPath = repo.GetFullDirPath(rootDirId);
+            var fullPath = repo.GetDirPath(rootDirId);
             Assert.Equal("/root", fullPath);
         }
 
@@ -395,8 +395,8 @@ namespace DuplicateFileFinderLibTests.Repository.Core
                 Dirs = [rootDir, childDir]
             }, TestContext.Current.CancellationToken);
 
-            var pathRoot = repo.GetFullDirPath(rootId);
-            var pathChild = repo.GetFullDirPath(childId);
+            var pathRoot = repo.GetDirPath(rootId);
+            var pathChild = repo.GetDirPath(childId);
 
             if (OperatingSystem.IsWindows())
             {
@@ -410,7 +410,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core
             }
 
             // Ensure cache hit path also works
-            var pathChild2 = repo.GetFullDirPath(childId);
+            var pathChild2 = repo.GetDirPath(childId);
             Assert.Equal(pathChild, pathChild2);
         }
         
