@@ -22,7 +22,7 @@ public partial class TreeMapController : ObservableObject
         _treeIndex = treeIndex ?? throw new ArgumentNullException(nameof(treeIndex));
     }
 
-    public TreeMapBuildOptions Options { get; } = TreeMapBuildOptions.Default;
+    public TreeMapBuildOptions Options { get; init; } = TreeMapBuildOptions.Default;
 
     public bool IsMetricBytes
     {
