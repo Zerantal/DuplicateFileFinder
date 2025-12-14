@@ -32,7 +32,11 @@ public partial class DuplicatesViewModel : ObservableObject
         var hashIndexService = host.HashIndex;
 
         _folderTreeBuilder = new FolderTreeBuilder(_repo, scanner);
-        _treeMap = new TreeMapController(_repo, host.TreeIndex);
+        _treeMap = new TreeMapController(_repo, host.TreeIndex)
+        {
+            Options = new TreeMapBuildOptions {MaxDepth = 8}
+        };
+        
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.Root))

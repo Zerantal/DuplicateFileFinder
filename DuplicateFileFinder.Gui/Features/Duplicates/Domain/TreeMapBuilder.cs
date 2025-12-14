@@ -1,6 +1,8 @@
+using System.Globalization;
 using Avalonia.Media;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
+using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
@@ -120,7 +122,6 @@ public static class TreeMapBuilder
                 typeLabel: "Directory",
                 lines:
                 [
-                    ("Metric", _metric == TreeMapMetric.TotalBytes ? "Total size" : "Total files"),
                     ("Total", FormatMetric(total))
                 ]);
         
@@ -362,7 +363,6 @@ public static class TreeMapBuilder
                 typeLabel: "Directory",
                 lines:
                 [
-                    ("Metric", _metric == TreeMapMetric.TotalBytes ? "Total size" : "Total files"),
                     ("Total", FormatMetric(value))
                 ]);
         }
@@ -375,7 +375,6 @@ public static class TreeMapBuilder
                 typeLabel: "File",
                 lines:
                 [
-                    ("Metric", "Total size"),
                     ("Total", FormatMetric(value))
                 ]);
         }
@@ -383,7 +382,14 @@ public static class TreeMapBuilder
         private string FormatMetric(double value)
         {
             if (_metric == TreeMapMetric.TotalBytes)
-                return $"{(long)value:n0} bytes";
+            {
+                var bytesFormated = (string?)BytesToHumanConverter.Instance.Convert(
+                        value,
+                        typeof(string),
+                        null,
+                        CultureInfo.CurrentUICulture) ?? $"{(long)value:n0} bytes";
+                return bytesFormated;
+            }
 
             return $"{(long)value:n0} files";
         }
