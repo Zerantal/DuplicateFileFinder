@@ -181,6 +181,7 @@
                     <treeMap:TreeMapControl Root="{Binding DirectoryTreeMapRoot}"
                                              PrimaryBorderDepth="2"
                                              ValuesArePreSummed="True"
+                                             MaxRectangles="25000"
                                              Margin="0,6,0,0" />
                     
                 </DockPanel>
