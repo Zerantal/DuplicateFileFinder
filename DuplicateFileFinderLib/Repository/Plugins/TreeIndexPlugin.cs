@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -9,14 +10,17 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
     private const string StateFileName = "tree-index.bin";
-
-    private readonly Dictionary<long, List<long>> _childrenDirsByParentId = new();
-    private readonly Dictionary<long, List<long>> _childrenFilesByDirId = new();
     
-    private readonly Dictionary<long, DirAggregateStats> _dirStatsById = new();
+    private volatile ImmutableDictionary<long, ImmutableArray<long>> _childrenDirsByParentId
+        = ImmutableDictionary<long, ImmutableArray<long>>.Empty;
+
+    private volatile ImmutableDictionary<long, ImmutableArray<long>> _childrenFilesByDirId
+        = ImmutableDictionary<long, ImmutableArray<long>>.Empty;
+
+    private volatile ImmutableDictionary<long, DirAggregateStats> _dirStatsById
+        = ImmutableDictionary<long, DirAggregateStats>.Empty;
 
     private readonly string _dataDirectory;
-    private readonly Lock _lock = new();
 
     private long _lastIndexedGeneration;
     private long _lastIndexedLogSequence;
@@ -34,30 +38,26 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // ---------------------------------------------------------------------
     // Public query surface
     // ---------------------------------------------------------------------
-
-    public IReadOnlyList<long> GetChildFileIds(long dirId)
+    
+    public ImmutableArray<long> GetChildDirIds(long dirId)
     {
-        _childrenFilesByDirId.TryGetValue(dirId, out var files);
-        return files ?? [];
+        var map = _childrenDirsByParentId;
+        return map.TryGetValue(dirId, out var v) ? v : ImmutableArray<long>.Empty;
     }
 
-    public IReadOnlyList<long> GetChildDirIds(long dirId)
+    public ImmutableArray<long> GetChildFileIds(long dirId)
     {
-        _childrenDirsByParentId.TryGetValue(dirId, out var dirs);
-        return dirs ?? [];
+        var map = _childrenFilesByDirId;
+        return map.TryGetValue(dirId, out var v) ? v : ImmutableArray<long>.Empty;
     }
 
     public DirAggregateStats GetDirStats(long dirId)
     {
-        lock (_lock)
-        {
-            if (_dirStatsById.TryGetValue(dirId, out var stats))
-                return stats;
-
-            // Default if missing (e.g., unknown dir id)
-            return new DirAggregateStats { TotalBytes = 0, FileCount = 0, DirCount = 0 };
-        }
+        var map = _dirStatsById;
+        return map.TryGetValue(dirId, out var s)
+            ? s : new DirAggregateStats {DirCount = 0, FileCount = 0, TotalBytes = 0};
     }
+
 
     // ---------------------------------------------------------------------
     // Event handlers
@@ -69,20 +69,16 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         {
             // Fallback: rebuild from snapshot and persist.
             RebuildFromSnapshot(evt.Snapshot);
-            lock (_lock)
-            {
-                _lastIndexedGeneration = evt.Generation;
-                _lastIndexedLogSequence = evt.NextLogSequence - 1;
-            }
+            
+            _lastIndexedGeneration = evt.Generation;
+            _lastIndexedLogSequence = evt.NextLogSequence - 1;
+            
             SaveState();
         }
         else
         {
-            lock (_lock)
-            {
-                _lastIndexedGeneration = evt.Generation;
-                _lastIndexedLogSequence = evt.NextLogSequence - 1;
-            }
+            _lastIndexedGeneration = evt.Generation;
+            _lastIndexedLogSequence = evt.NextLogSequence - 1;
         }
     }
 
@@ -90,11 +86,10 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
         RebuildFromSnapshot(evt.Snapshot);
-        lock (_lock)
-        {
-            _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = evt.NextLogSequence - 1;
-        }
+        
+        _lastIndexedGeneration = evt.Generation;
+        _lastIndexedLogSequence = evt.NextLogSequence - 1;
+        
         SaveState();
     }
 
@@ -104,58 +99,55 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     private void RebuildFromSnapshot(IRepoView snapshot)
     {
-        var newChildrenDirsByParentId = new Dictionary<long, List<long>>();
-        var newChildrenFilesByDirId = new Dictionary<long, List<long>>();
+        
+        var dirBuilder  = ImmutableDictionary.CreateBuilder<long, ImmutableArray<long>>();
+        var fileBuilder = ImmutableDictionary.CreateBuilder<long, ImmutableArray<long>>();
+        
+        var tmpDirs  = new Dictionary<long, List<long>>();
+        var tmpFiles = new Dictionary<long, List<long>>();
 
         // Build child dir map
         foreach (var (dirId, dirRecord) in snapshot.Dirs)
         {
             if (!dirRecord.ParentDirId.HasValue)
                 continue;
-
+    
             var parentDirId = dirRecord.ParentDirId.Value;
-            if (!newChildrenDirsByParentId.TryGetValue(parentDirId, out var subdirs))
+            if (!tmpDirs.TryGetValue(parentDirId, out var subdirs))
             {
                 subdirs = new List<long>();
-                newChildrenDirsByParentId[parentDirId] = subdirs;
+                tmpDirs[parentDirId] = subdirs;
             }
-
+    
             subdirs.Add(dirId);
         }
-
+    
         // Build child file map
         foreach (var (fileId, fileRecord) in snapshot.Files)
         {
-            if (!newChildrenFilesByDirId.TryGetValue(fileRecord.DirId, out var fileList))
+            if (!tmpFiles.TryGetValue(fileRecord.DirId, out var fileList))
             {
                 fileList = new List<long>();
-                newChildrenFilesByDirId[fileRecord.DirId] = fileList;
+                tmpFiles[fileRecord.DirId] = fileList;
             }
-
+    
             fileList.Add(fileId);
         }
+        
+        foreach (var (k, v) in tmpDirs)
+            dirBuilder[k] = [..v];
 
-        // Compute aggregates
-        var newDirStatsById = ComputeDirStats(snapshot, newChildrenDirsByParentId, newChildrenFilesByDirId);
-
-        lock (_lock)
-        {
-            _childrenDirsByParentId.Clear();
-            _childrenFilesByDirId.Clear();
-            _dirStatsById.Clear();
-
-            foreach (var (parentDirId, subdirs) in newChildrenDirsByParentId)
-                _childrenDirsByParentId[parentDirId] = subdirs;
-
-            foreach (var (dirId, files) in newChildrenFilesByDirId)
-                _childrenFilesByDirId[dirId] = files;
-
-            foreach (var (dirId, stats) in newDirStatsById)
-                _dirStatsById[dirId] = stats;
-        }
+        foreach (var (k, v) in tmpFiles)
+            fileBuilder[k] = [..v];
+        
+        _childrenDirsByParentId  = dirBuilder.ToImmutable();
+        _childrenFilesByDirId = fileBuilder.ToImmutable();
+        _dirStatsById = ComputeDirStats(snapshot, tmpDirs, tmpFiles);
+        
+        
     }
-
-    private static Dictionary<long, DirAggregateStats> ComputeDirStats(
+    
+    private static ImmutableDictionary<long, DirAggregateStats> ComputeDirStats(
         IRepoView snapshot,
         Dictionary<long, List<long>> childrenDirsByParentId,
         Dictionary<long, List<long>> childrenFilesByDirId)
@@ -167,18 +159,18 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         //
         // Approach: memoized DFS over the directory graph (forest).
         // Snapshot may be large; keep allocations modest.
-
-        var memo = new Dictionary<long, DirAggregateStats>(snapshot.Dirs.Count);
-
+    
+        var memo = ImmutableDictionary.CreateBuilder<long, DirAggregateStats>();
+    
         DirAggregateStats Dfs(long dirId)
         {
             if (memo.TryGetValue(dirId, out var cached))
                 return cached;
-
+    
             long bytes = 0;
             int fileCount = 0;
             int dirCount = 0;
-
+    
             if (childrenFilesByDirId.TryGetValue(dirId, out var fileIds))
             {
                 foreach (var fileId in fileIds)
@@ -190,39 +182,42 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                         bytes += f.Size;
                         fileCount++;
                     }
-        }
-    }
-
+                }
+            }
+    
             if (childrenDirsByParentId.TryGetValue(dirId, out var childDirIds))
             {
                 foreach (var childId in childDirIds)
                 {
                     // Count the child dir itself
                     dirCount++;
-
+    
                     var childStats = Dfs(childId);
                     bytes += childStats.TotalBytes;
                     fileCount += childStats.FileCount;
                     dirCount += childStats.DirCount; // child's descendants
                 }
             }
-
+    
             var stats = new DirAggregateStats
             {
                 TotalBytes = bytes,
                 FileCount = fileCount,
                 DirCount = dirCount
             };
-
+    
             memo[dirId] = stats;
             return stats;
         }
-
+    
         // Compute stats for every directory id in snapshot
-        foreach (var dirId in snapshot.Dirs.Keys)
-            _ = Dfs(dirId);
+        foreach (var (dirId, dir) in snapshot.Dirs)
+        {
+            if (!dir.ParentDirId.HasValue)
+                _ = Dfs(dirId);
+        }
 
-        return memo;
+        return memo.ToImmutable();
     }
 
     // ---------------------------------------------------------------------
@@ -233,32 +228,15 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     private void SaveState()
     {
-        TreeIndexState state;
-
-        lock (_lock)
+        var state = new TreeIndexState
         {
-            var childrenDirsByParentCopy = new Dictionary<long, List<long>>(_childrenDirsByParentId.Count);
-            var childrenFilesByDirCopy = new Dictionary<long, List<long>>(_childrenFilesByDirId.Count);
-            var dirStatsCopy = new Dictionary<long, DirAggregateStats>(_dirStatsById.Count);
-
-            foreach (var (dirId, subdirs) in _childrenDirsByParentId)
-                childrenDirsByParentCopy[dirId] = [..subdirs];
-
-            foreach (var (dirId, files) in _childrenFilesByDirId)
-                childrenFilesByDirCopy[dirId] = [..files];
-
-            foreach (var (dirId, stats) in _dirStatsById)
-                dirStatsCopy[dirId] = stats;
-
-            state = new TreeIndexState
-            {
-                LastIndexedGeneration = _lastIndexedGeneration,
-                LastIndexedLogSequence = _lastIndexedLogSequence,
-                ChildrenDirsByParentId = childrenDirsByParentCopy,
-                ChildrenFilesByDirId = childrenFilesByDirCopy,
-                DirStatsById = dirStatsCopy
-            };
-        }
+            LastIndexedGeneration = _lastIndexedGeneration,
+            LastIndexedLogSequence = _lastIndexedLogSequence,
+            ChildrenDirsByParentId = _childrenDirsByParentId,
+            ChildrenFilesByDirId = _childrenFilesByDirId,
+            DirStatsById = _dirStatsById
+        };
+        
 
         var path = GetStateFilePath();
         var dir = Path.GetDirectoryName(path);
@@ -286,25 +264,14 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             if (state.LastIndexedGeneration != expectedGeneration ||
                 state.LastIndexedLogSequence != expectedLastLogSequence)
                 return false;
+            
+            _lastIndexedGeneration = state.LastIndexedGeneration;
+            _lastIndexedLogSequence = state.LastIndexedLogSequence;
 
-            lock (_lock)
-            {
-                _childrenDirsByParentId.Clear();
-                _childrenFilesByDirId.Clear();
-                _dirStatsById.Clear();
+            _childrenDirsByParentId  = state.ChildrenDirsByParentId;
+            _childrenFilesByDirId    = state.ChildrenFilesByDirId;
+            _dirStatsById            = state.DirStatsById;
 
-                foreach (var (dirId, subdirs) in state.ChildrenDirsByParentId)
-                    _childrenDirsByParentId[dirId] = subdirs;
-
-                foreach (var (dirId, files) in state.ChildrenFilesByDirId)
-                    _childrenFilesByDirId[dirId] = files;
-
-                foreach (var (dirId, stats) in state.DirStatsById)
-                    _dirStatsById[dirId] = stats;
-
-                _lastIndexedGeneration = state.LastIndexedGeneration;
-                _lastIndexedLogSequence = state.LastIndexedLogSequence;
-            }
 
             return true;
         }

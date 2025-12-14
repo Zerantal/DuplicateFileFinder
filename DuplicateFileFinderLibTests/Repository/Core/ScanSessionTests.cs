@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -936,14 +937,14 @@ public sealed partial class ScanSessionTests : IDisposable
         private readonly Dictionary<long, List<long>> _childDirs = new();
         private readonly Dictionary<long, List<long>> _childFiles = new();
 
-        public IReadOnlyList<long> GetChildFileIds(long dirId)
+        public ImmutableArray<long> GetChildFileIds(long dirId)
         {
-            return _childFiles.TryGetValue(dirId, out var list) ? list : Array.Empty<long>();
+            return _childFiles.TryGetValue(dirId, out var list) ? [..list] : [];
         }
 
-        public IReadOnlyList<long> GetChildDirIds(long dirId)
+        public ImmutableArray<long> GetChildDirIds(long dirId)
         {
-            return _childDirs.TryGetValue(dirId, out var list) ? list : Array.Empty<long>();
+            return _childDirs.TryGetValue(dirId, out var list) ? [..list] : [];
         }
 
         public void SetChildDirs(long parentId, params long[] dirs)

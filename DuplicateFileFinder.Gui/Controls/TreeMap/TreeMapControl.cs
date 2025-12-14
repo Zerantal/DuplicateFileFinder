@@ -17,8 +17,6 @@ public sealed class TreeMapControl : Control
     private int _maxRectanglesCached = 25_000;
     private bool _valuesArePreSummedCached;
     
-    private Control? _currentTooltip;
-    
     // Scratch buffers to avoid per-call allocations.
     private readonly List<TreeItem> _itemsScratch = new(256);
     private readonly List<TreeItem> _rowScratch   = new(64);
@@ -196,7 +194,7 @@ public sealed class TreeMapControl : Control
         using (TimingLog.Start("TreeMapControl.ArrangeOverride"))
         {
             RefreshCachedProps();
-
+            
             _layout.Clear();
             _layout.EnsureCapacity(_maxRectanglesCached + _shadeLevelsCached);
             _valueCache.Clear();
@@ -575,17 +573,12 @@ public sealed class TreeMapControl : Control
         if (baseColor.HasValue)
         {
             var color = ShadeColor(baseColor.Value, depth - baseDepth);
-            // return new SolidColorBrush(color);
             return GetCachedBrush(color);
         }
 
         // Fallback palette if no base colour origin exists.
         return depth switch
         {
-            // 0 => new SolidColorBrush(Color.Parse("#FFE0E0E0")),
-            // 1 => new SolidColorBrush(Color.Parse("#FFC0C0C0")),
-            // 2 => new SolidColorBrush(Color.Parse("#FFA0A0A0")),
-            // _ => new SolidColorBrush(Color.Parse("#FF808080"))
             0 => GetCachedBrush(Color.Parse("#FFE0E0E0")),
             1 => GetCachedBrush(Color.Parse("#FFC0C0C0")),
             2 => GetCachedBrush(Color.Parse("#FFA0A0A0")),
@@ -766,27 +759,7 @@ public sealed class TreeMapControl : Control
     
         return r1 > r2 ? r1 : r2;
     }
-
-    // private static double WorstAspect(List<TreeItem> row, double w)
-    // {
-    //     if (row.Count == 0 || w <= 0)
-    //         return double.MaxValue;
-    //     
-    //     var sum = row.Sum(i => i.Area);
-    //     if (sum <= 0)
-    //         return double.MaxValue;
-    //     
-    //     var maxA = row.Max(i => i.Area);
-    //     var minA = row.Min(i => i.Area);
-    //     
-    //     var s2 = sum * sum;
-    //     var w2 = w * w;
-    //     
-    //     return Math.Max(
-    //         w2 * maxA / s2,
-    //         s2 / (w2 * minA));
-    // }
-
+    
     private Rect LayoutRow(
         IReadOnlyList<TreeItem> row,
         double rowArea,
@@ -840,6 +813,8 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Tooltips -----------------
 
+    private ITreeMapNodeElement? _currentTooltipElement;
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
@@ -848,7 +823,7 @@ public sealed class TreeMapControl : Control
             return;
 
         var p = e.GetPosition(this);
-        Control? tip = null;
+        ITreeMapNodeElement? element = null;
 
         // Iterate from back so visually “topmost” items win.
         for (var i = _layout.Count - 1; i >= 0; i--)
@@ -856,14 +831,26 @@ public sealed class TreeMapControl : Control
             var item = _layout[i];
             if (item.Rect.Contains(p))
             {
-                tip = item.Node.Element.CreateToolTip();
+                element = item.Node.Element;
                 break;
             }
         }
         
-        if (!ReferenceEquals(_currentTooltip, tip))
+        if (element is null)
         {
-            _currentTooltip = tip;
+            if (_currentTooltipElement is not null)
+            {
+                _currentTooltipElement = null;
+                ToolTip.SetTip(this, null);
+            }
+            return;
+        }
+        
+        if (!ReferenceEquals(_currentTooltipElement, element))
+        {
+            _currentTooltipElement = element;
+            
+            var tip = element.ToolTipFactory(); 
             ToolTip.SetTip(this, tip);
         }
             
@@ -873,7 +860,11 @@ public sealed class TreeMapControl : Control
     {
         base.OnPointerExited(e);
 
-        ToolTip.SetTip(this, null);
+        if (_currentTooltipElement is not null)
+        {
+            _currentTooltipElement = null;
+            ToolTip.SetTip(this, null);
+        }
     }
 
     private sealed class ExpandFrame

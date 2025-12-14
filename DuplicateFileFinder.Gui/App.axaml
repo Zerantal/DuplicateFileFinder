@@ -1,9 +1,9 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:converters="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Converters"
+             xmlns:conv="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Converters"
+             xmlns:tm="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap"
              x:Class="DuplicateFileFinder.Gui.App"
-RequestedThemeVariant="Default">
-    <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+             RequestedThemeVariant="Default">
 
     <Application.Styles>
         <FluentTheme />
@@ -11,6 +11,61 @@ RequestedThemeVariant="Default">
     </Application.Styles>
 
     <Application.Resources>
-        <converters:BytesToHumanConverter x:Key="BytesToHuman" />
+        <conv:BytesToHumanConverter x:Key="BytesToHuman" />
     </Application.Resources>
+
+    <Application.DataTemplates>
+
+        <DataTemplate DataType="{x:Type tm:DirTreeMapElement}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                <TextBlock Text="Type: Directory" />
+                <TextBlock Text="{Binding VolumeLabel, StringFormat=Volume: {0}}" />
+                <TextBlock Text="{Binding RelativePath, StringFormat=Path: {0}}" />
+
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="Total size:" />
+                    <TextBlock Text="{Binding Stats.TotalBytes, Converter={StaticResource BytesToHuman}}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding Stats.FileCount, StringFormat=Files: {0:N0}}" />
+                <TextBlock Text="{Binding Stats.DirCount, StringFormat=Dirs: {0:N0}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type tm:FileTreeMapElement}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                <TextBlock Text="Type: File" />
+                <TextBlock Text="{Binding VolumeLabel, StringFormat=Volume: {0}}" />
+                <TextBlock Text="{Binding RelativePath, StringFormat=Path: {0}}" />
+
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="Size:" />
+                    <TextBlock Text="{Binding Value, Converter={StaticResource BytesToHuman}}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type tm:SyntheticTreeMapElement}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                <TextBlock Text="{Binding TypeLabel, StringFormat=Type: {0}}" />
+
+                <ItemsControl ItemsSource="{Binding ToolTipLines}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock>
+                                <Run Text="{Binding Key}" />
+                                <Run Text=": " />
+                                <Run Text="{Binding Value}" />
+                            </TextBlock>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+
+    </Application.DataTemplates>
+
 </Application>

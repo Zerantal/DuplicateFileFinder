@@ -6,38 +6,28 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 public abstract class RepoTreeMapElement : ITreeMapNodeElement
 {
-    private readonly Lock _toolTipLock = new();
-
-    private Func<Control>? _toolTipFactory;
-
     // Common data for dir/file
-    protected string? VolumeLabel => ScanRoot?.VolumeLabel;
-    public required string RelativePath { get; init; }
+    public required Func<string> RelativePathFactory { get; init; }
     public required string Name { get; init; }
+    public required string Label { get; init; }
+
+    public Func<Control> ToolTipFactory => () => new ContentControl
+    {
+        Content = this
+    };
+    
+    public required double Value { get; init; }
+
     protected ScanRoot? ScanRoot { get; init; }
 
-    // ITreeMapNodeElement interface
-    public double Value { get; init; }
+    // Bindable convenience
+    public string VolumeLabel => ScanRoot?.VolumeLabel ?? "(unknown)";
+    public string RelativePath => SafeInvoke(RelativePathFactory);
 
-    public Control CreateToolTip()
+    private static string SafeInvoke(Func<string> f)
     {
-        var f = _toolTipFactory;
-        if (f != null)
-            return f();
-
-        lock (_toolTipLock)
-        {
-            f = _toolTipFactory;
-            if (f != null)
-                return f();
-
-            // Build factory ONCE, not the control
-            _toolTipFactory = BuildToolTipFactory();
-            return _toolTipFactory();
-        }
+        try { return f(); }
+        catch { return string.Empty; }
     }
-
-    public required string Label { get; init; }
-    
-    protected abstract Func<Control> BuildToolTipFactory();
 }
+    

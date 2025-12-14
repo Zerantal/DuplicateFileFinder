@@ -182,7 +182,7 @@
                                              PrimaryBorderDepth="2"
                                              ValuesArePreSummed="True"
                                              MaxRectangles="150000"
-                                             ShadeLevels="10"
+                                             ShadeLevels="{Binding MaxDepth}"
                                              Margin="0,6,0,0" />
                     
                 </DockPanel>

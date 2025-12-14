@@ -37,6 +37,7 @@ public partial class DuplicatesViewModel : ObservableObject
             Options = new TreeMapBuildOptions {MaxDepth = 8}
         };
         
+        
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.Root))
@@ -115,6 +116,8 @@ public partial class DuplicatesViewModel : ObservableObject
             OnPropertyChanged(nameof(IsTreeMapMetricBytes));
         }
     }
+
+    public object MaxDepth => _treeMap.Options.MaxDepth + 2;
 
     public void LoadFromRepo()
     {
