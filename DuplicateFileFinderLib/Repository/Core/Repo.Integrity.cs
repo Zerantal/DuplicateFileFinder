@@ -379,7 +379,7 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotOnDisk>(bytes);
+                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshot>(bytes);
                 if (snap is null)
                 {
                     issues.Add(new RepoIntegrityIssue
@@ -509,7 +509,7 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotOnDisk>(bytes);
+                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshot>(bytes);
                 if (snap is null)
                     continue;
 

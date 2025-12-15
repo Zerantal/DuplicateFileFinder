@@ -132,7 +132,7 @@ public sealed partial class Repo
             if (filesByDir.TryGetValue(dirId, out var filesInDir))
                 fileList.AddRange(filesInDir);
 
-        var rootSnap = new ScanRootSnapshotOnDisk
+        var rootSnap = new ScanRootSnapshot
         {
             ScanRootId = scanRootId,
             Dirs = dirRecords,

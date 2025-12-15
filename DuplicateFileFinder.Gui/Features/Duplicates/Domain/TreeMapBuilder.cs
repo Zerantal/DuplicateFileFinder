@@ -37,7 +37,7 @@ public static class TreeMapBuilder
         Parallel.For(
             0, liveRoots.Count,
             new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
-            (int i) =>
+            i =>
             {
                 var root = liveRoots[i];
                 var node = ctx.BuildDirNode(root, root.DirId, depth: 0);
@@ -98,20 +98,6 @@ public static class TreeMapBuilder
                 list.Add(r);
             }
             return list;
-        }
-    
-        public List<TreeMapNode<ITreeMapNodeElement>> BuildScanRootNodes(IReadOnlyList<ScanRoot> liveRoots)
-        {
-            var nodes = new List<TreeMapNode<ITreeMapNodeElement>>(liveRoots.Count);
-
-            foreach (var root in liveRoots)
-            {
-                var node = BuildDirNode(root, root.DirId, depth: 0);
-                if (node.Element.Value > 0)
-                    nodes.Add(node);
-            }
-
-            return nodes;
         }
 
         public void ApplyScanRootColours(IReadOnlyList<TreeMapNode<ITreeMapNodeElement>> scanRootNodes)

@@ -324,7 +324,7 @@ public sealed partial class Repo
             if (root.DirId == 0 || !dirsSnapshot.ContainsKey(root.DirId))
             {
                 // Unbound root: write an empty snapshot so the root still exists
-                var emptySnap = new ScanRootSnapshotOnDisk
+                var emptySnap = new ScanRootSnapshot
                 {
                     ScanRootId = root.RootId,
                     Dirs       = [],
@@ -351,7 +351,7 @@ public sealed partial class Repo
                         : Enumerable.Empty<FileRecord>())
                 .ToArray();
 
-            var snap = new ScanRootSnapshotOnDisk
+            var snap = new ScanRootSnapshot
             {
                 ScanRootId = root.RootId,
                 Dirs = dirRecs,

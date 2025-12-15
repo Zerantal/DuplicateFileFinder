@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Avalonia.Controls;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 

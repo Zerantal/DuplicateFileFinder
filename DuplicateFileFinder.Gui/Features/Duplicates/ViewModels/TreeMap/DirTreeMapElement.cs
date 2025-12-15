@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Avalonia.Controls;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 

@@ -35,7 +35,7 @@ public static class RepoStore
 
     public static async Task SaveScanRootSnapshotAsync(
         string repoPath,
-        ScanRootSnapshotOnDisk snapshot,
+        ScanRootSnapshot snapshot,
         CancellationToken ct = default)
     {
         var rootsFolder = GetRootsFolder(repoPath);
@@ -60,7 +60,7 @@ public static class RepoStore
         File.Move(tmpPath, path, overwrite: true);
     }
 
-    public static async Task<ScanRootSnapshotOnDisk?> LoadScanRootSnapshotAsync(
+    public static async Task<ScanRootSnapshot?> LoadScanRootSnapshotAsync(
         string repoPath,
         long scanRootId,
         CancellationToken ct = default)
@@ -71,7 +71,7 @@ public static class RepoStore
         
 
         await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotOnDisk>(fs, cancellationToken: ct)
+        return await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshot>(fs, cancellationToken: ct)
             .ConfigureAwait(false);
     }
 
