@@ -8,16 +8,16 @@ public sealed class DirTreeMapElement : RepoTreeMapElement
 {
     [SetsRequiredMembers]
     public DirTreeMapElement(
-        DirRecord dir,
+        DirRecordV2 dir,
         ScanRoot scanRoot,
         DirAggregateStats dirAggregateStats,
         Func<string> relPathFactory, 
-        double value)
+        double value,
+        Func<string> nameResolver) : base(nameResolver)
     {
         ScanRoot = scanRoot;
-
-        Name = dir.Name;
-        Label = dir.Name;
+        
+        Label = dir.DirId.ToString();
         Value = value;
 
         RelativePathFactory = relPathFactory;

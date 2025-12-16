@@ -3,12 +3,19 @@ using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
-[MemoryPackable]
-internal sealed partial record HashIndexState
+[MemoryPackable(SerializeLayout.Sequential)]
+public sealed partial class HashGroupState
 {
-    [MemoryPackOrder(0)] public required long LastIndexedGeneration { get; init; }
-    [MemoryPackOrder(1)] public required long LastIndexedLogSequence { get; init; }
-    [MemoryPackOrder(2)] public required Dictionary<HashKey, (long size, List<long> list)> Index { get; init; }
-    [MemoryPackOrder(3)] public required int TotalDuplicateFileCount { get; init; }
-    [MemoryPackOrder(4)] public required long TotalSpaceTakenByDuplicates { get; init; }
+    public long Size { get; set; }
+    public FileHandle[] Files { get; set; } = [];
+}
+
+[MemoryPackable(SerializeLayout.Sequential)]
+public sealed partial class HashIndexState
+{
+    public long LastIndexedGeneration { get; init; }
+    public long LastIndexedLogSequence { get; init; }
+    public Dictionary<HashKey, HashGroupState> Index { get; init; } = new();
+    public int TotalDuplicateFileCount { get; init; }
+    public long TotalSpaceTakenByDuplicates { get; init; }
 }

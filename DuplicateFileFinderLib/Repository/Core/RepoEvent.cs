@@ -1,4 +1,3 @@
-using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
@@ -12,7 +11,7 @@ public abstract record RepoEvent
 // Initial bootstrap / “opened at current state”
 public sealed record BootstrapEvent : RepoEvent
 {
-    public required IRepoView Snapshot { get; init; }
+    public required RepoSnapshotView RepoSnapshotView { get; init; }
 }
 
 // After a delta is committed and applied to in-memory state
@@ -31,5 +30,5 @@ public sealed record ScanRunCompletedEvent : RepoEvent
 // After compaction writes new snapshots & bumps generation
 public sealed record CompactedEvent : RepoEvent
 {
-    public required IRepoView Snapshot { get; init; }
+    public required RepoSnapshotView RepoSnapshotView { get; init; }
 }

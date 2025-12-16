@@ -961,6 +961,21 @@ public sealed partial class ScanSessionTests : IDisposable
         {
             throw new NotImplementedException();
         }
+
+        public DirAggregateStats GetDirStats(DirHandle dirId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public ImmutableArray<DirHandle> GetChildDirIds(DirHandle dir)
+        {
+            throw new NotImplementedException();
+        }
+
+        public ImmutableArray<FileHandle> GetChildFileIds(DirHandle dir)
+        {
+            throw new NotImplementedException();
+        }
     }
 
     private sealed class FakeFileEnumerator : IFileEnumerator

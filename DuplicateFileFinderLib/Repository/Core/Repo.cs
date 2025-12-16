@@ -17,6 +17,7 @@ public sealed partial class Repo : IRepo, IRepoInternal
     private readonly string _logDirPath;
     
     // live state
+    private Dictionary<long, ScanRootSnapshotV2> _scanRootSnapshots = new(); 
     private Dictionary<long, DirRecord>  _dirs       = new();
     private Dictionary<long, FileRecord> _files      = new();
     private List<ScanRun> _scanRuns = new();

@@ -7,39 +7,125 @@ using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.Repository.Plugins
+namespace DuplicateFileFinderLibTests.Repository.Plugins;
+
+public sealed class TreeIndexPluginTests
 {
-    public sealed class TreeIndexPluginTests
+    private static string CreateTempDir()
     {
-        private static string CreateTempDir()
-        {
-            var dir = Path.Combine(Path.GetTempPath(), "TreeIndexTests_" + Guid.NewGuid());
-            Directory.CreateDirectory(dir);
-            return dir;
-        }
+        var dir = Path.Combine(Path.GetTempPath(), "TreeIndexTests_" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
 
-        [Fact]
-        public async Task BootstrapEvent_BuildsInitialTreeIndex_AndPersistsState()
+    [Fact]
+    public async Task BootstrapEvent_BuildsInitialTreeIndex_AndPersistsState()
+    {
+        var tempDir = CreateTempDir();
+        try
         {
-            var tempDir = CreateTempDir();
-            try
+            await using var plugin = new TreeIndexPlugin(tempDir);
+
+            // Layout:
+            //   Dir 1: root (no parent)
+            //     Dir 2: subA
+            //     Dir 3: subB
+            //     File 10: file_root.txt
+            //   Dir 2:
+            //     File 20: file_subA.txt
+            var now = DateTimeOffset.UtcNow;
+
+            // IMPORTANT: arrays are in deterministic order so indices are deterministic
+            var dirs = new[]
             {
-                await using var plugin = new TreeIndexPlugin(tempDir);
-
-                // Layout:
-                //   Dir 1: root (no parent)
-                //     Dir 2: subA
-                //     Dir 3: subB
-                //     File 10: file_root.txt
-                //   Dir 2:
-                //     File 20: file_subA.txt
-                var now = DateTime.UtcNow;
-
-                var dirs = new Dictionary<long, DirRecord>
+                new DirRecord
                 {
-                    [1] = new DirRecord
+                    DirId = 1, ParentDirId = null, Name = "root", Status = ScanEntryStatus.Enumerated, Created = now,
+                    Modified = now
+                },
+                new DirRecord
+                {
+                    DirId = 2, ParentDirId = 1, Name = "subA", Status = ScanEntryStatus.Enumerated, Created = now,
+                    Modified = now
+                },
+                new DirRecord
+                {
+                    DirId = 3, ParentDirId = 1, Name = "subB", Status = ScanEntryStatus.Enumerated, Created = now,
+                    Modified = now
+                }
+            };
+
+            var files = new[]
+            {
+                new FileRecord
+                {
+                    FileId = 10, DirId = 1, Name = "file_root.txt", Size = 123, Status = ScanEntryStatus.Enumerated,
+                    Hash = HashKey.NotComputed, Created = now, Modified = now
+                },
+                new FileRecord
+                {
+                    FileId = 20, DirId = 2, Name = "file_subA.txt", Size = 456, Status = ScanEntryStatus.Enumerated,
+                    Hash = HashKey.NotComputed, Created = now, Modified = now
+                }
+            };
+
+            var snapshot = RepoUtil.MakeSnapshot(1, dirs, files);
+
+            plugin.Post(new BootstrapEvent
+            {
+                Generation = 1,
+                NextLogSequence = 10,
+                RepoSnapshotView = snapshot
+            });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            // handles by index in dirs/files arrays above
+            var root = new DirHandle(1, 0);
+            var subA = new DirHandle(1, 1);
+            var subB = new DirHandle(1, 2);
+
+            var fileRoot = new FileHandle(1, 0);
+            var fileSubA = new FileHandle(1, 1);
+
+            // root children
+            Assert.Equal(
+                RepoUtil.Sort([subA, subB]),
+                RepoUtil.Sort(plugin.GetChildDirIds(root).ToArray()));
+
+            Assert.Equal(
+                RepoUtil.Sort([fileRoot]),
+                RepoUtil.Sort(plugin.GetChildFileIds(root).ToArray()));
+
+            // subA children
+            Assert.Empty(plugin.GetChildDirIds(subA));
+            Assert.Equal(
+                RepoUtil.Sort([fileSubA]),
+                RepoUtil.Sort(plugin.GetChildFileIds(subA).ToArray()));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task BootstrapEvent_LoadsExistingState_WhenStateMatchesGenerationAndSequence()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+
+            // First run: build state.
+            await using (var plugin1 = new TreeIndexPlugin(tempDir))
+            {
+                var dirs1 = new[]
+                {
+                    new DirRecord
                     {
                         DirId = 1,
                         ParentDirId = null,
@@ -48,7 +134,7 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
                         Modified = now,
                         Status = ScanEntryStatus.Enumerated
                     },
-                    [2] = new DirRecord
+                    new DirRecord
                     {
                         DirId = 2,
                         ParentDirId = 1,
@@ -56,8 +142,59 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
                         Created = now,
                         Modified = now,
                         Status = ScanEntryStatus.Enumerated
+                    }
+                };
+
+                var files1 = new[]
+                {
+                    new FileRecord
+                    {
+                        FileId = 10,
+                        DirId = 1,
+                        Name = "file_subA.txt",
+                        Size = 1,
+                        Created = now,
+                        Modified = now,
+                        Status = ScanEntryStatus.Enumerated,
+                        Hash = HashKey.NotComputed
+                    }
+                };
+
+                var snapshot = RepoUtil.MakeSnapshot(scanRootId: 1, dirs1, files1);
+
+                var bootstrap1 = new BootstrapEvent
+                {
+                    Generation = 1,
+                    NextLogSequence = 10,
+                    RepoSnapshotView = snapshot
+                };
+
+                plugin1.Post(bootstrap1);
+                await plugin1.WhenReadyAsync(TestContext.Current.CancellationToken);
+                
+                var root = new DirHandle(1, 0);
+                var subA = new DirHandle(1, 1);
+                var fileSubA = new FileHandle(1, 0);
+
+                Assert.Equal(new[] { subA }, plugin1.GetChildDirIds(root).ToArray());
+                Assert.Equal(new[] { fileSubA }, plugin1.GetChildFileIds(root).ToArray());
+            }
+
+            // Second run: different snapshot, same (Generation, NextLogSequence) -> should load persisted state.
+            await using (var plugin2 = new TreeIndexPlugin(tempDir))
+            {
+                var dirs2 = new[]
+                {
+                    new  DirRecord
+                    {
+                        DirId = 1,
+                        ParentDirId = null,
+                        Name = "root",
+                        Created = now,
+                        Modified = now,
+                        Status = ScanEntryStatus.Enumerated
                     },
-                    [3] = new DirRecord
+                    new DirRecord
                     {
                         DirId = 3,
                         ParentDirId = 1,
@@ -68,25 +205,14 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
                     }
                 };
 
-                var files = new Dictionary<long, FileRecord>
+                var files2 = new[]
                 {
-                    [10] = new FileRecord
+                    new FileRecord
                     {
-                        FileId = 10,
+                        FileId = 99,
                         DirId = 1,
-                        Name = "file_root.txt",
-                        Size = 123,
-                        Created = now,
-                        Modified = now,
-                        Status = ScanEntryStatus.Enumerated,
-                        Hash = HashKey.NotComputed
-                    },
-                    [20] = new FileRecord
-                    {
-                        FileId = 20,
-                        DirId = 2,
-                        Name = "file_subA.txt",
-                        Size = 456,
+                        Name = "fileB.txt",
+                        Size = 2,
                         Created = now,
                         Modified = now,
                         Status = ScanEntryStatus.Enumerated,
@@ -94,405 +220,252 @@ namespace DuplicateFileFinderLibTests.Repository.Plugins
                     }
                 };
 
-                var snapshot = new RepoView(dirs, files);
+                var snapshot = RepoUtil.MakeSnapshot(1, dirs2, files2);
 
-                var bootstrap = new BootstrapEvent
+                var bootstrap2 = new BootstrapEvent
                 {
                     Generation = 1,
                     NextLogSequence = 10,
-                    Snapshot = snapshot
+                    RepoSnapshotView = snapshot
                 };
 
-                plugin.Post(bootstrap);
-                await plugin.WhenReadyAsync(CancellationToken.None);
+                plugin2.Post(bootstrap2);
+                await plugin2.WhenReadyAsync(TestContext.Current.CancellationToken);
 
-                var rootChildDirs = plugin.GetChildDirIds(1).OrderBy(x => x).ToArray();
-                var rootChildFiles = plugin.GetChildFileIds(1).OrderBy(x => x).ToArray();
+                var root = new DirHandle(1, 0);
+                var subB = new DirHandle(1, 1);
+                var fileSubB = new FileHandle(1, 0);
+                
+                var rootChildDirs2 = plugin2.GetChildDirIds(root).ToArray();
+                var rootChildFiles2 = plugin2.GetChildFileIds(root).ToArray();
 
-                Assert.Equal(new[] { 2L, 3L }, rootChildDirs);
-                Assert.Equal(new[] { 10L }, rootChildFiles);
-
-                var subAChildDirs = plugin.GetChildDirIds(2);
-                var subAChildFiles = plugin.GetChildFileIds(2).OrderBy(x => x).ToArray();
-
-                Assert.Empty(subAChildDirs);
-                Assert.Equal(new[] { 20L }, subAChildFiles);
-
-                var statePath = Path.Combine(tempDir, "tree-index.bin");
-                Assert.True(File.Exists(statePath));
-            }
-            finally
-            {
-                Directory.Delete(tempDir, recursive: true);
+                // Should reflect persisted state (dir 2, file 10), not new snapshot (dir 3, file 99)
+                Assert.Equal(new[] { subB }, rootChildDirs2);
+                Assert.Equal(new[] { fileSubB }, rootChildFiles2);
             }
         }
-
-        [Fact]
-        public async Task BootstrapEvent_LoadsExistingState_WhenStateMatchesGenerationAndSequence()
+        finally
         {
-            var tempDir = CreateTempDir();
-            try
-            {
-                var now = DateTime.UtcNow;
-
-                // First run: build state with one structure.
-                await using (var plugin1 = new TreeIndexPlugin(tempDir))
-                {
-                    var dirs1 = new Dictionary<long, DirRecord>
-                    {
-                        [1] = new DirRecord
-                        {
-                            DirId = 1,
-                            ParentDirId = null,
-                            Name = "root",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        },
-                        [2] = new DirRecord
-                        {
-                            DirId = 2,
-                            ParentDirId = 1,
-                            Name = "subA",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        }
-                    };
-
-                    var files1 = new Dictionary<long, FileRecord>
-                    {
-                        [10] = new FileRecord
-                        {
-                            FileId = 10,
-                            DirId = 1,
-                            Name = "fileA.txt",
-                            Size = 1,
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated,
-                            Hash = HashKey.NotComputed
-                        }
-                    };
-
-                    var snapshot1 = new RepoView(dirs1, files1);
-
-                    var bootstrap1 = new BootstrapEvent
-                    {
-                        Generation = 1,
-                        NextLogSequence = 10,
-                        Snapshot = snapshot1
-                    };
-
-                    plugin1.Post(bootstrap1);
-                    await plugin1.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-                    var rootChildDirs1 = plugin1.GetChildDirIds(1).ToArray();
-                    var rootChildFiles1 = plugin1.GetChildFileIds(1).ToArray();
-
-                    Assert.Equal(new[] { 2L }, rootChildDirs1);
-                    Assert.Equal(new[] { 10L }, rootChildFiles1);
-                }
-
-                // Second run: use a different snapshot, but same (Generation, NextLogSequence).
-                // TreeIndexPlugin should ignore the snapshot and load persisted state instead.
-                await using (var plugin2 = new TreeIndexPlugin(tempDir))
-                {
-                    var dirs2 = new Dictionary<long, DirRecord>
-                    {
-                        [1] = new DirRecord
-                        {
-                            DirId = 1,
-                            ParentDirId = null,
-                            Name = "root",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        },
-                        [3] = new DirRecord
-                        {
-                            DirId = 3,
-                            ParentDirId = 1,
-                            Name = "subB",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        }
-                    };
-
-                    var files2 = new Dictionary<long, FileRecord>
-                    {
-                        [99] = new FileRecord
-                        {
-                            FileId = 99,
-                            DirId = 1,
-                            Name = "fileB.txt",
-                            Size = 2,
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated,
-                            Hash = HashKey.NotComputed
-                        }
-                    };
-
-                    var snapshot2 = new RepoView(dirs2, files2);
-
-                    var bootstrap2 = new BootstrapEvent
-                    {
-                        Generation = 1,
-                        NextLogSequence = 10, // same as first run
-                        Snapshot = snapshot2
-                    };
-
-                    plugin2.Post(bootstrap2);
-                    await plugin2.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-                    var rootChildDirs2 = plugin2.GetChildDirIds(1).OrderBy(x => x).ToArray();
-                    var rootChildFiles2 = plugin2.GetChildFileIds(1).OrderBy(x => x).ToArray();
-
-                    // Should reflect persisted state (dir 2, file 10), not new snapshot (dir 3, file 99)
-                    Assert.Equal(new[] { 2L }, rootChildDirs2);
-                    Assert.Equal(new[] { 10L }, rootChildFiles2);
-                }
-            }
-            finally
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
+            Directory.Delete(tempDir, true);
         }
+    }
 
-        [Fact]
-        public async Task CompactedEvent_RebuildsIndexAndPersistsNewState()
+    [Fact]
+    public async Task CompactedEvent_RebuildsIndexAndPersistsNewState()
+    {
+        var tempDir = CreateTempDir();
+        try
         {
-            var tempDir = CreateTempDir();
-            try
+            var now = DateTimeOffset.UtcNow;
+    
+            // Initial snapshot
+            await using var plugin = new TreeIndexPlugin(tempDir);
+            
+            var dirs1 = new[]
             {
-                var now = DateTime.UtcNow;
-
-                // Initial snapshot
-                await using (var plugin = new TreeIndexPlugin(tempDir))
+                new DirRecord
                 {
-                    var dirs1 = new Dictionary<long, DirRecord>
-                    {
-                        [1] = new DirRecord
-                        {
-                            DirId = 1,
-                            ParentDirId = null,
-                            Name = "root",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        },
-                        [2] = new DirRecord
-                        {
-                            DirId = 2,
-                            ParentDirId = 1,
-                            Name = "oldSub",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        }
-                    };
-
-                    var files1 = new Dictionary<long, FileRecord>
-                    {
-                        [10] = new FileRecord
-                        {
-                            FileId = 10,
-                            DirId = 1,
-                            Name = "oldFile.txt",
-                            Size = 1,
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated,
-                            Hash = HashKey.NotComputed
-                        }
-                    };
-
-                    var snapshot1 = new RepoView(dirs1, files1);
-
-                    var bootstrap = new BootstrapEvent
-                    {
-                        Generation = 1,
-                        NextLogSequence = 10,
-                        Snapshot = snapshot1
-                    };
-
-                    plugin.Post(bootstrap);
-                    await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-                    Assert.Equal([2L], plugin.GetChildDirIds(1));
-                    Assert.Equal([10L], plugin.GetChildFileIds(1));
-
-                    // New snapshot after compaction
-                    var dirs2 = new Dictionary<long, DirRecord>
-                    {
-                        [1] = new DirRecord
-                        {
-                            DirId = 1,
-                            ParentDirId = null,
-                            Name = "root",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        },
-                        [3] = new DirRecord
-                        {
-                            DirId = 3,
-                            ParentDirId = 1,
-                            Name = "newSub",
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated
-                        }
-                    };
-
-                    var files2 = new Dictionary<long, FileRecord>
-                    {
-                        [20] = new FileRecord
-                        {
-                            FileId = 20,
-                            DirId = 1,
-                            Name = "newFile.txt",
-                            Size = 2,
-                            Created = now,
-                            Modified = now,
-                            Status = ScanEntryStatus.Enumerated,
-                            Hash = HashKey.NotComputed
-                        }
-                    };
-
-                    var snapshot2 = new RepoView(dirs2, files2);
-
-                    var compacted = new CompactedEvent
-                    {
-                        Generation = 2,
-                        NextLogSequence = 20,
-                        Snapshot = snapshot2
-                    };
-
-                    plugin.Post(compacted);
-
-                    // ChannelRepoPlugin handles events asynchronously; give it a little time.
-                    await Task.Delay(20, TestContext.Current.CancellationToken);
-
-                    var rootChildDirs = plugin.GetChildDirIds(1).ToArray();
-                    var rootChildFiles = plugin.GetChildFileIds(1).ToArray();
-
-                    Assert.Equal(new[] { 3L }, rootChildDirs);
-                    Assert.Equal(new[] { 20L }, rootChildFiles);
-                }
-
-                // New plugin instance should pick up the state written by CompactedEvent
-                await using (var plugin2 = new TreeIndexPlugin(tempDir))
+                    DirId = 1,
+                    ParentDirId = null,
+                    Name = "root",
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated
+                },
+                new DirRecord
                 {
-                    var emptySnapshot = new RepoView(
-                        new Dictionary<long, DirRecord>(),
-                        new Dictionary<long, FileRecord>());
-
-                    var bootstrap2 = new BootstrapEvent
-                    {
-                        Generation = 2,
-                        NextLogSequence = 20,
-                        Snapshot = emptySnapshot
-                    };
-
-                    plugin2.Post(bootstrap2);
-                    await plugin2.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-                    var rootChildDirs2 = plugin2.GetChildDirIds(1).ToArray();
-                    var rootChildFiles2 = plugin2.GetChildFileIds(1).ToArray();
-
-                    Assert.Equal(new[] { 3L }, rootChildDirs2);
-                    Assert.Equal(new[] { 20L }, rootChildFiles2);
+                    DirId = 2,
+                    ParentDirId = 1,
+                    Name = "oldSub",
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated
                 }
-            }
-            finally
+            };
+    
+            var files1 = new FileRecord[]
             {
-                Directory.Delete(tempDir, recursive: true);
-            }
+                new()
+                {
+                    FileId = 10,
+                    DirId = 1,
+                    Name = "oldFile.txt",
+                    Size = 1,
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated,
+                    Hash = HashKey.NotComputed
+                }
+            };
+    
+            var snapshot1 = RepoUtil.MakeSnapshot(1, dirs1, files1);
+    
+            var bootstrap = new BootstrapEvent
+            {
+                Generation = 1,
+                NextLogSequence = 10,
+                RepoSnapshotView = snapshot1
+            };
+    
+            plugin.Post(bootstrap);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+    
+            var root = new DirHandle(1, 0);
+            var oldSubB = new DirHandle(1, 1);
+            var oldFile = new FileHandle(1, 0);
+                
+            Assert.Equal(new[] { oldSubB }, plugin.GetChildDirIds(root));
+            Assert.Equal(new[] { oldFile }, plugin.GetChildFileIds(root));
+    
+            // New snapshot after compaction
+            var dirs2 = new DirRecord[]
+            {
+                new()
+                {
+                    DirId = 1,
+                    ParentDirId = null,
+                    Name = "root",
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated
+                },
+                new()
+                {
+                    DirId = 3,
+                    ParentDirId = 1,
+                    Name = "newSub",
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated
+                }
+            };
+    
+            var files2 = new FileRecord[]
+            {
+                new()
+                {
+                    FileId = 20,
+                    DirId = 1,
+                    Name = "newFile.txt",
+                    Size = 2,
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated,
+                    Hash = HashKey.NotComputed
+                }
+            };
+    
+            var snapshot2 = RepoUtil.MakeSnapshot(1, dirs2, files2);
+    
+            var compacted = new CompactedEvent
+            {
+                Generation = 2,
+                NextLogSequence = 999,
+                RepoSnapshotView = snapshot2
+            };
+    
+            plugin.Post(compacted);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+    
+            var newSubB = new DirHandle(1, 1);
+            var newFile = new FileHandle(1, 0);
+                
+            var rootChildDirs2 = plugin.GetChildDirIds(root).ToArray();
+            var rootChildFiles2 = plugin.GetChildFileIds(root).ToArray();
+    
+            Assert.Equal(new[] { newSubB }, rootChildDirs2);
+            Assert.Equal(new[] { newFile }, rootChildFiles2);
+    
+            var statePath = Path.Combine(tempDir, "tree-index.bin");
+            Assert.True(File.Exists(statePath));
         }
-
-        [Fact]
-        public async Task DeltaCommittedEvent_DoesNotChangeIndex_WhenNotHandled()
+        finally
         {
-            var tempDir = CreateTempDir();
-            try
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task DeltaCommittedEvent_DoesNotChangeIndex_WhenNotHandled()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            await using var plugin = new TreeIndexPlugin(tempDir);
+    
+            var now = DateTimeOffset.UtcNow;
+    
+            var dirs = new DirRecord[]
             {
-                await using var plugin = new TreeIndexPlugin(tempDir);
-
-                var now = DateTime.UtcNow;
-
-                var dirs = new Dictionary<long, DirRecord>
+                new()
                 {
-                    [1] = new DirRecord
-                    {
-                        DirId = 1,
-                        ParentDirId = null,
-                        Name = "root",
-                        Created = now,
-                        Modified = now,
-                        Status = ScanEntryStatus.Enumerated
-                    }
-                };
-
-                var files = new Dictionary<long, FileRecord>
-                {
-                    [10] = new FileRecord
-                    {
-                        FileId = 10,
-                        DirId = 1,
-                        Name = "file.txt",
-                        Size = 1,
-                        Created = now,
-                        Modified = now,
-                        Status = ScanEntryStatus.Enumerated,
-                        Hash = HashKey.NotComputed
-                    }
-                };
-
-                var snapshot = new RepoView(dirs, files);
-
-                var bootstrap = new BootstrapEvent
-                {
-                    Generation = 1,
-                    NextLogSequence = 5,
-                    Snapshot = snapshot
-                };
-
-                plugin.Post(bootstrap);
-                await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-                var originalChildDirs = plugin.GetChildDirIds(1).ToArray();
-                var originalChildFiles = plugin.GetChildFileIds(1).ToArray();
-
-                // TreeIndexPlugin currently only handles BootstrapEvent and CompactedEvent.
-                // DeltaCommittedEvent should be ignored by the plugin.
-                var delta = new RepoDelta
-                {
-                    ScanSequence = 1,
-                    Files = [],
-                    Dirs = [],
-                };
-
-                var deltaEvent = new DeltaCommittedEvent
-                {
-                    Generation = 1,
-                    NextLogSequence = 6,
-                    ScanSequence = 1,
-                    Delta = delta
-                };
-
-                plugin.Post(deltaEvent);
-                await Task.Delay(20, TestContext.Current.CancellationToken);
-
-                Assert.Equal(originalChildDirs, plugin.GetChildDirIds(1).ToArray());
-                Assert.Equal(originalChildFiles, plugin.GetChildFileIds(1).ToArray());
-            }
-            finally
+                    DirId = 1,
+                    ParentDirId = null,
+                    Name = "root",
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated
+                }
+            };
+    
+            var files = new FileRecord[]
             {
-                Directory.Delete(tempDir, recursive: true);
-            }
+                new()
+                {
+                    FileId = 10,
+                    DirId = 1,
+                    Name = "file.txt",
+                    Size = 1,
+                    Created = now,
+                    Modified = now,
+                    Status = ScanEntryStatus.Enumerated,
+                    Hash = HashKey.NotComputed
+                }
+            };
+    
+            var snapshot = RepoUtil.MakeSnapshot(1, dirs, files);
+    
+            var bootstrap = new BootstrapEvent
+            {
+                Generation = 1,
+                NextLogSequence = 5,
+                RepoSnapshotView = snapshot
+            };
+    
+            plugin.Post(bootstrap);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+    
+            var root =  new DirHandle(1, 0);
+            
+            var originalChildDirs = plugin.GetChildDirIds(root).ToArray();
+            var originalChildFiles = plugin.GetChildFileIds(root).ToArray();
+    
+            // TreeIndexPlugin currently only handles BootstrapEvent and CompactedEvent.
+            // DeltaCommittedEvent should be ignored by the plugin.
+            var delta = new RepoDelta
+            {
+                ScanSequence = 1,
+                Files = [],
+                Dirs = []
+            };
+    
+            var deltaEvent = new DeltaCommittedEvent
+            {
+                Generation = 1,
+                NextLogSequence = 6,
+                ScanSequence = 1,
+                Delta = delta
+            };
+    
+            plugin.Post(deltaEvent);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+            
+            Assert.Equal(originalChildDirs, plugin.GetChildDirIds(root).ToArray());
+            Assert.Equal(originalChildFiles, plugin.GetChildFileIds(root).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
         }
     }
 }

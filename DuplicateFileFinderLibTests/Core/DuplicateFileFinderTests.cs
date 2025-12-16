@@ -60,6 +60,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
             Repo = repo;
             HashIndex = new HashIndexPlugin(_repoDir.Root);
             TreeIndex = new TreeIndexPlugin(_repoDir.Root);
+            FileDirIndex = new FileDirIndex(_repoDir.Root);
         }
 
         public ValueTask DisposeAsync()
@@ -70,6 +71,7 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
         public IRepo Repo { get; }
         public IHashIndexReadModel HashIndex { get; }
         public ITreeIndexReadModel TreeIndex { get; }
+        public IFileDirReadModel FileDirIndex { get; }
     }
 
     private sealed class FakeRepoView : IRepoView
@@ -100,6 +102,16 @@ public sealed class DuplicateFileFinderRepoTests : IDisposable
 
         public IReadOnlyList<ScanRun> ScanRunsView { get; } = [];
         public IReadOnlyList<ScanRoot> ScanRootsView { get; } = [];
+
+        public ScanRootSnapshotView? TryGetScanRootView(long scanRootId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public RepoSnapshotView GetRepoSnapshotView()
+        {
+            throw new NotImplementedException();
+        }
 
         public IScanSession BeginScan(string rootPath, ScanOperation scanOperation = ScanOperation.FullScan, VolumeInfo? volumeInfo = null,
             int maxFilesBeforeFlush = 10000, int maxDirsBeforeFlush = 1000)

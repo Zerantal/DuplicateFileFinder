@@ -1,7 +1,8 @@
+using System.Collections.Immutable;
 using DuplicateFileFinderLib.Repository.Core;
-using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using MemoryPack;
 using HashIndexState = DuplicateFileFinderLib.Repository.Plugins.Models.HashIndexState;
 
@@ -9,20 +10,24 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 {
-    private readonly Lock _lock = new();
+    // Published (read-only) index snapshot
+    private volatile ImmutableDictionary<HashKey, HashGroup> _groupsByHash
+        = ImmutableDictionary<HashKey, HashGroup>.Empty;
 
-    // HashKey => (size, fileIds)
-    private readonly Dictionary<HashKey, (long size, List<long> list)> _hashToFileRecords = new();
+    // Published stats snapshot
+    private volatile StatsSnapshot _stats = new(0, 0);
+    public int TotalDuplicateFileCount => _stats.DuplicateFileCount;
+    public long TotalSpaceTakenByDuplicates => _stats.SpaceTakenByDuplicates;
 
+    // Persisted position (only mutated on bootstrap/compaction thread)
     private long _lastIndexedGeneration;
     private long _lastIndexedLogSequence;
     
-    private int _totalDuplicateFileCount;
-    private long _totalSpaceTakenByDuplicates;
-
     private readonly string _dataDirectory;
-
     private const string StateFileName = "hash-index.bin";
+
+    private readonly record struct HashGroup(long Size, ImmutableArray<FileHandle> Files);
+    private sealed record StatsSnapshot(int DuplicateFileCount, long SpaceTakenByDuplicates);
 
     public HashIndexPlugin(string dataDirectory)
         : base(4096)
@@ -40,117 +45,119 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
-        // Try to load persisted index that matches this generation/log sequence.
-        if (!TryLoadState(evt.Generation, evt.NextLogSequence - 1))
+        var expectedLastLogSequence = evt.NextLogSequence - 1;
+
+        if (!TryLoadState(evt.Generation, expectedLastLogSequence))
         {
             // Fallback: rebuild from snapshot and persist.
-            RebuildFromSnapshot(evt.Snapshot);
-            lock (_lock)
-            {
-                _lastIndexedGeneration = evt.Generation;
-                _lastIndexedLogSequence = evt.NextLogSequence - 1;
-            }
-
+            RebuildFromSnapshot(evt.RepoSnapshotView);
+            _lastIndexedGeneration = evt.Generation;
+            _lastIndexedLogSequence = expectedLastLogSequence;
             SaveState();
         }
         else
         {
             // Loaded state is already consistent with generation/log seq.
-            lock (_lock)
-            {
-                _lastIndexedGeneration = evt.Generation;
-                _lastIndexedLogSequence = evt.NextLogSequence - 1;
-            }
+            _lastIndexedGeneration = evt.Generation;
+            _lastIndexedLogSequence = expectedLastLogSequence;
         }
     }
 
     protected override void OnCompactedEvent(CompactedEvent evt)
     {
-        // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
-        RebuildFromSnapshot(evt.Snapshot);
-        lock (_lock)
-        {
-            _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = evt.NextLogSequence - 1;
-        }
+        var expectedLastLogSequence = evt.NextLogSequence - 1;
 
+        // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
+        RebuildFromSnapshot(evt.RepoSnapshotView);
+        _lastIndexedGeneration = evt.Generation;
+        _lastIndexedLogSequence = expectedLastLogSequence;
         SaveState();
     }
 
     // ---------------------------------------------------------------------
-    // Core index maintenance
+    // Core index maintenance (build -> freeze -> publish)
     // ---------------------------------------------------------------------
 
-    private void RebuildFromSnapshot(IRepoView snapshot)
+    private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        var newIndex = new Dictionary<HashKey, (long size, List<long> list)>();
+        var snapshotDict = repoSnapshot.Snapshots;
+        // Build mutable groups first
+        var tmp = new Dictionary<HashKey, (long size, List<FileHandle> list)>(capacity: 1024);
 
-        var totalDupCount = 0;
-        long totalSpaceDup = 0;
-
-        foreach (var file in snapshot.Files.Values)
+        foreach (var snapshot in snapshotDict.Values)
         {
-            if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
-                continue;
-
-            if (!newIndex.TryGetValue(file.Hash, out var group))
+            for (int i = 0; i < snapshot.Files.Count; i++)
             {
-                group = (file.Size, new List<long>());
-                newIndex[file.Hash] = group;
+                var file = snapshot.Files[i];
+                
+                if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
+                    continue;
+
+                if (!tmp.TryGetValue(file.Hash, out var group))
+                {
+                    group = (file.Size, new List<FileHandle>());
+                    tmp[file.Hash] = group;
+                }
+
+                group.list.Add(new FileHandle(snapshot.ScanRootId, i));
             }
 
-            group.list.Add(file.FileId);
-        }
+            // Freeze into immutable dictionary once, and compute stats once
+            var builder = ImmutableDictionary.CreateBuilder<HashKey, HashGroup>();
 
-        // Compute duplicate stats from the new index.
-        foreach (var group in newIndex.Values)
-        {
-            if (group.list.Count <= 1)
-                continue;
+            int totalDupCount = 0;
+            long totalSpaceDup = 0;
+            
+            // Compute duplicate stats from the new index.
+            foreach (var (hash, group) in tmp)
+            {
+                var files = group.list.Count == 0
+                    ? ImmutableArray<FileHandle>.Empty
+                    : [..group.list];
 
-            var dupCount = group.list.Count - 1;
-            totalDupCount += dupCount;
-            totalSpaceDup += dupCount * group.size;
-        }
+                builder[hash] = new HashGroup(group.size, files);
+                if (files.Length > 1)
+                {
+                    var dupCount = files.Length - 1;
+                    totalDupCount += dupCount;
+                    totalSpaceDup += dupCount * group.size;
+                }
+            }
 
-        lock (_lock)
-        {
-            _hashToFileRecords.Clear();
-            foreach (var (hash, ids) in newIndex)
-                _hashToFileRecords[hash] = ids;
-
-            _totalDuplicateFileCount = totalDupCount;
-            _totalSpaceTakenByDuplicates = totalSpaceDup;
+            // Publish snapshots (single volatile writes)
+            _groupsByHash = builder.ToImmutable();
+            _stats = new StatsSnapshot(totalDupCount, totalSpaceDup);
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Persistence
-    // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------
 
-    private string GetStateFilePath()
-    {
-        return Path.Combine(_dataDirectory, StateFileName);
-    }
+    private string GetStateFilePath() => Path.Combine(_dataDirectory, StateFileName);
 
     private void SaveState()
     {
-        HashIndexState state;
+        // Capture published snapshots locally so they’re consistent for this write
+        var groups = _groupsByHash;
+        var totalDupCount = TotalDuplicateFileCount;
+        var totalSpaceDup = TotalSpaceTakenByDuplicates;
 
-        lock (_lock)
+        var state = new HashIndexState
         {
-            var indexCopy = new Dictionary<HashKey, (long size, List<long> list)>(_hashToFileRecords.Count);
-            foreach (var (hash, group) in _hashToFileRecords)
-                // Copy the list so callers can’t mutate persisted state via references.
-                indexCopy[hash] = (group.size, [..group.list]);
+            LastIndexedGeneration = _lastIndexedGeneration,
+            LastIndexedLogSequence = _lastIndexedLogSequence,
+            TotalDuplicateFileCount = totalDupCount,
+            TotalSpaceTakenByDuplicates = totalSpaceDup,
+            Index = new Dictionary<HashKey, HashGroupState>(groups.Count)
+        };
 
-            state = new HashIndexState
+        foreach (var (hash, group) in groups)
+        {
+            state.Index[hash] = new HashGroupState
             {
-                LastIndexedGeneration = _lastIndexedGeneration,
-                LastIndexedLogSequence = _lastIndexedLogSequence,
-                Index = indexCopy,
-                TotalDuplicateFileCount = _totalDuplicateFileCount,
-                TotalSpaceTakenByDuplicates = _totalSpaceTakenByDuplicates
+                Size = group.Size,
+                Files = group.Files.IsDefaultOrEmpty ? [] : group.Files.ToArray()
             };
         }
 
@@ -159,8 +166,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        var bytes = MemoryPackSerializer.Serialize(state);
-        File.WriteAllBytes(path, bytes);
+        File.WriteAllBytes(path, MemoryPackSerializer.Serialize(state));
     }
 
     private bool TryLoadState(long expectedGeneration, long expectedLastLogSequence)
@@ -171,8 +177,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         try
         {
-            var bytes = File.ReadAllBytes(path);
-            var state = MemoryPackSerializer.Deserialize<HashIndexState>(bytes);
+            var state = MemoryPackSerializer.Deserialize<HashIndexState>(File.ReadAllBytes(path));
             if (state is null)
                 return false;
 
@@ -181,19 +186,23 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 state.LastIndexedLogSequence != expectedLastLogSequence)
                 return false;
 
-            lock (_lock)
+            // Rehydrate into immutable snapshot + publish
+            var builder = ImmutableDictionary.CreateBuilder<HashKey, HashGroup>();
+
+            foreach (var (hash, g) in state.Index)
             {
-                _hashToFileRecords.Clear();
-                foreach (var (hash, group) in state.Index)
-                    // lists can be taken as-is; they’re private to this plugin
-                    _hashToFileRecords[hash] = (group.size, group.list);
+                var files = g.Files is { Length: > 0 }
+                    ? [..g.Files]
+                    : ImmutableArray<FileHandle>.Empty;
 
-                _totalDuplicateFileCount = state.TotalDuplicateFileCount;
-                _totalSpaceTakenByDuplicates = state.TotalSpaceTakenByDuplicates;
-
-                _lastIndexedGeneration = state.LastIndexedGeneration;
-                _lastIndexedLogSequence = state.LastIndexedLogSequence;
+                builder[hash] = new HashGroup(g.Size, files);
             }
+
+            _groupsByHash = builder.ToImmutable();
+            _stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
+
+            _lastIndexedGeneration = state.LastIndexedGeneration;
+            _lastIndexedLogSequence = state.LastIndexedLogSequence;
 
             return true;
         }
@@ -204,45 +213,28 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Public query surface
-    // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+    // Public query surface (lock-free)
+// ---------------------------------------------------------------------
 
-    public IReadOnlyList<(long size, IReadOnlyList<long> list)> GetDuplicateGroups(
+    public IReadOnlyList<(long size, IReadOnlyList<FileHandle> list)> GetDuplicateGroups(
         int minDuplicates = 2,
         long minSize = 1)
     {
         if (minDuplicates < 2) throw new ArgumentOutOfRangeException(nameof(minDuplicates));
         if (minSize < 1) throw new ArgumentOutOfRangeException(nameof(minSize));
 
-        lock (_lock)
-        {
-            return _hashToFileRecords.Values
-                .Where(group => group.list.Count >= minDuplicates && group.size > minSize)
-                .Select(group => ((long size, IReadOnlyList<long>))(group.size, group.list.ToArray()))
-                .ToArray();
-        }
-    }
+        var groups = _groupsByHash;
 
-    public int TotalDuplicateFileCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _totalDuplicateFileCount;
-            }
-        }
-    }
+        // Materialize only the result list; do not clone per-group lists.
+        var result = new List<(long size, IReadOnlyList<FileHandle> list)>();
 
-    public long TotalSpaceTakenByDuplicates
-    {
-        get
+        foreach (var g in groups.Values)
         {
-            lock (_lock)
-            {
-                return _totalSpaceTakenByDuplicates;
-            }
+            if (g.Files.Length >= minDuplicates && g.Size >= minSize)
+                result.Add((g.Size, g.Files));
         }
+
+        return result;
     }
 }

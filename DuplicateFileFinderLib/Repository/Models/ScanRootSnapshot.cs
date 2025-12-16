@@ -5,7 +5,7 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Models;
 
 [MemoryPackable]
-public partial record ScanRootSnapshot
+internal partial record ScanRootSnapshot
 {
     [MemoryPackOrder(0)] public required long ScanRootId { get; init; }
     

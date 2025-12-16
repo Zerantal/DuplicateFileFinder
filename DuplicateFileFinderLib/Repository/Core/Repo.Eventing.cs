@@ -14,20 +14,20 @@ public sealed partial class Repo
             _eventSinks.Add(sink);
         }
     }
-
+    
     public void RegisterEventSinkWithBootstrap(IRepoEventSink sink)
     {
         BootstrapEvent bootstrap;
 
         lock (_sync)
         {
-            var snapshot = GetRepoView_NoLock();
+            var snapshots = GetRepoSnapshotView();
 
             bootstrap = new BootstrapEvent
             {
                 Generation = Meta.Generation,
                 NextLogSequence = Meta.NextLogSequence,
-                Snapshot = snapshot
+                RepoSnapshotView = snapshots
             };
 
             _eventSinks.Add(sink);

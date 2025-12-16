@@ -8,8 +8,8 @@ namespace DuplicateFileFinderLib.Repository.Models;
 [MemoryPackable]
 public readonly partial struct HashKey : IEquatable<HashKey>
 {
-    [MemoryPackOrder(0)] public readonly ulong A; // first 8 bytes
-    [MemoryPackOrder(1)] public readonly ulong B; // next 8 bytes
+    [MemoryPackOrder(0)] public ulong A { get; init; } // first 8 bytes
+    [MemoryPackOrder(1)] public ulong B { get; init; } // next 8 bytes
 
     /// <summary>
     /// Sentinel: hash has not been computed yet. This is also the default(HashKey) value.

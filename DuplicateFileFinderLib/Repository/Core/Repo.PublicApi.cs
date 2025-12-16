@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Interfaces;
@@ -67,6 +68,7 @@ public sealed partial class Repo
         DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
+    [Obsolete("Use TryGetScanRootView instead")]
     public IRepoView GetRepoView()
     {
         lock (_sync)
@@ -75,6 +77,7 @@ public sealed partial class Repo
         }
     }
 
+    [Obsolete("Use TryGetScanRootView instead")]
     private IRepoView GetRepoView_NoLock()
     {
         var filesCopy = new Dictionary<long, FileRecord>(_files);
@@ -82,8 +85,51 @@ public sealed partial class Repo
 
         return new RepoView(dirsCopy, filesCopy);
     }
+    
+    
+    public ScanRootSnapshotView? TryGetScanRootView(long scanRootId)
+    {
+        if (_scanRootSnapshots.TryGetValue(scanRootId, out var rootSnapshot))
+        {
+            var scanRootView = new ScanRootSnapshotView
+            {
+                ScanRootId = rootSnapshot.ScanRootId,
+                StringPool = rootSnapshot.StringPool,
+                Dirs = rootSnapshot.Dirs,
+                Files = rootSnapshot.Files
+            };
+            
+            return scanRootView;
+        }
+
+        return null;
+    }
+    
+    public RepoSnapshotView GetRepoSnapshotView()
+    {
+        // Copy references so the returned view is stable even if the repo changes later.
+        var snapshots = new Dictionary<long, ScanRootSnapshotView>(_scanRootSnapshots.Count);
+        foreach (var (id, snap) in _scanRootSnapshots)
+        {
+            snapshots[id] = new ScanRootSnapshotView
+            {
+                ScanRootId = snap.ScanRootId,
+                StringPool = snap.StringPool,
+                Dirs = snap.Dirs,
+                Files = snap.Files  
+            };
+        }
+
+        return new RepoSnapshotView
+        {
+            Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(snapshots),
+            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(_scanRoots)
+        };
+    }
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
+
+
 
     public IScanSession BeginScan(
         string rootPath,
@@ -404,20 +450,20 @@ public sealed partial class Repo
     {
         long generation;
         long nextLogSeq;
-        IRepoView snapshot;
+        RepoSnapshotView snapshots;
         
         lock (_sync)
         {
             generation = Meta.Generation;
             nextLogSeq = Meta.NextLogSequence;
-            snapshot = GetRepoView_NoLock();
+            snapshots = GetRepoSnapshotView();
         }
 
         var evt = new CompactedEvent
         {
             Generation      = generation,
             NextLogSequence = nextLogSeq,
-            Snapshot        = snapshot
+            RepoSnapshotView       = snapshots
         };
 
         PublishEvent(evt);

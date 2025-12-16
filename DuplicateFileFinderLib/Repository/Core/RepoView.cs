@@ -8,7 +8,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 /// Backed by copies of the repo's internal dictionaries, so it is stable
 /// even if the repo continues to mutate after creation.
 /// </summary>
-internal sealed class RepoView(
+public sealed class RepoView(
     IReadOnlyDictionary<long, DirRecord> dirs,
     IReadOnlyDictionary<long, FileRecord> files)
     : IRepoView

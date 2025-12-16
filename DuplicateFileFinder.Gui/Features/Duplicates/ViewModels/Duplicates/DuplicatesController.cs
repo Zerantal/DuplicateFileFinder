@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -11,6 +12,7 @@ public partial class DuplicatesController : ObservableObject
 {
     private readonly IRepo _repo;
     private readonly IHashIndexReadModel _hashIndex;
+    private readonly IFileDirReadModel _mainIndex;
 
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
@@ -23,9 +25,10 @@ public partial class DuplicatesController : ObservableObject
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
 
-    public DuplicatesController(IRepo repo, IHashIndexReadModel hashIndex)
+    public DuplicatesController(IRepoHost repoHost, IHashIndexReadModel hashIndex)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        _repo = repoHost.Repo ?? throw new ArgumentNullException(nameof(repoHost));
+        _mainIndex = repoHost.FileDirIndex;
         _hashIndex = hashIndex ?? throw new ArgumentNullException(nameof(hashIndex));
     }
 
@@ -65,25 +68,35 @@ public partial class DuplicatesController : ObservableObject
 
     public IReadOnlyList<FileItem> SelectedItems => _selectedSet?.Items ?? [];
 
-    public void Rebuild(IRepoView snapshot, int minDuplicates = 2, long minSizeBytes = 10 * 1024 * 1024)
+    public void Rebuild(RepoSnapshotView snapshot, int minDuplicates = 2, long minSizeBytes = 10 * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         _allSets.Clear();
         FilteredSets.Clear();
 
-        FilesScanned = snapshot.Files.Count;
+        FilesScanned = _mainIndex.FileCount;
 
         // HashIndex provides groups; we map ids -> FileRecord and build DuplicateSetRow
         var groups = _hashIndex.GetDuplicateGroups(minDuplicates, minSizeBytes);
 
         foreach (var group in groups)
         {
-            // group.list is assumed to be file ids
-            List<FileRecord> fileRecords;
+            // group.list is assumed to be file id
+            List<(FileRecordV2 FileRecord, string Name, Func<string> pathResolver)> fileRecords;
             try
             {
-                fileRecords = group.list.Select(id => snapshot.Files[id]).ToList();
+                fileRecords = group.list.Select(handle =>
+                {
+                    var rec = snapshot.GetFile(handle);
+                    var name = snapshot.DecodeFileName(handle);
+                    var pathResolver = () =>
+                    {
+                        var dirPath = _repo.GetDirPath(rec.DirId);
+                        return Path.Combine(dirPath, name);
+                    };
+                    return (rec, name, pathResolver);
+                }).ToList();
             }
             catch
             {
@@ -94,10 +107,10 @@ public partial class DuplicatesController : ObservableObject
             if (fileRecords.Count == 0)
                 continue;
 
-            var hash = fileRecords[0].Hash;
+            var hash = fileRecords[0].FileRecord.Hash;
 
             // If duplicates come back in multiple groups for any reason, last wins.
-            _allSets[hash] = BuildRow(hash, fileRecords);
+            _allSets[hash] = new DuplicateSetRow(fileRecords);
         }
 
         DuplicatesFound = _hashIndex.TotalDuplicateFileCount;
@@ -128,16 +141,5 @@ public partial class DuplicatesController : ObservableObject
             .ToList();
 
         FilteredSets.AddRange(sorted, clearCollection: true);
-    }
-
-    private DuplicateSetRow BuildRow(HashKey hash, IReadOnlyList<FileRecord> files)
-    {
-        string PathResolver(FileRecord f)
-        {
-            var dirPath = _repo.GetDirPath(f.DirId);
-            return Path.Combine(dirPath, f.Name);
-        }
-
-        return new DuplicateSetRow(hash, files, PathResolver);
     }
 }

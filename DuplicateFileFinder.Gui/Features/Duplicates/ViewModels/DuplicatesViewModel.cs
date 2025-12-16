@@ -11,6 +11,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
 
@@ -31,8 +32,8 @@ public partial class DuplicatesViewModel : ObservableObject
         _repo = host.Repo;
         var hashIndexService = host.HashIndex;
 
-        _folderTreeBuilder = new FolderTreeBuilder(_repo, scanner);
-        _treeMap = new TreeMapController(_repo, host.TreeIndex)
+        _folderTreeBuilder = new FolderTreeBuilder(host, scanner);
+        _treeMap = new TreeMapController(host)
         {
             Options = new TreeMapBuildOptions {MaxDepth = 8}
         };
@@ -44,7 +45,7 @@ public partial class DuplicatesViewModel : ObservableObject
                 OnPropertyChanged(nameof(DirectoryTreeMapRoot));
         };
 
-        _duplicates = new DuplicatesController(_repo, hashIndexService);
+        _duplicates = new DuplicatesController(host, hashIndexService);
         _duplicates.PropertyChanged += (_, e) =>
         {
             // bubble up for existing bindings (if your view binds directly to VM props)
@@ -123,12 +124,13 @@ public partial class DuplicatesViewModel : ObservableObject
     {
         using (TimingLog.StartPhase("LoadFromRepo()"))
         {
-            var snap = _repo.GetRepoView();
-            InitializeFromSnapshot(snap);
+            RepoSnapshotView repoSnapshot = _repo.GetRepoSnapshotView();
+            
+            InitializeFromSnapshot(repoSnapshot);
         }
     }
-
-    private void InitializeFromSnapshot(IRepoView snapshot)
+    
+    private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
         FolderRoots.Clear();
         FilteredSets.Clear();
@@ -157,10 +159,6 @@ public partial class DuplicatesViewModel : ObservableObject
         await Task.Run(() => _repo.CompactAsync());
 
         // After compaction, reload from the repo to reflect any changes
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            var snap = _repo.GetRepoView();
-            InitializeFromSnapshot(snap);
-        });
+        await Dispatcher.UIThread.InvokeAsync(LoadFromRepo);
     }
 }

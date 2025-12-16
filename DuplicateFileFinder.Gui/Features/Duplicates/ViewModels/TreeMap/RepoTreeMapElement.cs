@@ -4,11 +4,24 @@ using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
-public abstract class RepoTreeMapElement : ITreeMapNodeElement
+public abstract class RepoTreeMapElement(Func<string> nameResolver) : ITreeMapNodeElement
 {
+    private Func<string> NameResolver { get; } = nameResolver;
+
     // Common data for dir/file
     public required Func<string> RelativePathFactory { get; init; }
-    public required string Name { get; init; }
+
+    public string Name
+    {
+        get
+        {
+            field ??= SafeInvoke(NameResolver);
+
+            return field;
+        }
+        
+    } = null;
+
     public required string Label { get; init; }
 
     public Func<Control> ToolTipFactory => () => new ContentControl

@@ -10,11 +10,10 @@ public sealed class SyntheticTreeMapElement : RepoTreeMapElement
         string label,
         double value,
         string typeLabel,
-        IReadOnlyList<(string Key, string Value)> lines)
+        IReadOnlyList<(string Key, string Value)> lines) : base(() => label)
     {
         ScanRoot = null;
-
-        Name = label;
+        
         Label = label;
         Value = value;
 

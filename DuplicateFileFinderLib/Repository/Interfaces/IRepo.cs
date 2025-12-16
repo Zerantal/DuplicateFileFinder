@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
@@ -15,6 +16,8 @@ public interface IRepo : IDisposable, IAsyncDisposable
     IRepoView GetRepoView();
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
+    ScanRootSnapshotView? TryGetScanRootView(long scanRootId);
+    public RepoSnapshotView GetRepoSnapshotView();
 
     public IScanSession BeginScan(
         string rootPath,

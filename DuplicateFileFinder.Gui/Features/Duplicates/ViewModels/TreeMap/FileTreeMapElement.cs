@@ -7,14 +7,14 @@ public sealed class FileTreeMapElement : RepoTreeMapElement
 {
     [SetsRequiredMembers]
     public FileTreeMapElement(
-        FileRecord file,
+        FileRecordV2 file,
         ScanRoot scanRoot,
-        Func<string> relPathFactory)
+        Func<string> relPathFactory,
+        Func<string> nameResolver) : base(nameResolver)
     {
         ScanRoot = scanRoot;
-
-        Name = file.Name;
-        Label = file.Name;
+        
+        Label = file.FileId.ToString();
         Value = file.Size;
         
         RelativePathFactory = relPathFactory;

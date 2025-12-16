@@ -232,13 +232,16 @@ public sealed partial class Repo
 
             var snap = await RepoStore.LoadScanRootSnapshotAsync(_repoPath, root.RootId, ct)
                 .ConfigureAwait(false);
-            if (snap is null) continue;
-
-            foreach (var d in snap.Dirs)
+            
+            if (snap.oldSnapshot is null) continue;
+            foreach (var d in snap.oldSnapshot.Dirs)
                 _dirs[d.DirId] = d;
 
-            foreach (var f in snap.Files)
+            foreach (var f in snap.oldSnapshot.Files)
                 _files[f.FileId] = f;
+
+            if (snap.newSnapshot is null) continue;
+            _scanRootSnapshots[root.RootId] = snap.newSnapshot.Value;
         }
 
         ReplayDeltas();
