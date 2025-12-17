@@ -231,7 +231,7 @@ internal class FullScanOperation(
             TimingLog.Counter("files");
         }
          
-        Dff.PurgeOldDirs(session, _treeIndex, expectedDirs.Values.Select(t => t.Record.DirId));
+        Dff.PurgeOldDirs(session, _treeIndex, _fileDirIndex, repoView, expectedDirs.Values.Select(t => t.Record.DirId));
         Dff.PurgeOldFiles(session, expectedFiles.Values.Select(t => t.Record.FileId));
 
         return Task.CompletedTask;
