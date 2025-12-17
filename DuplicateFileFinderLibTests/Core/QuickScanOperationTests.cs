@@ -119,19 +119,19 @@ public class QuickScanOperationTests
         var volProvider  = Substitute.For<IVolumeInfoProvider>();
         var session      = Substitute.For<IScanSession>();
         var repoView     = Substitute.For<IRepoView>();
-
+    
         host.Repo.Returns(repo);
         host.TreeIndex.Returns(treeIndex);
-
+    
         var tempDir = Directory.CreateDirectory(
             Path.Combine(Path.GetTempPath(), "dff_quickscan_cancel_" + Guid.NewGuid()));
-
+    
         var vinfo = (VolumeInfo?)null;
         volProvider.GetVolumeInfoForPath(tempDir.FullName).Returns(vinfo);
-
+    
         repo.BeginScan(tempDir.FullName, ScanOperation.QuickScan, vinfo).Returns(session);
         repo.GetRepoView().Returns(repoView);
-
+    
         session.RootDir.Returns(new DirRecord
         {
             DirId       = 1,
@@ -141,11 +141,11 @@ public class QuickScanOperationTests
             Modified    = DateTime.UtcNow,
             Status      = ScanEntryStatus.Enumerated
         });
-
+    
         // No children in tree index
-        treeIndex.GetChildDirIds(Arg.Any<long>()).Returns([]);
-        treeIndex.GetChildFileIds(Arg.Any<long>()).Returns([]);
-
+        treeIndex.GetChildDirs(Arg.Any<DirHandle>()).Returns([]);
+        treeIndex.GetChildFiles(Arg.Any<DirHandle>()).Returns([]);
+    
         // Fs enumerator throws OCE when enumerated
         fs.EnumerateChildren(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
@@ -154,21 +154,21 @@ public class QuickScanOperationTests
                 ct.ThrowIfCancellationRequested();
                 return [];
             });
-
+    
         var cts = new CancellationTokenSource();
         await cts.CancelAsync();
-
+    
         var op = new QuickScanOperation(host, fs, pipeline, volProvider);
-
+    
         // Act
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             op.ExecuteAsync(tempDir.FullName, progress: null, cts.Token));
-
+    
         // Assert
         await session.Received(1)
             .FailAsync("Scan cancelled.", true, cts.Token);
         await session.Received(1).DisposeAsync();
-
+    
         tempDir.Delete(recursive: true);
     }
 }

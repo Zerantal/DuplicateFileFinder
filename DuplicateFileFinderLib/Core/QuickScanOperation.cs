@@ -1,6 +1,7 @@
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -18,6 +19,7 @@ internal class QuickScanOperation(
 {
     private readonly IRepo _repo = host.Repo;
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex;
+    private readonly IFileDirReadModel _fileDirIndex = host.FileDirIndex;
     private int _hashDegreeOfParallelism;
 
     public async Task ExecuteAsync(
@@ -98,7 +100,7 @@ internal class QuickScanOperation(
         IScanSession session,
         CancellationToken token)
     {
-        var repoView    = _repo.GetRepoView();
+        var repoView    = _repo.GetRepoSnapshotView();
         var filesToHash = new List<HashingRunner.FileToHash>();
 
         var dirsToVisit = new Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)>();
@@ -133,9 +135,7 @@ internal class QuickScanOperation(
             token.ThrowIfCancellationRequested();
 
             var (dirEntry, parentDirId, existingDirId) = dirsToVisit.Pop();
-
-            var existingDir = existingDirId != 0 ? repoView.TryGetDir(existingDirId) : null;
-
+            
             var dirRecord = new DirRecord
             {
                 DirId       = existingDirId,
@@ -157,11 +157,15 @@ internal class QuickScanOperation(
                 processed: dirsVisited);
 
             // Only descend into this directory if the directory's metadata has changed or it is new.
-            var unchangedDir =
-                skipUnchangedDirectories &&
-                existingDir is not null &&
-                existingDir.Modified == dirEntry.ModifiedTimeUtc &&
-                existingDir.Status   != ScanEntryStatus.Deleted;
+            bool unchangedDir = false;
+            if (_fileDirIndex.TryGetDir(existingDirId, out var existingDirHandle))
+            {
+                var existingDir = repoView.GetDirRecord(existingDirHandle);
+                unchangedDir =
+                    skipUnchangedDirectories &&
+                    existingDir.ModifiedTicks == dirEntry.ModifiedTimeUtc.Ticks &&
+                    existingDir.Status != ScanEntryStatus.Deleted;
+            }
 
             if (!unchangedDir)
             {
@@ -194,67 +198,59 @@ internal class QuickScanOperation(
         IScanSession session,
         List<HashingRunner.FileToHash> filesToHash,
         Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)> dirsToVisit,
-        IRepoView repoView,
+        RepoSnapshotView repoView,
         CancellationToken token = default)
     {
         var normDir = PathUtils.NormalizePath(location);
-
+        
         TimingLog.Counter("folders");
-
-        var childDirIds  = _treeIndex.GetChildDirIds(parentDirId);
-        var childFileIds = _treeIndex.GetChildFileIds(parentDirId);
-
-        var expectedDirs = new Dictionary<string, long>(PathUtils.PathComparer);
-        foreach (var dirId in childDirIds)
-        {
-            var dir = repoView.TryGetDir(dirId);
-            if (dir is not null)
-                expectedDirs[dir.Name] = dir.DirId;
-        }
-
-        var expectedFiles = new Dictionary<string, long>(PathUtils.PathComparer);
-        foreach (var fileId in childFileIds)
-        {
-            var file = repoView.TryGetFile(fileId);
-            if (file is not null)
-                expectedFiles[file.Name] = file.FileId;
-        }
-
+        _fileDirIndex.TryGetDir(parentDirId, out var parentDir);
+        
+        var expectedDirs  = _treeIndex.GetChildDirs(parentDir)
+            .Select(h => (Handle: h, Record: repoView.GetDirRecord(h)))
+            .ToDictionary(tuple => repoView.DecodeDirName(tuple.Handle), PathUtils.PathComparer);
+        var expectedFiles = _treeIndex.GetChildFiles(parentDir)
+            .Select(h => (Handle: h, Record: repoView.GetFileRecord(h)))
+            .ToDictionary(tuple => repoView.DecodeFileName(tuple.Handle), PathUtils.PathComparer);
+        
         foreach (var e in fs.EnumerateChildren(normDir, token))
         {
             if (e.IsDirectory)
             {
                 long existingDirId = 0;
-                if (expectedDirs.TryGetValue(e.Name, out var dirId))
+                if (expectedDirs.TryGetValue(e.Name, out var dir))
                 {
-                    existingDirId = dirId;
+                    existingDirId = dir.Record.DirId;
                     expectedDirs.Remove(e.Name);
                 }
-
+        
                 // Defer whether to recurse; EnumerateQuickAsync will decide based on metadata comparison.
                 dirsToVisit.Push((e, parentDirId, existingDirId));
                 continue;
             }
-
+        
             var fullPath = PathUtils.NormalizePath(e.FullPath);
-
+        
             long existingFileId = 0;
-            if (expectedFiles.TryGetValue(e.Name, out var fileId))
+            bool unchangedFile = false;
+            FileRecordV2? existingFile = null;
+            if (expectedFiles.TryGetValue(e.Name, out var file))
             {
-                existingFileId = fileId;
+                existingFileId = file.Record.FileId;
                 expectedFiles.Remove(e.Name);
+                
+                existingFile = existingFileId != 0 ? repoView.GetFileRecord(file.Handle) : null;
+            
+                unchangedFile =
+                    existingFile is not null &&
+                    existingFile.Value.Size     == e.Length &&
+                    existingFile.Value.ModifiedTicks == e.ModifiedTimeUtc.Ticks &&
+                    existingFile.Value.Hash     != HashKey.NotComputed &&
+                    existingFile.Value.Status   != ScanEntryStatus.Deleted;
             }
-
-            FileRecord? existingFile = existingFileId != 0 ? repoView.TryGetFile(existingFileId) : null;
-
-            var unchangedFile =
-                existingFile is not null &&
-                existingFile.Size     == e.Length &&
-                existingFile.Modified == e.ModifiedTimeUtc &&
-                existingFile.Hash     != HashKey.NotComputed &&
-                existingFile.Status   != ScanEntryStatus.Deleted;
-
-            var file = new FileRecord
+            
+        
+            var updatedFile = new FileRecord
             {
                 FileId   = existingFileId,
                 DirId    = parentDirId,
@@ -262,25 +258,25 @@ internal class QuickScanOperation(
                 Size     = e.Length,
                 Created  = e.CreationTimeUtc,
                 Modified = e.ModifiedTimeUtc,
-                Status   = unchangedFile ? existingFile!.Status : ScanEntryStatus.Enumerated ,
-                Hash     = unchangedFile ? existingFile!.Hash : HashKey.NotComputed
+                Status   = unchangedFile ? existingFile!.Value.Status : ScanEntryStatus.Enumerated ,
+                Hash     = unchangedFile ? existingFile!.Value.Hash : HashKey.NotComputed
             };
-
-            session.AddOrUpdateFile(ref file);
-
+        
+            session.AddOrUpdateFile(ref updatedFile);
+        
             // Only queue for hashing if the file is new, has changed, or has no previous hash.
             if (!unchangedFile && e.Length > 0)
             {
-                filesToHash.Add(new HashingRunner.FileToHash(fullPath, file));
+                filesToHash.Add(new HashingRunner.FileToHash(fullPath, updatedFile));
             }
-
+        
             TimingLog.Counter("files");
         }
-
+        
         // Note: won't purge files/dirs if dir not enumerated
-        Dff.PurgeOldDirs(session, _treeIndex, expectedDirs.Values);
-        Dff.PurgeOldFiles(session, expectedFiles.Values);
-
+        Dff.PurgeOldDirs(session, _treeIndex, _fileDirIndex, repoView, expectedDirs.Values.Select(t => t.Record.DirId).ToArray());
+        Dff.PurgeOldFiles(session, expectedFiles.Values.Select(t => t.Record.FileId).ToArray());
+        
         return Task.CompletedTask;
     }
 }
