@@ -136,8 +136,8 @@ public class FullScanOperationTests
         });
 
         // No tree index children
-        treeIndex.GetChildDirIds(Arg.Any<long>()).Returns([]);
-        treeIndex.GetChildFileIds(Arg.Any<long>()).Returns([]);
+        treeIndex.GetChildDirs(Arg.Any<DirHandle>()).Returns([]);
+        treeIndex.GetChildFiles(Arg.Any<DirHandle>()).Returns([]);
 
         // Fs enumerator throws OperationCanceledException immediately when enumeration starts
         fs.EnumerateChildren(Arg.Any<string>(), Arg.Any<CancellationToken>())

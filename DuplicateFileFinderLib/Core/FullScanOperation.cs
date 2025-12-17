@@ -1,6 +1,7 @@
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -17,6 +18,7 @@ internal class FullScanOperation(
 {
     private readonly IRepo _repo = host.Repo;
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex;
+    private readonly IFileDirReadModel _fileDirIndex = host.FileDirIndex;
     private int _hashDegreeOfParallelism;
 
     public async Task ExecuteAsync(string rootPath, IProgress<DuplicateFileFinderProgressReport>? progress, CancellationToken ct)
@@ -85,7 +87,7 @@ internal class FullScanOperation(
         IScanSession session, 
         CancellationToken token)
     {
-        var repoView = _repo.GetRepoView();
+        var repoView = _repo.GetRepoSnapshotView();
         var filesToHash   = new List<HashingRunner.FileToHash>();
          
         var dirsToVisit = new Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)>();
@@ -160,31 +162,21 @@ internal class FullScanOperation(
         IScanSession session,
         List<HashingRunner.FileToHash> filesToHash,
         Stack<(FsEntry dirEntry, long parentDirId, long existingDirId)> dirsToVisit,
-        IRepoView repoView,
+        RepoSnapshotView repoView,
         CancellationToken token = default)
     {
         var normDir = PathUtils.NormalizePath(location);
 
         TimingLog.Counter("folders");
 
-        var childDirIds  = _treeIndex.GetChildDirIds(parentDirId);
-        var childFileIds = _treeIndex.GetChildFileIds(parentDirId);
-
-        var expectedDirs = new Dictionary<string, long>(PathUtils.PathComparer);
-        foreach (var dirId in childDirIds)
-        {
-            var dir = repoView.TryGetDir(dirId);
-            if (dir is not null)
-                expectedDirs[dir.Name] = dir.DirId;
-        }
-
-        var expectedFiles = new Dictionary<string, long>(PathUtils.PathComparer);
-        foreach (var fileId in childFileIds)
-        {
-            var file = repoView.TryGetFile(fileId);
-            if (file is not null)
-                expectedFiles[file.Name] = file.FileId;
-        }
+        _fileDirIndex.TryGetDir(parentDirId, out var parentDir);
+        
+        var expectedDirs  = _treeIndex.GetChildDirs(parentDir)
+            .Select(h => (Handle: h, Record: repoView.GetDirRecord(h)))
+            .ToDictionary(tuple => repoView.DecodeDirName(tuple.Handle), PathUtils.PathComparer);
+        var expectedFiles = _treeIndex.GetChildFiles(parentDir)
+            .Select(h => (Handle: h, Record: repoView.GetFileRecord(h)))
+            .ToDictionary(tuple => repoView.DecodeFileName(tuple.Handle), PathUtils.PathComparer);
          
         foreach (var e in fs.EnumerateChildren(normDir, token))
         {
@@ -192,9 +184,9 @@ internal class FullScanOperation(
             {
                 // Try to reuse existing DirId from tree index
                 long existingDirId = 0;
-                if (expectedDirs.TryGetValue(e.Name, out var id))
+                if (expectedDirs.TryGetValue(e.Name, out var dir))
                 {
-                    existingDirId = id;
+                    existingDirId = dir.Record.DirId;
                     expectedDirs.Remove(e.Name);
                 }
 
@@ -207,14 +199,14 @@ internal class FullScanOperation(
 
             // Try to reuse existing FileId from tree index
             long existingFileId = 0;
-            if (expectedFiles.TryGetValue(e.Name, out var fileId))
+            if (expectedFiles.TryGetValue(e.Name, out var file))
             {
-                existingFileId = fileId;
+                existingFileId = file.Record.FileId;
                 expectedFiles.Remove(e.Name);
             }
 
             // Normal path: record as enumerated, hash not computed yet.
-            FileRecord file = new FileRecord
+            FileRecord updatedFile = new FileRecord
             {
                 FileId   = existingFileId,
                 DirId = parentDirId,
@@ -226,21 +218,21 @@ internal class FullScanOperation(
                 Hash = HashKey.NotComputed
             };
 
-            session.AddOrUpdateFile(ref file);
+            session.AddOrUpdateFile(ref updatedFile);
 
             // Only non-zero files are hashed
             if (e.Length > 0)
             {
                 filesToHash.Add(new HashingRunner.FileToHash(
                     fullPath,
-                    file));
+                    updatedFile));
             }
 
             TimingLog.Counter("files");
         }
          
-        Dff.PurgeOldDirs(session, _treeIndex, expectedDirs.Values);
-        Dff.PurgeOldFiles(session, expectedFiles.Values);
+        Dff.PurgeOldDirs(session, _treeIndex, expectedDirs.Values.Select(t => t.Record.DirId));
+        Dff.PurgeOldFiles(session, expectedFiles.Values.Select(t => t.Record.FileId));
 
         return Task.CompletedTask;
     }

@@ -45,7 +45,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             if (!_mainIndex.TryGetDir(scanRoot.DirId, out var rootHandle))
                 continue;
 
-            var rootRec = snapshot.GetDir(rootHandle);
+            var rootRec = snapshot.GetDirRecord(rootHandle);
             if (rootRec.Status == ScanEntryStatus.None)
                 continue;
             
@@ -65,7 +65,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called before building nodes.");
 
-        var dirRec = _snapshot.GetDir(dirHandle);
+        var dirRec = _snapshot.GetDirRecord(dirHandle);
         var dirId = dirRec.DirId;
 
         if (_folderNodes.TryGetValue(dirId, out var existing))
@@ -93,7 +93,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
     private bool HasChildDirs(DirHandle dirHandle)
     {
         // Cheap enough for now; if you want, extend TreeIndex with a HasChildren/Count API.
-        return _treeIndex.GetChildDirIds(dirHandle).Length > 0;
+        return _treeIndex.GetChildDirs(dirHandle).Length > 0;
     }
 
     private void EnsureChildrenLoaded(FolderNodeViewModel node)
@@ -109,7 +109,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         if (!_mainIndex.TryGetDir(node.DirId, out var parentHandle))
             return;
 
-        var childHandles = _treeIndex.GetChildDirIds(parentHandle);
+        var childHandles = _treeIndex.GetChildDirs(parentHandle);
         foreach (var childHandle in childHandles)
         {
             var childNode = GetOrCreateNode(childHandle, isScanRoot: false);
@@ -146,7 +146,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         var cur = leaf;
         while (true)
         {
-            var rec = _snapshot.GetDir(cur);
+            var rec = _snapshot.GetDirRecord(cur);
             parts.Add(_snapshot.DecodeDirName(cur));
 
             if (rec.ParentDirId < 0)

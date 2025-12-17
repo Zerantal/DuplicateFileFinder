@@ -150,7 +150,7 @@ public static class TreeMapBuilder
             DirRecordV2 dirRec;
             try
             {
-                dirRec = _snapshot.GetDir(dir);
+                dirRec = _snapshot.GetDirRecord(dir);
             }
             catch
             {
@@ -252,7 +252,7 @@ public static class TreeMapBuilder
         {
             var list = new List<(DirHandle, double)>();
 
-            var children = _treeIndex.GetChildDirIds(parentDir);
+            var children = _treeIndex.GetChildDirs(parentDir);
             for (int i = 0; i < children.Length; i++)
             {
                 var child = children[i];
@@ -350,7 +350,7 @@ public static class TreeMapBuilder
             long otherValue = 0;
             int otherCount = 0;
 
-            var childFiles = _treeIndex.GetChildFileIds(dir);
+            var childFiles = _treeIndex.GetChildFiles(dir);
             for (int i = 0; i < childFiles.Length; i++)
             {
                 var fh = childFiles[i];
@@ -358,7 +358,7 @@ public static class TreeMapBuilder
                 FileRecordV2 f;
                 try
                 {
-                    f = _snapshot.GetFile(fh);
+                    f = _snapshot.GetFileRecord(fh);
                 }
                 catch
                 {
@@ -398,8 +398,8 @@ public static class TreeMapBuilder
 
             kept.Sort((a, b) =>
             {
-                var fa = _snapshot.GetFile(a);
-                var fb = _snapshot.GetFile(b);
+                var fa = _snapshot.GetFileRecord(a);
+                var fb = _snapshot.GetFileRecord(b);
                 return fb.Size.CompareTo(fa.Size);
             });
 
@@ -417,7 +417,7 @@ public static class TreeMapBuilder
 
         private TreeMapNode<ITreeMapNodeElement> BuildFileNode(ScanRoot scanRoot, FileHandle fh)
         {
-            var f = _snapshot.GetFile(fh);
+            var f = _snapshot.GetFileRecord(fh);
 
             var element = new FileTreeMapElement(
                 f,

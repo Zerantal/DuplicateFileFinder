@@ -7,8 +7,8 @@ public sealed class RepoSnapshotView
     public required IReadOnlyDictionary<long, ScanRootSnapshotView> Snapshots { get; init; }
     public required IReadOnlyDictionary<long, ScanRoot> ScanRoots { get; init; }
     
-    public DirRecordV2 GetDir(DirHandle dir) => Snapshots[dir.ScanRootId].Dirs[dir.Index];
-    public FileRecordV2 GetFile(FileHandle file) => Snapshots[file.ScanRootId].Files[file.Index];
+    public DirRecordV2 GetDirRecord(DirHandle dir) => Snapshots[dir.ScanRootId].Dirs[dir.Index];
+    public FileRecordV2 GetFileRecord(FileHandle file) => Snapshots[file.ScanRootId].Files[file.Index];
     
     public string DecodeDirName(DirHandle dir)
     {

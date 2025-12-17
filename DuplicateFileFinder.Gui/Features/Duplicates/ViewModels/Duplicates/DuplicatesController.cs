@@ -88,7 +88,7 @@ public partial class DuplicatesController : ObservableObject
             {
                 fileRecords = group.list.Select(handle =>
                 {
-                    var rec = snapshot.GetFile(handle);
+                    var rec = snapshot.GetFileRecord(handle);
                     var name = snapshot.DecodeFileName(handle);
                     var pathResolver = () =>
                     {

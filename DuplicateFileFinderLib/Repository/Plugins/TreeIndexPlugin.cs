@@ -39,13 +39,13 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // Public query surface
     // ---------------------------------------------------------------------
     
-    public ImmutableArray<DirHandle> GetChildDirIds(DirHandle dir)
+    public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir)
     {
         var map = _childrenDirsByParentId;
         return map.TryGetValue(dir, out var v) ? v : ImmutableArray<DirHandle>.Empty;
     }
 
-    public ImmutableArray<FileHandle> GetChildFileIds(DirHandle dir)
+    public ImmutableArray<FileHandle> GetChildFiles(DirHandle dir)
     {
         var map = _childrenFilesByDirId;
         return map.TryGetValue(dir, out var v) ? v : ImmutableArray<FileHandle>.Empty;

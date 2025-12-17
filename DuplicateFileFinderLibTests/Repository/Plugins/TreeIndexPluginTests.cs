@@ -94,17 +94,17 @@ public sealed class TreeIndexPluginTests
             // root children
             Assert.Equal(
                 RepoUtil.Sort([subA, subB]),
-                RepoUtil.Sort(plugin.GetChildDirIds(root).ToArray()));
+                RepoUtil.Sort(plugin.GetChildDirs(root).ToArray()));
 
             Assert.Equal(
                 RepoUtil.Sort([fileRoot]),
-                RepoUtil.Sort(plugin.GetChildFileIds(root).ToArray()));
+                RepoUtil.Sort(plugin.GetChildFiles(root).ToArray()));
 
             // subA children
-            Assert.Empty(plugin.GetChildDirIds(subA));
+            Assert.Empty(plugin.GetChildDirs(subA));
             Assert.Equal(
                 RepoUtil.Sort([fileSubA]),
-                RepoUtil.Sort(plugin.GetChildFileIds(subA).ToArray()));
+                RepoUtil.Sort(plugin.GetChildFiles(subA).ToArray()));
         }
         finally
         {
@@ -176,8 +176,8 @@ public sealed class TreeIndexPluginTests
                 var subA = new DirHandle(1, 1);
                 var fileSubA = new FileHandle(1, 0);
 
-                Assert.Equal(new[] { subA }, plugin1.GetChildDirIds(root).ToArray());
-                Assert.Equal(new[] { fileSubA }, plugin1.GetChildFileIds(root).ToArray());
+                Assert.Equal(new[] { subA }, plugin1.GetChildDirs(root).ToArray());
+                Assert.Equal(new[] { fileSubA }, plugin1.GetChildFiles(root).ToArray());
             }
 
             // Second run: different snapshot, same (Generation, NextLogSequence) -> should load persisted state.
@@ -236,8 +236,8 @@ public sealed class TreeIndexPluginTests
                 var subB = new DirHandle(1, 1);
                 var fileSubB = new FileHandle(1, 0);
                 
-                var rootChildDirs2 = plugin2.GetChildDirIds(root).ToArray();
-                var rootChildFiles2 = plugin2.GetChildFileIds(root).ToArray();
+                var rootChildDirs2 = plugin2.GetChildDirs(root).ToArray();
+                var rootChildFiles2 = plugin2.GetChildFiles(root).ToArray();
 
                 // Should reflect persisted state (dir 2, file 10), not new snapshot (dir 3, file 99)
                 Assert.Equal(new[] { subB }, rootChildDirs2);
@@ -314,8 +314,8 @@ public sealed class TreeIndexPluginTests
             var oldSubB = new DirHandle(1, 1);
             var oldFile = new FileHandle(1, 0);
                 
-            Assert.Equal(new[] { oldSubB }, plugin.GetChildDirIds(root));
-            Assert.Equal(new[] { oldFile }, plugin.GetChildFileIds(root));
+            Assert.Equal(new[] { oldSubB }, plugin.GetChildDirs(root));
+            Assert.Equal(new[] { oldFile }, plugin.GetChildFiles(root));
     
             // New snapshot after compaction
             var dirs2 = new DirRecord[]
@@ -370,8 +370,8 @@ public sealed class TreeIndexPluginTests
             var newSubB = new DirHandle(1, 1);
             var newFile = new FileHandle(1, 0);
                 
-            var rootChildDirs2 = plugin.GetChildDirIds(root).ToArray();
-            var rootChildFiles2 = plugin.GetChildFileIds(root).ToArray();
+            var rootChildDirs2 = plugin.GetChildDirs(root).ToArray();
+            var rootChildFiles2 = plugin.GetChildFiles(root).ToArray();
     
             Assert.Equal(new[] { newSubB }, rootChildDirs2);
             Assert.Equal(new[] { newFile }, rootChildFiles2);
@@ -437,8 +437,8 @@ public sealed class TreeIndexPluginTests
     
             var root =  new DirHandle(1, 0);
             
-            var originalChildDirs = plugin.GetChildDirIds(root).ToArray();
-            var originalChildFiles = plugin.GetChildFileIds(root).ToArray();
+            var originalChildDirs = plugin.GetChildDirs(root).ToArray();
+            var originalChildFiles = plugin.GetChildFiles(root).ToArray();
     
             // TreeIndexPlugin currently only handles BootstrapEvent and CompactedEvent.
             // DeltaCommittedEvent should be ignored by the plugin.
@@ -460,8 +460,8 @@ public sealed class TreeIndexPluginTests
             plugin.Post(deltaEvent);
             await Task.Delay(20, TestContext.Current.CancellationToken);
             
-            Assert.Equal(originalChildDirs, plugin.GetChildDirIds(root).ToArray());
-            Assert.Equal(originalChildFiles, plugin.GetChildFileIds(root).ToArray());
+            Assert.Equal(originalChildDirs, plugin.GetChildDirs(root).ToArray());
+            Assert.Equal(originalChildFiles, plugin.GetChildFiles(root).ToArray());
         }
         finally
         {

@@ -2,6 +2,7 @@ using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Models;
 
+[Obsolete("Use DirRecordV2 instead")]
 [MemoryPackable]
 public partial record DirRecord
 {

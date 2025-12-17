@@ -967,12 +967,12 @@ public sealed partial class ScanSessionTests : IDisposable
             throw new NotImplementedException();
         }
 
-        public ImmutableArray<DirHandle> GetChildDirIds(DirHandle dir)
+        public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir)
         {
             throw new NotImplementedException();
         }
 
-        public ImmutableArray<FileHandle> GetChildFileIds(DirHandle dir)
+        public ImmutableArray<FileHandle> GetChildFiles(DirHandle dir)
         {
             throw new NotImplementedException();
         }

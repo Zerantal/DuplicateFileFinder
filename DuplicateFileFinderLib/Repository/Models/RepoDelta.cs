@@ -2,6 +2,7 @@ using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Models;
 
+[Obsolete("Use RepoDeltaV2 instead")]
 [MemoryPackable]
 public sealed partial record RepoDelta
 {
