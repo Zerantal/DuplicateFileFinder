@@ -5,6 +5,7 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using MemoryPack;
 using HashIndexState = DuplicateFileFinderLib.Repository.Plugins.Models.HashIndexState;
+using HashKey = DuplicateFileFinderLib.Repository.Storage.Models.HashKey;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 

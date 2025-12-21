@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;

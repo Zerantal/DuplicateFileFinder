@@ -7,6 +7,7 @@ using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 

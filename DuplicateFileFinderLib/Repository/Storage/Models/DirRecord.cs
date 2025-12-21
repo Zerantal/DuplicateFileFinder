@@ -1,3 +1,4 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Models;
@@ -14,7 +15,6 @@ public partial record DirRecord
     [MemoryPackOrder(5)] public string? ErrorMessage { get; init; }
     [MemoryPackOrder(6)] public DateTimeOffset? Modified { get; init; }
     [MemoryPackOrder(7)] public DateTimeOffset? Created { get; init; }
-
 
     // Possible Extensions:
     // [MemoryPackOrder(7)] ulong? INode {get; init;}   // or FileId on Windows (might need to be byte[])

@@ -1,8 +1,9 @@
 // Repository/Models/ScanRootSnapshot.cs
 
+using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable(SerializeLayout.Explicit)]
 internal partial record struct ScanRootSnapshotV2

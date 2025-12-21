@@ -4,7 +4,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
@@ -95,11 +95,9 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     // A callback that the owning viewmodel can set to remove this node
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
-
-    // NEW: callback that the owning viewmodel sets to load children on demand
+    
     public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; set; }
-
-    // NEW: bound from TreeViewItem.IsExpanded (e.g. via style)
+    
     public bool IsExpanded
     {
         get => _isExpanded;

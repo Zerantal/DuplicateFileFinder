@@ -1,6 +1,7 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [Obsolete("Use FileRecordV2 instead")]
 [MemoryPackable]

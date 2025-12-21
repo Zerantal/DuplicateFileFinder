@@ -2,28 +2,22 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable(SerializeLayout.Sequential)]
-public partial class PackedStringPool
+public partial class PackedStringPool(byte[] data, int[] offsets)
 {
     // UTF-8 bytes packed contiguously: [s0][s1]...[sN-1]
-    [MemoryPackInclude] private readonly byte[] _data;
+    [MemoryPackInclude] private readonly byte[] _data = data;
     
     // Sentinel offsets: length == Count + 1, with _offsets[Count] == _data.Length.
-    [MemoryPackInclude] private readonly int[] _offsets;
+    [MemoryPackInclude] private readonly int[] _offsets = offsets;
     
     [MemoryPackIgnore] internal byte[] Data => _data;
     [MemoryPackIgnore] internal int[] Offsets => _offsets;
     
     [MemoryPackIgnore]
     public int Count => _offsets.Length - 1;
-
-    public PackedStringPool(byte[] data, int[] offsets)
-    {
-        _data = data;
-        _offsets = offsets;
-    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string GetString(int index)

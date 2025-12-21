@@ -1,6 +1,9 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using MemoryPack;
+using PackedStringPool = DuplicateFileFinderLib.Repository.Storage.Models.PackedStringPool;
+using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -103,93 +106,23 @@ public sealed partial class Repo
         };
     }
 
+    private static readonly PackedStringPool EmptyStringPool
+        = new PackedStringPool(Array.Empty<byte>(), [0]);
 
-    private async Task PersistScanRootSnapshotAsync(
-        long scanRootId,
-        IReadOnlyDictionary<long, DirRecord> allDirs,
-        IReadOnlyDictionary<long, FileRecord> allFiles,
-        CancellationToken ct = default)
-    {
-        // Find the ScanRoot
-        var scanRoot = _metaFile.ScanRoots.FirstOrDefault(r => r.RootId == scanRootId);
-        if (scanRoot is null)
-            throw new InvalidOperationException($"Unknown ScanRoot {scanRootId}.");
-
-        // Collect all DirIds under this ScanRoot.DirId (subtree)
-        var dirsById = allDirs; // shorthand
-
-        var dirIds = CollectDirSubtree(scanRoot.DirId, dirsById);
-
-        var dirRecords = dirIds.Select(id => dirsById[id]).ToArray();
-
-        // Collect all files whose DirId is in that subtree
-        var filesByDir = allFiles.Values
-            .GroupBy(f => f.DirId)
-            .ToDictionary(g => g.Key, g => g.ToArray());
-
-        var fileList = new List<FileRecord>();
-        foreach (var dirId in dirIds)
-            if (filesByDir.TryGetValue(dirId, out var filesInDir))
-                fileList.AddRange(filesInDir);
-
-        var rootSnap = new ScanRootSnapshot
+    private static ScanRootSnapshotV2 CreateEmptySnapshotV2(long scanRootId)
+        => new ScanRootSnapshotV2
         {
             ScanRootId = scanRootId,
-            Dirs = dirRecords,
-            Files = fileList.ToArray()
+            StringPool = EmptyStringPool,
+            Dirs = [],
+            Files = []
         };
-
-        await RepoStore.SaveScanRootSnapshotAsync(_repoPath, rootSnap, ct).ConfigureAwait(false);
-    }
-
-    private static HashSet<long> CollectDirSubtree(
-        long rootDirId,
-        IReadOnlyDictionary<long, DirRecord> allDirs)
+    
+    private Task PersistScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken ct = default)
     {
-        var result = new HashSet<long>();
-
-        // Root not present? Nothing to do.
-        if (!allDirs.ContainsKey(rootDirId))
-            return result;
-
-        // Build parent -> children index once for this call.
-        // This is O(N) over allDirs and avoids N * N scanning.
-        var childrenByParent = new Dictionary<long, List<long>>(allDirs.Count);
-
-        foreach (var dir in allDirs.Values)
-            if (dir.ParentDirId is { } parentId)
-            {
-                if (!childrenByParent.TryGetValue(parentId, out var list))
-                {
-                    list = new List<long>();
-                    childrenByParent[parentId] = list;
-                }
-
-                list.Add(dir.DirId);
-            }
-
-        var queue = new Queue<long>();
-        result.Add(rootDirId);
-        queue.Enqueue(rootDirId);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-
-            if (!childrenByParent.TryGetValue(current, out var children))
-                continue;
-
-            for (var i = 0; i < children.Count; i++)
-            {
-                var childId = children[i];
-                if (result.Add(childId))
-                    queue.Enqueue(childId);
-            }
-        }
-
-        return result;
+        // single place to write V2 snapshots
+        return RepoStore.SaveScanRootSnapshotV2Async(_repoPath, snapshot, ct);
     }
-
 
     // ---------- util ----------
 
@@ -243,10 +176,10 @@ public sealed partial class Repo
             if (snap.newSnapshot is null) continue;
             _scanRootSnapshots[root.RootId] = snap.newSnapshot.Value;
         }
-
+        RebuildDirHandleMap_NoLock();
         ReplayDeltas();
     }
-
+    
     // Writes per-root snapshots and updates meta. Caller must hold _sync.
     private void SaveScanSnapshots_NoLock()
     {
@@ -259,18 +192,34 @@ public sealed partial class Repo
         SyncMetaFile_NoLock();
         _ = PersistMetaAsync();
 
-        // Take copies so we snapshot a stable view
-        var dirsCopy = new Dictionary<long, DirRecord>(_dirs);
-        var filesCopy = new Dictionary<long, FileRecord>(_files);
+        // Snapshot a stable view of roots + snapshots
+        var rootsCopy = _scanRoots.Values.ToArray();
+        var snapsCopy = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
 
         // Persist snapshots per scan root
-        foreach (var scanRoot in _scanRoots.Values)
-            PersistScanRootSnapshotAsync(
-                    scanRoot.RootId,
-                    dirsCopy,
-                    filesCopy,
-                    CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
+        foreach (var root in rootsCopy)
+        {
+            if (root.IsDeleted)
+            {
+                RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+                continue;
+            }
+
+            if (snapsCopy.TryGetValue(root.RootId, out var snapV2))
+            {
+                PersistScanRootSnapshotV2Async(snapV2, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            else
+            {
+                // No snapshot in memory. Ensure no stale file exists on disk.
+                RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+        }
     }
 }

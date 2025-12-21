@@ -3,8 +3,8 @@ using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
 
@@ -119,7 +119,7 @@ public partial class DuplicatesController : ObservableObject
         ApplyFilters();
     }
 
-    public void ApplyFilters()
+    private void ApplyFilters()
     {
         var filtered = new List<DuplicateSetRow>(_allSets.Count);
 

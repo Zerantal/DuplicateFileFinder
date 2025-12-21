@@ -2,7 +2,7 @@
 
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 public enum ScanRunStatus : byte
 {
@@ -29,6 +29,6 @@ public sealed partial record ScanRun
     [MemoryPackOrder(4)] public DateTimeOffset? FinishedAt          { get; init; }
     [MemoryPackOrder(5)] public required ScanRunStatus Status       { get; init; }
     [MemoryPackOrder(6)] public string? ErrorMessage                { get; init; }
-    [MemoryPackOrder(7)] public ScanOperation Operation                       { get; init; } = ScanOperation.FullScan;
+    [MemoryPackOrder(7)] public ScanOperation Operation             { get; init; } = ScanOperation.FullScan;
 
 }

@@ -1,4 +1,7 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Models;
+using DirRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.DirRecordV2;
+using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecordV2;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -23,4 +26,19 @@ public sealed class RepoSnapshotView
         var rec = s.Files[file.Index];
         return rec.NameStrIdx >= 0 ? s.StringPool.GetString(rec.NameStrIdx) : "";
     }
+    
+    public string DecodeDirErrorMessage(DirHandle dir)
+    {
+        var s = Snapshots[dir.ScanRootId];
+        var rec = s.Dirs[dir.Index];
+        return rec.NameStrIdx >= 0 ? s.StringPool.GetString(rec.ErrorMessageStrIdx) : "";
+    }
+    
+    public string DecodeFileErrorMessage(DirHandle dir)
+    {
+        var s = Snapshots[dir.ScanRootId];
+        var rec = s.Dirs[dir.Index];
+        return rec.NameStrIdx >= 0 ? s.StringPool.GetString(rec.ErrorMessageStrIdx) : "";
+    }
+    
 }

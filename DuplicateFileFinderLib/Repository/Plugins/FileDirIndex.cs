@@ -82,7 +82,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
                 if (!dirIndexbuilder.TryAdd(dir.DirId, new DirHandle(rootId, i)))
                 {
                     throw new InvalidOperationException(
-                        $"Duplicate DirId {dir.DirId} encountered while rebuilding FileDirIndex.");
+                        $"Duplicate dirId {dir.DirId} encountered while rebuilding FileDirIndex.");
                 }
             }
             for (int i = 0; i < snapshot.Files.Count; i++)

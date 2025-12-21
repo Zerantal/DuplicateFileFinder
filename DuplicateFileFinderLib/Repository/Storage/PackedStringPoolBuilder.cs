@@ -1,7 +1,6 @@
-using System.Buffers;
 using System.Text;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Util;
 
 /// <summary>
 /// Builds a PackedStringPool by interning strings into a single UTF-8 byte buffer + offsets.
@@ -52,7 +51,7 @@ public sealed class PackedStringBuilder
     public int InternOrMinusOne(string? value)
         => value is null ? -1 : Intern(value);
 
-    public PackedStringPool Build()
+    public Repository.Storage.Models.PackedStringPool Build()
     {
         // Offsets array has a sentinel at the end
         var n = _offsets.Count;
@@ -65,7 +64,7 @@ public sealed class PackedStringBuilder
 
         var data = _length == 0 ? Array.Empty<byte>() : _buffer.AsSpan(0, _length).ToArray();
 
-        return new PackedStringPool(data, offsets);
+        return new Repository.Storage.Models.PackedStringPool(data, offsets);
     }
 
     public void Reset(bool keepCapacity = true)

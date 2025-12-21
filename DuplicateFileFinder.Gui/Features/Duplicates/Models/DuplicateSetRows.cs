@@ -1,5 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Models;
 

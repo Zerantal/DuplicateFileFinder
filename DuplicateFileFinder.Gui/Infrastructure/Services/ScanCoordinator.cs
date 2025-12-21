@@ -2,7 +2,7 @@
 
 using Avalonia.Threading;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
 using ScanProgressViewModel = DuplicateFileFinder.Gui.Features.Scanning.ViewModels.ScanProgressViewModel;

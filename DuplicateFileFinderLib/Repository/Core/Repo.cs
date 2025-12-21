@@ -2,6 +2,9 @@
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
+using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
+using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
+using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -9,7 +12,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 ///     The persistent database of all scanned files across all scan locations.
 ///     Uses a snapshot + append-only delta log for durability.
 /// </summary>
-public sealed partial class Repo : IRepo, IRepoInternal
+public sealed partial class Repo : IRepoInternal
 {
     private const int RepoSchemaVersion = 6;
     
@@ -24,12 +27,18 @@ public sealed partial class Repo : IRepo, IRepoInternal
     private Dictionary<long, ScanRoot>   _scanRoots  = new();
 
     private readonly Dictionary<long, string> _dirPathCache = new();
+    private readonly Dictionary<DirHandle, string> _dirPathCacheV2 = new();
     private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run 
     
     private readonly Lock _sync = new();
     
     private RepoMetaFile _metaFile = null!;
-    private bool _disposed;
+    private bool _disposed; 
+    
+    // *********** TEMP
+    private readonly Dictionary<long, DirHandle> _dirHandleById = new(); // transitional
+    private long _dirHandleMapGeneration = -1; // or bump token whenever snapshots change
+    // *********** TEMP
     
     private Repo(string repoPath, RepoMetaFile metaFile)
     {
@@ -68,11 +77,26 @@ public sealed partial class Repo : IRepo, IRepoInternal
     {
         lock (_sync)
         {
+            // 1) Remove the snapshot from live state (source of truth)
+            _scanRootSnapshots.Remove(scanRootId);
+
+            // 2) Mark ScanRoot as deleted (metadata)
             if (_scanRoots.TryGetValue(scanRootId, out var scanRoot))
             {
-                scanRoot = scanRoot with { IsDeleted = true, DirId = 0, DeletedAtUtc = DateTimeOffset.UtcNow };
+                scanRoot = scanRoot with
+                {
+                    IsDeleted = true,
+                    DeletedAtUtc = DateTimeOffset.UtcNow
+                };
                 _scanRoots[scanRootId] = scanRoot;
             }
+            
+            RebuildDirHandleMap_NoLock();
+
+            // 4) Clear any cached paths that might reference removed dirs
+            _dirPathCache.Clear();
+
+            // 5) Persist metadata update (and any other state you persist here)
             SaveMeta_NoLock();
         }
     }

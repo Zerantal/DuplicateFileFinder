@@ -1,6 +1,6 @@
 // Repo/Models/ScanEntryStatus.cs
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Core.Models;
 
 /// <summary>
 /// Discrete status of a scan entry (file or directory).

@@ -1,18 +1,21 @@
-// DuplicateFileFinderLib/Repository/IScanSession.cs
+// DuplicateFileFinderLib/Repository/Interfaces/IScanSession.cs
 
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 
+
 public interface IScanSession : IAsyncDisposable
 {
-    long ScanSequence { get; }
+    DirCursor RootDirCursor { get; }
 
-    DirRecord RootDir { get; init; }
+    DirEnumerationContext BeginDirectory(DirCursor parentDirId);
 
-    long AddOrUpdateDirectory(DirRecord dir);
-    void AddOrUpdateFile(ref FileRecord file);
-
+    DirCursor OnDirectoryFound(in ObservedDir dir, ref DirEnumerationContext ctx);
+    FileHashDecision OnFileFound(in ObservedFile file, ref DirEnumerationContext ctx);
+    void OnFileHashCompleted(in FileHashToken token, ReadOnlyMemory<byte> hashBytes, string? errorMessage = null);
+    void EndDirectory(ref DirEnumerationContext ctx);
     Task FlushProgressAsync(CancellationToken cancellationToken = default);
     Task CompleteAsync(CancellationToken cancellationToken = default);
     Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default);

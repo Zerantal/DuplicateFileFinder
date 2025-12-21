@@ -1,6 +1,9 @@
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Repository.Storage.Models;
+using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -44,7 +47,7 @@ public sealed partial class Repo
         }
     }
 
-    internal long AllocateDirId()
+    public long AllocateDirId()
     {
         lock (_sync)
         {
@@ -59,7 +62,7 @@ public sealed partial class Repo
         return id;
     }
 
-    internal long AllocateFileId()
+    public long AllocateFileId()
     {
         lock (_sync)
         {
@@ -96,7 +99,7 @@ public sealed partial class Repo
             .GetResult();
     }
     
-    internal void MarkScanCompleted(long sequence)
+    public void MarkScanCompleted(long sequence)
     {
         ScanRun updated;
         long generation;
@@ -137,7 +140,7 @@ public sealed partial class Repo
         PublishEvent(evt);
     }
 
-    internal void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
+    public void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
     {
         lock (_sync)
         {
@@ -222,7 +225,7 @@ public sealed partial class Repo
             }
             else
             {
-                // TODO: Log warning about conflicting DirId?
+                // TODO: Log warning about conflicting dirId?
             }
         }
     }
@@ -241,5 +244,22 @@ public sealed partial class Repo
             DeviceModel    = volume.DeviceModel ?? root.DeviceModel,
             LastScannedAt  = DateTimeOffset.UtcNow
         };
+    }
+    
+    Task IRepoInternal.CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
+            SaveMeta_NoLock();
+            
+            RebuildDirHandleMap_NoLock();
+            
+            PersistScanRootSnapshotV2Async(snapshot, cancellationToken);
+            
+            SaveScanSnapshots_NoLock();
+        }
+        
+        return Task.CompletedTask;
     }
 }

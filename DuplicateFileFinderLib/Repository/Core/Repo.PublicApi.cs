@@ -1,11 +1,17 @@
 using System.Collections.ObjectModel;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
 using MemoryPack;
+using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
+using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
+using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -24,44 +30,52 @@ public sealed partial class Repo
 
         _disposed = true;
 
-        Dictionary<long, DirRecord>? dirsCopy;
-        Dictionary<long, FileRecord>? filesCopy;
-        RepoMetaFile? metaCopy;
-        List<ScanRoot>? scanRootsCopy;
+        RepoMetaFile metaCopy;
+        ScanRoot[] rootsCopy;
+        Dictionary<long, ScanRootSnapshotV2> snapsCopy;
 
-        // 1. Capture in-memory state safely
         lock (_sync)
         {
-            // Take local snapshots of the in-memory dictionaries for async work outside lock
-            dirsCopy = new Dictionary<long, DirRecord>(_dirs);
-            filesCopy = new Dictionary<long, FileRecord>(_files);
-
-            // Sync metaFile so it's up to date
             SyncMetaFile_NoLock();
             metaCopy = _metaFile;
 
-            // Capture roots (for per-root flush)
-            scanRootsCopy = _scanRoots.Values.ToList();
+            rootsCopy = _scanRoots.Values.ToArray();
+            snapsCopy = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
         }
 
-        // 2. Save meta.mp
+        // 1) Save meta
         await RepoStore.SaveMetaAsync(_repoPath, metaCopy).ConfigureAwait(false);
-
-        // 3. Write per-root snapshots
-        foreach (var root in scanRootsCopy)
-            await PersistScanRootSnapshotAsync(
-                root.RootId,
-                dirsCopy,
-                filesCopy,
-                CancellationToken.None
-            ).ConfigureAwait(false);
-
-        // 4. clean deltas / compaction at shutdown
+        
+        // 2) Persist per-root snapshots
+        foreach (var root in rootsCopy)
+        {
+            if (root.IsDeleted)
+            {
+                await RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, CancellationToken.None)
+                    .ConfigureAwait(false);
+                continue;
+            }
+        
+            if (snapsCopy.TryGetValue(root.RootId, out var snapV2))
+            {
+                await RepoStore.SaveScanRootSnapshotV2Async(_repoPath, snapV2, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // Ensure no stale snapshot exists
+                await RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+        }
+        
+        // 3) best-effort cleanup of obsolete deltas at shutdown
         lock (_sync)
         {
             DeleteObsoleteDeltas_NoLock();
         }
     }
+
 
     public void Dispose()
     {
@@ -122,8 +136,8 @@ public sealed partial class Repo
 
         return new RepoSnapshotView
         {
-            Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(snapshots),
-            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(_scanRoots)
+            Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(new Dictionary<long, ScanRootSnapshotView>(snapshots)),
+            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(new Dictionary<long, ScanRoot>(_scanRoots))
         };
     }
 
@@ -149,9 +163,7 @@ public sealed partial class Repo
             relativeRootPath = PathUtils.NormalizePath(Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
         
         ScanRun run;
-        RepoDelta? rootDelta = null;
-        // Dictionary<long, DirRecord> existingDirs;
-        DirRecord rootDir;
+        DirScanInput rootDirInput;
 
         lock (_sync)
         {
@@ -159,28 +171,17 @@ public sealed partial class Repo
             
             var scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
 
-            // Create dummy dir record if no dir record is associated with the scan root.
-            if (scanRoot.DirId == 0 || !_dirs.TryGetValue(scanRoot.DirId, out var dir))
+            // Ensure there is a root dir id for this scan root (V2 model uses snapshots as truth,
+            // but ScanRoot still needs a stable dirId for identity).
+            if (scanRoot.DirId == 0)
             {
                 var rootDirId = AllocateDirId_NoLock();
-
-                rootDir = new DirRecord
-                {
-                    DirId = rootDirId,
-                    ParentDirId = null,
-                    Name = "",
-                    LastSeenScanSequence = runId,
-                    Status = ScanEntryStatus.None, // “known root, not yet enumerated”
-                    ErrorMessage = null
-                };
-
-                _dirs[rootDirId] = rootDir;
-
                 scanRoot = scanRoot with { DirId = rootDirId};
             }
-            else rootDir = dir;
             
-            if (volumeInfo is not null) scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
+            if (volumeInfo is not null)
+                scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
+
             _scanRoots[scanRoot.RootId] = scanRoot;
             
             run = new ScanRun
@@ -197,17 +198,16 @@ public sealed partial class Repo
 
             _scanRuns.Add(run);
             _scanRunIndex[runId] = run;
+
             SaveMeta_NoLock();
             
-            // existingDirs = _dirs.ToDictionary(kv => kv.Key, kv => kv.Value);
+            // Root directory "dummy" record (session will upsert it as Enumerated when observed)
+            rootDirInput = new DirScanInput { DirId = scanRoot.DirId };
         }
 
-        if (rootDelta is not null)
-            CommitDelta(rootDelta);
-
-        // return new ScanSession(this, run,  scanRoot, existingDirs, maxFilesBeforeFlush, maxDirsBeforeFlush);
-        return new ScanSession(this, run, rootDir, maxFilesBeforeFlush, maxDirsBeforeFlush);
+        return new ScanSession(this, run, rootDirInput, maxFilesBeforeFlush, maxDirsBeforeFlush);
     }
+
 
     // -------- CommitDelta: progressive, with log id --------
 
@@ -263,15 +263,138 @@ public sealed partial class Repo
             SaveScanSnapshots_NoLock();
         }
     }
+// ***************** TEMP
+    private void RebuildDirHandleMap_NoLock()
+    {
+        _dirHandleById.Clear();
 
+        foreach (var (scanRootId, snap) in _scanRootSnapshots)
+        {
+            var dirs = snap.Dirs;
+            for (int i = 0; i < dirs.Length; i++)
+            {
+                var dirId = dirs[i].DirId;
+
+                // Fail fast on duplicate ids – your design assumes global uniqueness.
+                if (!_dirHandleById.TryAdd(dirId, new DirHandle(scanRootId, i)))
+                    throw new InvalidOperationException($"Duplicate dirId {dirId} across snapshots.");
+            }
+        }
+    }
+// ***************** TEMP
+
+    public string GetDirPathV2ByHandle(DirHandle dirHandle, bool relativeToVolumePath = false)
+    {
+        return GetDirPathV2(_scanRootSnapshots[dirHandle.ScanRootId].Dirs[dirHandle.Index].DirId, relativeToVolumePath);
+    }
+
+    public string GetDirPathV2(long dirId, bool relativeToVolumePath = false)
+    {
+        // Cache by dirId for transition
+        if (_dirPathCache.TryGetValue(dirId, out var cached))
+            return cached;
+
+        DirHandle handle;
+        ScanRootSnapshotV2 snap;
+
+        lock (_sync)
+        {
+            // Ensure resolver exists (or rebuild lazily)
+            if (_dirHandleById.Count == 0 && _scanRootSnapshots.Count != 0)
+                RebuildDirHandleMap_NoLock();
+
+            if (!_dirHandleById.TryGetValue(dirId, out handle))
+                throw new KeyNotFoundException($"dirId {dirId} not found in V2 snapshots.");
+
+            if (!_scanRootSnapshots.TryGetValue(handle.ScanRootId, out snap!))
+                throw new KeyNotFoundException($"ScanRootId {handle.ScanRootId} not found in repo snapshots.");
+        }
+
+        // Reconstruct leaf → root within the scan root
+        var parts = new List<string>(16);
+        var cursor = handle;
+
+        while (true)
+        {
+            var rec = snap.Dirs[cursor.Index];
+
+            if (rec.NameStrIdx >= 0)
+            {
+                var name = snap.StringPool.GetString(rec.NameStrIdx);
+                if (!string.IsNullOrEmpty(name))
+                    parts.Add(name);
+            }
+
+            if (rec.ParentDirId >= 0)
+            {
+                // Parent lookup without plugins: use resolver map
+                DirHandle parent;
+                lock (_sync)
+                {
+                    if (!_dirHandleById.TryGetValue(rec.ParentDirId, out parent))
+                        throw new InvalidOperationException($"Broken parent chain: missing parent {rec.ParentDirId} for dir {rec.DirId}.");
+
+                    if (parent.ScanRootId != handle.ScanRootId)
+                        throw new InvalidOperationException($"Broken parent chain: parent {rec.ParentDirId} resolves to a different scan root.");
+                }
+
+                cursor = parent;
+                continue;
+            }
+
+            // At scan root dir: prepend scan root RootPath / VolumePath unless relativeToVolumePath
+            if (!relativeToVolumePath)
+            {
+                ScanRoot? sr;
+                lock (_sync)
+                {
+                    _scanRoots.TryGetValue(handle.ScanRootId, out sr);
+                }
+
+                if (sr is not null)
+                {
+                    AddPathSegmentsReversed(parts, sr.RootPath);
+                    if (sr.VolumePath is not null)
+                        AddPathSegmentsReversed(parts, sr.VolumePath);
+                }
+            }
+
+            break;
+        }
+
+        parts.Reverse();
+
+        string fullPath;
+        if (OperatingSystem.IsWindows())
+            fullPath = Path.Combine(parts.ToArray());
+        else
+            fullPath = Path.DirectorySeparatorChar + Path.Combine(parts.ToArray());
+
+        lock (_sync)
+        {
+            _dirPathCache[dirId] = fullPath;
+        }
+
+        return fullPath;
+    }
+
+    private static void AddPathSegmentsReversed(List<string> parts, string path)
+    {
+        var segs = path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        for (int i = segs.Length - 1; i >= 0; i--)
+            parts.Add(segs[i]);
+    }
+
+    
+    [Obsolete]
     public string GetDirPath(long dirId, bool relativeToVolumePath = false)
     {
         // Fast path: return cached value
         if (_dirPathCache.TryGetValue(dirId, out var cached))
             return cached;
-
+        
         if (!_dirs.TryGetValue(dirId, out var node))
-            throw new KeyNotFoundException($"DirId {dirId} not found in repo.");
+            throw new KeyNotFoundException($"dirId {dirId} not found in repo.");
 
         // Reconstruct path from leaf → root
         var parts = new List<string>(16);
@@ -332,10 +455,9 @@ public sealed partial class Repo
             if (!await ShouldCompactAsync(policy).ConfigureAwait(false))
                 return; // no-op: thresholds not met
         }
-
-        Dictionary<long, DirRecord>  dirsSnapshot;
-        Dictionary<long, FileRecord> filesSnapshot;
-        List<ScanRoot>               rootsSnapshot;
+        
+        Dictionary<long, ScanRootSnapshotV2> snapshots;
+        List<ScanRoot> rootsSnapshot;
         long nextLogSeq;
         long generation;
 
@@ -345,73 +467,36 @@ public sealed partial class Repo
         lock (_sync)
         {
             // Clone into fresh dictionaries so we can operate outside the lock
-            dirsSnapshot   = new Dictionary<long, DirRecord>(_dirs);
-            filesSnapshot  = new Dictionary<long, FileRecord>(_files);
             rootsSnapshot  = _scanRoots.Values.ToList();
-
+            snapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
+            
             nextLogSeq = Meta.NextLogSequence;
             generation = Meta.Generation;
         }
 
-        //
-        // 2. Pre-index files by DirId for efficient per-root selection
-        //
-        var filesByDir = filesSnapshot.Values
-            .GroupBy(f => f.DirId)
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        //
-        // 3. Write per-root snapshots based on the in-memory snapshot (outside lock)
-        //
+        // 2. Persist all snapshots to disk, remove snapshots for deleted ScanRoots
         foreach (var root in rootsSnapshot)
         {
             ct.ThrowIfCancellationRequested();
 
-            if (root.DirId == 0 || !dirsSnapshot.ContainsKey(root.DirId))
+            if (root.IsDeleted)
             {
-                // Unbound root: write an empty snapshot so the root still exists
-                var emptySnap = new ScanRootSnapshot
-                {
-                    ScanRootId = root.RootId,
-                    Dirs       = [],
-                    Files      = []
-                };
-
-                await RepoStore.SaveScanRootSnapshotAsync(_repoPath, emptySnap, ct)
-                    .ConfigureAwait(false);
-
+                await RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, ct).ConfigureAwait(false);
                 continue;
             }
 
-            // Collect the subtree of dirs under this root
-            var subtree = Repo.CollectDirSubtree(root.DirId, dirsSnapshot);
-
-            var dirRecs = subtree
-                .Select(id => dirsSnapshot[id])
-                .ToArray();
-
-            var fileRecs = subtree
-                .SelectMany(dirId =>
-                    filesByDir.TryGetValue(dirId, out var list)
-                        ? list
-                        : Enumerable.Empty<FileRecord>())
-                .ToArray();
-
-            var snap = new ScanRootSnapshot
+            if (snapshots.TryGetValue(root.RootId, out var snapV2))
             {
-                ScanRootId = root.RootId,
-                Dirs = dirRecs,
-                Files = fileRecs
-            };
-
-            await RepoStore.SaveScanRootSnapshotAsync(_repoPath, snap, ct)
-                .ConfigureAwait(false);
+                await RepoStore.SaveScanRootSnapshotV2Async(_repoPath, snapV2, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await RepoStore.DeleteScanRootSnapshotAsync(_repoPath, root.RootId, ct).ConfigureAwait(false);
+            }
         }
-
-        //
-        // 4. Bump generation and mark all logs up to nextLogSeq - 1 as snapshotted
-        //    under the lock, then persist meta
-        //
+        
+        // 3. Bump generation and mark all logs up to nextLogSeq - 1 as snapshotted
+        // under the lock, then persist meta
         lock (_sync)
         {
             Meta = Meta with
@@ -423,10 +508,8 @@ public sealed partial class Repo
             
             SaveMeta_NoLock();
         }
-
-        //
-        // 5. Delete old-generation delta files
-        //
+        
+        // 4. Delete old-generation delta files
         var deltaFiles = Directory
             .GetFiles(_logDirPath, $"{generation}-*.delta")
             .ToList();

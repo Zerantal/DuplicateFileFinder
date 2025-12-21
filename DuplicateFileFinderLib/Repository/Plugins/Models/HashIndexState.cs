@@ -1,5 +1,6 @@
 using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
+using HashKey = DuplicateFileFinderLib.Repository.Storage.Models.HashKey;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 

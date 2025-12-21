@@ -1,6 +1,7 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable(SerializeLayout.Sequential)]
 // ReSharper disable once RedundantExtendsListEntry
@@ -14,25 +15,7 @@ public readonly partial record struct DirRecordV2() : IEquatable<DirRecordV2>
     public int ErrorMessageStrIdx { get; init; } = -1;
     public long ModifiedTicks { get; init; } = 0;
     public long CreatedTicks { get; init; } = 0;
-
+    
     public bool Equals(DirRecordV2 other) => DirId == other.DirId;
     public override int GetHashCode() => DirId.GetHashCode();
-
-    [MemoryPackIgnore]
-    public bool HasParentDir => ParentDirId != -1;
-
-    public static DirRecordV2 FromOldDirRecord(DirRecord dir, int nameStrIdx, int errorMsgStrIdx)
-    {
-        return new DirRecordV2
-        {
-            DirId = dir.DirId,
-            ParentDirId = dir.DirId,
-            NameStrIdx = nameStrIdx,
-            LastSeenScanSequence = dir.LastSeenScanSequence,
-            Status = dir.Status,
-            ErrorMessageStrIdx = errorMsgStrIdx,
-            ModifiedTicks = dir.Modified?.Ticks ?? 0,
-            CreatedTicks = dir.Created?.Ticks ?? 0,
-        };
-    }
 }

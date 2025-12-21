@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.Repository.Models;
+using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 

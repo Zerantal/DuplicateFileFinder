@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
