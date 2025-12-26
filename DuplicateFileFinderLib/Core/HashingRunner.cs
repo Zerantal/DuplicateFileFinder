@@ -1,10 +1,8 @@
 // DuplicateFileFinderLib/Core/HashingRunner.cs
 
 using DuplicateFileFinderLib.Hashing;
-using DuplicateFileFinderLib.Logging;
 
 namespace DuplicateFileFinderLib.Core;
-
 
 internal class HashingRunner<T>(
     IChecksumPipeline pipeline)
@@ -12,7 +10,8 @@ internal class HashingRunner<T>(
 {
     private int _dop = 1;
 
-    public int ReadBufferSize {
+    public int ReadBufferSize
+    {
         get => pipeline.BufferSize;
         set => pipeline.BufferSize = value;
     }
@@ -24,7 +23,7 @@ internal class HashingRunner<T>(
     }
 
     public async Task HashFilesAsync(
-        List<FileToHash<T>> filesToHash, 
+        List<FileToHash<T>> filesToHash,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         Action<T, ReadOnlyMemory<byte>, string?> onFileHashed,
         CancellationToken ct)
@@ -34,10 +33,15 @@ internal class HashingRunner<T>(
         var total = filesToHash.Count;
         if (total == 0)
         {
-            DuplicateFileFinderHelpers.Report(progress, ScanPhase.Hashing, "No files to hash.", 1.0, processed: 0, total: 0);
+            DuplicateFileFinderHelpers.Report(
+                progress, ScanPhase.Hashing,
+                "No files to hash.",
+                1.0,
+                processed: 0,
+                total: 0);
             return;
         }
-        
+
         long processed = 0;
 
         await Parallel.ForEachAsync(
@@ -49,7 +53,8 @@ internal class HashingRunner<T>(
 
                 try
                 {
-                    using var h = await pipeline.ComputeFileHashAsync(item.FullPath, token).ConfigureAwait(false);
+                    using var h = await pipeline.ComputeFileHashAsync(item.FullPath, token)
+                        .ConfigureAwait(false);
                     onFileHashed(item.Token, h.Bytes, null);
                 }
                 catch (OperationCanceledException)
@@ -65,19 +70,14 @@ internal class HashingRunner<T>(
                     var done = Interlocked.Increment(ref processed);
                     var pct = Math.Min(1.0, (double)done / total);
 
-                    if ((done & 0x3FFF) == 0 || done == total)
-                    {
-                        DuplicateFileFinderHelpers.Report(
-                            progress,
-                            ScanPhase.Hashing,
-                            done == total ? "Finished hashing." : $"Hashing files... ({done}/{total})",
-                            pct,
-                            running: true,
-                            processed: done,
-                            total: total);
-                    }
-
-                    TimingLog.Counter("files_hashed_attempted");
+                    DuplicateFileFinderHelpers.Report(
+                        progress,
+                        ScanPhase.Hashing,
+                        done == total ? "Finished hashing." : $"Hashing files... ({done}/{total})",
+                        pct,
+                        running: true,
+                        processed: done,
+                        total: total);
                 }
             }).ConfigureAwait(false);
 

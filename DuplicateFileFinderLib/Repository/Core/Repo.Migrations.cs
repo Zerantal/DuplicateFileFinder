@@ -8,7 +8,7 @@ public sealed partial class Repo
     /// if any migration actually ran.
     /// </summary>
     // ReSharper disable once UnusedMember.Local
-    private void MigrateToLatest()
+    private async Task MigrateToLatest()
     {
         bool migrated = false;
 
@@ -31,19 +31,11 @@ public sealed partial class Repo
                 if (Meta.SchemaVersion != RepoSchemaVersion)
                 {
                     Meta = Meta with { SchemaVersion = RepoSchemaVersion };
-                    SyncMetaFile_NoLock();
-                    _ = PersistMetaAsync();
+                    MarkMetaDirty_NoLock();
                 }
-                return;
             }
-
-            // After migration(s), write a fresh snapshot + meta + scanroots/scanruns.
-            // SaveScanSnapshots_NoLock will include the migrated _meta (with new SchemaVersion).
-
-            SyncMetaFile_NoLock();
-            _ = PersistMetaAsync();
-            
-            SaveScanSnapshots_NoLock();
         }
+
+        await PersistMetaIfDirtyAsync().ConfigureAwait(false);
     }
 }
