@@ -1,7 +1,6 @@
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Models;
-using DirRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.DirRecordV2;
-using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecordV2;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 

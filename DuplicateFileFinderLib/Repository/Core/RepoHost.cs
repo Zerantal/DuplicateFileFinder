@@ -36,7 +36,7 @@ public sealed class RepoHost : IRepoHost
         var treeIndexDir = Path.Combine(repoDir, nameof(TreeIndexPlugin));
         var treeIndex = new TreeIndexPlugin(treeIndexDir);
         var fileDirIndexDir = Path.Combine(repoDir, nameof(FileDirIndex));
-        var fileDirIndex = new FileDirIndex(fileDirIndexDir);
+        var fileDirIndex = new FileDirIndexPlugin(fileDirIndexDir);
 
         // 3. Bootstrap + subscribe plugins
         repo.RegisterEventSinkWithBootstrap(fileDirIndex);

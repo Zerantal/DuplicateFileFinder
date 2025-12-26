@@ -93,11 +93,7 @@ public sealed partial class Repo
 
     private async Task InitialiseStateFromStoreAsync(CancellationToken ct)
     {
-        _dirs.Clear();
-        _files.Clear();
-        _dirPathCache.Clear();
-
-        // 1. Load per-root snapshots
+        // Load per-root snapshots
         foreach (var root in _scanRoots.Values)
         {
             ct.ThrowIfCancellationRequested();
