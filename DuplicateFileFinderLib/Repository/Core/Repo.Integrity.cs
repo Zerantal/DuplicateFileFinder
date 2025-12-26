@@ -1,7 +1,14 @@
 // DuplicateFileFinderLib/Repository/Repo.Integrity.cs
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
+using DirRecord = DuplicateFileFinderLib.Repository.Storage.Models.DirRecord;
+using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
+using RepoDelta = DuplicateFileFinderLib.Repository.Storage.Models.RepoDelta;
+using RepoMetaFile = DuplicateFileFinderLib.Repository.Storage.Models.RepoMetaFile;
+using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -117,7 +124,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "ROOT_DIRID_EMPTY",
-                    Message = $"ScanRoot {root.RootId} has no DirId bound (rootPath={root.RootPath})."
+                    Message = $"ScanRoot {root.RootId} has no dirId bound (rootPath={root.RootPath})."
                 });
                 continue;
             }
@@ -128,7 +135,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "ROOT_DIRID_MISSING",
-                    Message  = $"ScanRoot {root.RootId} DirId {root.DirId} not found in dirs (rootPath={root.RootPath})."
+                    Message  = $"ScanRoot {root.RootId} dirId {root.DirId} not found in dirs (rootPath={root.RootPath})."
                 });
             }
         }
@@ -165,7 +172,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "FILE_DIR_MISSING",
-                    Message = $"File {file.FileId} ('{file.Name}') references missing DirId {file.DirId}."
+                    Message = $"File {file.FileId} ('{file.Name}') references missing dirId {file.DirId}."
                 });
             }
         }
@@ -401,7 +408,7 @@ public sealed partial class Repo
                         {
                             Severity = RepoIntegritySeverity.Error,
                             Code = "ROOT_SNAPSHOT_DUP_DIR",
-                            Message  = $"Snapshot {path} contains duplicate DirId {d.DirId}.",
+                            Message  = $"Snapshot {path} contains duplicate dirId {d.DirId}.",
                             FilePath = path
                         });
                     }
@@ -415,7 +422,7 @@ public sealed partial class Repo
                         {
                             Severity = RepoIntegritySeverity.Error,
                             Code = "ROOT_SNAPSHOT_FILE_DIR_MISSING",
-                            Message  = $"Snapshot {path} file {f.FileId} references missing DirId {f.DirId}.",
+                            Message  = $"Snapshot {path} file {f.FileId} references missing dirId {f.DirId}.",
                             FilePath = path
                         });
                     }
@@ -620,7 +627,7 @@ public sealed partial class Repo
             {
                 Severity = RepoIntegritySeverity.Error,
                 Code = "DIR_CYCLE",
-                Message = $"Directory graph contains a cycle involving DirId {dirId}."
+                Message = $"Directory graph contains a cycle involving dirId {dirId}."
             });
             return;
         }

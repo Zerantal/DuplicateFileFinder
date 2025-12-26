@@ -9,9 +9,6 @@ using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
 using MemoryPack;
-using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
-using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -148,9 +145,7 @@ public sealed partial class Repo
     public IScanSession BeginScan(
         string rootPath,
         ScanOperation scanOperation,
-        VolumeInfo? volumeInfo,
-        int maxFilesBeforeFlush,
-        int maxDirsBeforeFlush)
+        VolumeInfo? volumeInfo)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException("Root path is null or empty.", nameof(rootPath));
@@ -205,7 +200,7 @@ public sealed partial class Repo
             rootDirInput = new DirScanInput { DirId = scanRoot.DirId };
         }
 
-        return new ScanSession(this, run, rootDirInput, maxFilesBeforeFlush, maxDirsBeforeFlush);
+        return new ScanSession(this, run, rootDirInput);
     }
 
 

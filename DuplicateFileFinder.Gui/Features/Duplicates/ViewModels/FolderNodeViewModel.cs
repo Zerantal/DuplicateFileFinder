@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
-using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
@@ -15,8 +14,6 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     private string _fullPath;
     private string _name;
-    private bool _showFullPath;
-    private bool _isExpanded;
     private long _scanRootId = -1;
 
     // Dummy child used to show the expand arrow before children are loaded.
@@ -77,10 +74,10 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     public bool ShowFullPath
     {
-        get => _showFullPath;
+        get;
         set
         {
-            if (SetProperty(ref _showFullPath, value))
+            if (SetProperty(ref field, value))
                 OnPropertyChanged(nameof(DisplayName));
         }
     }
@@ -97,16 +94,16 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
     
     public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; set; }
-    
+
     public bool IsExpanded
     {
-        get => _isExpanded;
+        get;
         set
         {
-            if (!SetProperty(ref _isExpanded, value))
+            if (!SetProperty(ref field, value))
                 return;
 
-            if (_isExpanded)
+            if (field)
                 EnsureChildrenLoaded?.Invoke(this);
         }
     }
@@ -128,15 +125,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     }
 
     internal void ClearChildren() => Children.Clear();
-
-    [RelayCommand]
-    private async Task QuickRescanAsync()
-    {
-        if (_isDummy || _scanCoordinator is null)
-            return;
-
-        await _scanCoordinator.RunScanWithDialogAsync(FullPath, ScanOperation.QuickScan);
-    }
+    
 
     [RelayCommand]
     private async Task FullRescanAsync()

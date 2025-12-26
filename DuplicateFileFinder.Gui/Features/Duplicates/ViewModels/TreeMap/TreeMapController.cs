@@ -62,7 +62,11 @@ public partial class TreeMapController : ObservableObject
             _fileDirIndex,
             Metric,
             Options,
-            (dirId) => _repo.GetDirPath(dirId, true));
+            (dirId) =>
+            {
+                _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
+                return dirPath;
+            });
     }
 
     partial void OnMetricChanged(TreeMapMetric value)
@@ -77,7 +81,11 @@ public partial class TreeMapController : ObservableObject
             _fileDirIndex,
             value,
             Options,
-            (dirId) =>  _repo.GetDirPath(dirId, true));
+            (dirId) =>
+            {
+                _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
+                return dirPath;
+            });
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));

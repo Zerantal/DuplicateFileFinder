@@ -1,7 +1,6 @@
 // Gui/Services/IScanCoordinator.cs
 
 using DuplicateFileFinderLib.Core;
-using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
@@ -20,7 +19,6 @@ public interface IScanCoordinator
 
     public Task RunScanWithDialogAsync(
         string rootPath,
-        ScanOperation operation = ScanOperation.FullScan,
         CancellationToken cancellationToken = default);
 
 

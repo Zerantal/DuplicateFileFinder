@@ -3,7 +3,6 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -261,5 +260,10 @@ public sealed partial class Repo
         }
         
         return Task.CompletedTask;
+    }
+
+    async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
+    {
+        await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct);
     }
 }

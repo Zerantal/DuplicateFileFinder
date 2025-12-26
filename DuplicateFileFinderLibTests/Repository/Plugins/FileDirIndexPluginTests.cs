@@ -4,9 +4,14 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
 using Xunit;
+using DirRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.DirRecordV2;
+using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecordV2;
+using HashKey = DuplicateFileFinderLib.Repository.Storage.Models.HashKey;
+using PackedStringPool = DuplicateFileFinderLib.Repository.Storage.Models.PackedStringPool;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins;
 
@@ -209,6 +214,94 @@ public sealed class FileDirIndexTests
         }
     }
 
+    [Fact]
+    public async Task BootstrapEvent_RebuildsIndex_FromSnapshot_AndResolvesRelativePaths()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndex(dir);
+
+            var snapshot = MakeHierarchicalSnapshot();
+
+            plugin.Post(new BootstrapEvent
+            {
+                Generation = 1,
+                NextLogSequence = 2, // expectedLastLogSequence = 1
+                RepoSnapshotView = snapshot
+            });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            // Handles resolve
+            Assert.True(plugin.TryGetDir(101, out _));
+            Assert.True(plugin.TryGetDir(102, out var d102));
+            Assert.True(plugin.TryGetFile(1001, out var f1001));
+
+            // Dir paths (relative to scan root)
+            Assert.True(plugin.TryGetDirPathById(101, out var p101));
+            Assert.Equal("a", p101);
+
+            Assert.True(plugin.TryGetDirPathByHandle(d102, out var p102));
+            Assert.Equal(Path.Combine("a", "b"), p102);
+
+            // File paths (relative to scan root)
+            Assert.True(plugin.TryGetFilePathByHandle(f1001, out var fp));
+            Assert.Equal(Path.Combine("a", "b", "f.txt"), fp);
+
+            Assert.True(plugin.TryGetFilePathById(1001, out var fp2));
+            Assert.Equal(Path.Combine("a", "b", "f.txt"), fp2);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PathResolution_ReturnsFalse_WhenSnapshotNotAvailable()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndex(dir);
+
+            // No bootstrap => no snapshot published; path resolution should fail.
+            Assert.False(plugin.TryGetFilePathById(1001, out _));
+            Assert.False(plugin.TryGetDirPathById(101, out _));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PathResolution_ReturnsFalse_ForUnknownIds()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndex(dir);
+
+            plugin.Post(new BootstrapEvent
+            {
+                Generation = 1,
+                NextLogSequence = 2,
+                RepoSnapshotView = MakeHierarchicalSnapshot()
+            });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.False(plugin.TryGetFilePathById(999999, out _));
+            Assert.False(plugin.TryGetDirPathById(888888, out _));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ---------------- Helpers ----------------
 
     private static string CreateTempDir()
@@ -234,7 +327,7 @@ public sealed class FileDirIndexTests
                     dirIds: [201L],
                     fileIds: [2001L])
             },
-            ScanRoots = null
+            ScanRoots = null!
         };
     }
 
@@ -253,7 +346,19 @@ public sealed class FileDirIndexTests
                     dirIds: [99902L],
                     fileIds: [999002L])
             },
-            ScanRoots = null
+            ScanRoots = null!
+        };
+    }
+
+    private static RepoSnapshotView MakeHierarchicalSnapshot()
+    {
+        return new RepoSnapshotView
+        {
+            Snapshots = new Dictionary<long, ScanRootSnapshotView>
+            {
+                [1] = MakeHierarchicalRoot(scanRootId: 1)
+            },
+            ScanRoots = null!
         };
     }
 
@@ -298,6 +403,63 @@ public sealed class FileDirIndexTests
                 ModifiedTicks = 0
             };
         }
+
+        return new ScanRootSnapshotView
+        {
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs = dirs,
+            Files = files
+        };
+    }
+
+    private static ScanRootSnapshotView MakeHierarchicalRoot(long scanRootId)
+    {
+        // pool indices: 0="a", 1="b", 2="f.txt", 3="" (error/empty)
+        var pool = PackedStringPool.FromStrings(["a", "b", "f.txt", ""]);
+
+        var dirs = new[]
+        {
+            new DirRecordV2
+            {
+                DirId = 101,
+                ParentDirId = -1,
+                NameStrIdx = 0,              // "a"
+                ErrorMessageStrIdx = 3,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            },
+            new DirRecordV2
+            {
+                DirId = 102,
+                ParentDirId = 101,
+                NameStrIdx = 1,              // "b"
+                ErrorMessageStrIdx = 3,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            }
+        };
+
+        var files = new[]
+        {
+            new FileRecordV2
+            {
+                FileId = 1001,
+                DirId = 102,
+                NameStrIdx = 2,              // "f.txt"
+                ErrorMessageStrIdx = 3,
+                Size = 1,
+                Hash = HashKey.NotComputed,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            }
+        };
 
         return new ScanRootSnapshotView
         {

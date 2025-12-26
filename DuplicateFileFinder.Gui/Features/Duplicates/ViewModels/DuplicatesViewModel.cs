@@ -1,7 +1,6 @@
 // ViewModels/DuplicatesViewModel.cs
 
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
@@ -88,7 +87,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public long WastedBytes => _duplicates.WastedBytes;
 
 
-    public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
+    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
     public ObservableCollection<FolderNodeViewModel> FolderRoots { get; } = [];
 
     // Expose treemap for binding
@@ -133,7 +132,6 @@ public partial class DuplicatesViewModel : ObservableObject
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
         FolderRoots.Clear();
-        FilteredSets.Clear();
 
         using (TimingLog.StartPhase("BuildFolderTree()"))
         {
@@ -150,15 +148,7 @@ public partial class DuplicatesViewModel : ObservableObject
             _treeMap.Rebuild(snapshot);
         }
 
+        OnPropertyChanged(nameof(FilteredSets));
         OnPropertyChanged(nameof(DirectoryTreeMapRoot));
-    }
-
-    public async Task OptimizeRepoAsync()
-    {
-        // Run compaction off the UI thread
-        await Task.Run(() => _repo.CompactAsync());
-
-        // After compaction, reload from the repo to reflect any changes
-        await Dispatcher.UIThread.InvokeAsync(LoadFromRepo);
     }
 }

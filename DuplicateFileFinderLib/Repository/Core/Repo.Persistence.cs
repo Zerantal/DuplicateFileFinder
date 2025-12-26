@@ -1,9 +1,7 @@
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
-using PackedStringPool = DuplicateFileFinderLib.Repository.Storage.Models.PackedStringPool;
-using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 

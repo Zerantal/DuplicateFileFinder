@@ -24,5 +24,3 @@ using (TimingLog.Start("Folder scan", root))
 {
     await finder.FullScanAsync(root);
 }
-
-await host.Repo.CompactAsync();

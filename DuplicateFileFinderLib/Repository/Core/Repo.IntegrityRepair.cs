@@ -1,7 +1,10 @@
 // DuplicateFileFinderLib/Repository/Repo.IntegrityRepair.cs
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Util;
+using DirRecord = DuplicateFileFinderLib.Repository.Storage.Models.DirRecord;
+using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -12,7 +15,7 @@ public sealed partial class Repo
     /// It:
     /// - Promotes dirs whose ParentDirId is missing to roots.
     /// - Recreates missing ScanRoots for ScanRuns.
-    /// - Binds ScanRoot.DirId (creating dummy root dirs as needed).
+    /// - Binds ScanRoot.dirId (creating dummy root dirs as needed).
     /// - Removes ScanRuns that are not referenced by any Dir/File record.
     /// - Removes ScanRoots with no remaining runs.
     /// - Deduplicates ScanRoots per RootPath (keeping the best candidate).
@@ -97,7 +100,7 @@ public sealed partial class Repo
             _scanRoots = rootsById;
 
             // ------------------------------------
-            // 3. Bind ROOT_DIRID_EMPTY (ScanRoot.DirId)
+            // 3. Bind ROOT_DIRID_EMPTY (ScanRoot.dirId)
             // ------------------------------------
             foreach (var (id, root) in _scanRoots.ToArray())
             {
@@ -257,7 +260,7 @@ public sealed partial class Repo
                 }
 
                 // Choose canonical:
-                // 1. prefer one with non-empty DirId
+                // 1. prefer one with non-empty dirId
                 // 2. among those, prefer latest LastScannedAt
                 var candidates = roots.Where(r => r.DirId != 0).ToList();
                 if (candidates.Count == 0)

@@ -12,6 +12,9 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
     private volatile ImmutableDictionary<long, FileHandle> _filesById = ImmutableDictionary<long, FileHandle>.Empty;
     private volatile ImmutableDictionary<long, DirHandle> _dirsById = ImmutableDictionary<long, DirHandle>.Empty;
     
+    // cached snapshot of all file/dir records
+    private volatile RepoSnapshotView? _snapshotView;
+    
     // Persisted position (only mutated on bootstrap/compaction thread)
     private long _lastIndexedGeneration;
     private long _lastIndexedLogSequence;
@@ -34,8 +37,9 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
 
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
+        _snapshotView = evt.RepoSnapshotView;
         var expectedLastLogSequence = evt.NextLogSequence - 1;
-
+        
         if (!TryLoadState(evt.Generation, expectedLastLogSequence))
         {
             // Fallback: rebuild from snapshot and persist.
@@ -54,6 +58,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
 
     protected override void OnCompactedEvent(CompactedEvent evt)
     {
+        _snapshotView = evt.RepoSnapshotView;
         var expectedLastLogSequence = evt.NextLogSequence - 1;
 
         // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
@@ -99,6 +104,9 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
         // public index
         _dirsById = dirIndexbuilder.ToImmutable();
         _filesById = fileIndexbuilder.ToImmutable();
+
+        // Publish snapshot view last so readers see coherent state.
+        _snapshotView = repoSnapshot;
     }
 
 // ---------------------------------------------------------------------
@@ -165,4 +173,120 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
     public bool TryGetFile(long fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
     public int FileCount => _filesById.Count;
     public int DirCount => _dirsById.Count;
+    public bool TryGetFilePathById(long fileId, out string relativePath)
+    {
+        relativePath = String.Empty;
+        
+        return TryGetFile(fileId, out FileHandle handle) && TryGetFilePathByHandle(handle, out relativePath);
+    }
+
+    public bool TryGetFilePathByHandle(FileHandle fileHandle, out string relativePath)
+    {
+        relativePath = string.Empty;
+
+        var view = _snapshotView;
+        if (view is null)
+            return false;
+
+        if (!view.Snapshots.TryGetValue(fileHandle.ScanRootId, out var snapshot))
+            return false;
+
+        if ((uint)fileHandle.Index >= (uint)snapshot.Files.Count)
+            return false;
+
+        var file = snapshot.Files[fileHandle.Index];
+
+        // Collect segments bottom-up: [fileName, dirName, dirName, ...]
+        var segments = new List<string>(capacity: 8);
+
+        // File name
+        var pathElement = view.DecodeFileName(fileHandle);
+        segments.Add(pathElement);
+
+        // Walk parent dirs until "root"
+        long dirId = file.DirId;
+        while (dirId > 0)
+        {
+            if (!_dirsById.TryGetValue(dirId, out var dh))
+                return false; // inconsistent index/snapshot
+
+            if (dh.ScanRootId != fileHandle.ScanRootId)
+                return false; // should not happen
+
+            if ((uint)dh.Index >= (uint)snapshot.Dirs.Count)
+                return false;
+
+            var dir = snapshot.Dirs[dh.Index];
+            pathElement = view.DecodeDirName(dh);
+            segments.Add(pathElement);
+            dirId = dir.ParentDirId;
+        }
+
+        // Build relative path in correct order
+        segments.Reverse();
+
+        // Avoid Path.Combine in a loop; but fine as a sketch:
+        relativePath = segments.Count == 0 ? string.Empty : segments[0];
+        for (int i = 1; i < segments.Count; i++)
+            relativePath = Path.Combine(relativePath, segments[i]);
+
+        return true;
+    }
+
+
+    public bool TryGetDirPathById(long dirId, out string relativePath)
+    {
+        relativePath = String.Empty;
+        
+        return TryGetDir(dirId, out DirHandle handle) && TryGetDirPathByHandle(handle, out relativePath);
+    }
+
+    public bool TryGetDirPathByHandle(DirHandle dirHandle, out string relativePath)
+    {
+        relativePath = string.Empty;
+
+        var view = _snapshotView;
+        if (view is null)
+            return false;
+
+        if (!view.Snapshots.TryGetValue(dirHandle.ScanRootId, out var snapshot))
+            return false;
+
+        if ((uint)dirHandle.Index >= (uint)snapshot.Dirs.Count)
+            return false;
+
+        var segments = new List<string>(capacity: 8);
+        
+        var dir = snapshot.Dirs[dirHandle.Index];
+
+        // Add this dir name first, then climb parents
+        var pathElement = view.DecodeDirName(dirHandle);
+        segments.Add(pathElement);
+
+        long parentId = dir.ParentDirId;
+        while (parentId > 0)
+        {
+            if (!_dirsById.TryGetValue(parentId, out var parentHandle))
+                return false;
+
+            if (parentHandle.ScanRootId != dirHandle.ScanRootId)
+                return false;
+
+            if ((uint)parentHandle.Index >= (uint)snapshot.Dirs.Count)
+                return false;
+
+            var parent = snapshot.Dirs[parentHandle.Index];
+            pathElement = view.DecodeDirName(parentHandle);
+            segments.Add(pathElement);
+            parentId = parent.ParentDirId;
+        }
+
+        segments.Reverse();
+
+        relativePath = segments.Count == 0 ? string.Empty : segments[0];
+        for (int i = 1; i < segments.Count; i++)
+            relativePath = Path.Combine(relativePath, segments[i]);
+
+        return true;
+    }
 }

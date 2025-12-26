@@ -12,7 +12,7 @@ namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    private IRepoHost? _repoHost;
+    private readonly IRepoHost? _repoHost;
     
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
     
@@ -22,7 +22,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OptimizeRepoCommand))]
     private bool _isScanning;
 
     /// <inheritdoc/>
@@ -57,21 +56,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         await StartScan(path);
     }
-
-    [RelayCommand(CanExecute = nameof(CanStartScan))]
-    private async Task OptimizeRepo()
-    {
-        try
-        {
-            await Duplicates!.OptimizeRepoAsync();
-            await _dialogService.ShowInfoAsync("Repository optimized", "The repository has been compacted.");
-        }
-        catch (Exception ex)
-        {
-            await _dialogService.ShowErrorAsync("Failed to optimize repository", ex.Message);
-        }
-    }
-
+    
     // ---------------- Scan orchestration ----------------
 
     private async Task StartScan(string path)

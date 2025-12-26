@@ -1,5 +1,5 @@
-using DuplicateFileFinderLib.Repository.Models;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
+
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 

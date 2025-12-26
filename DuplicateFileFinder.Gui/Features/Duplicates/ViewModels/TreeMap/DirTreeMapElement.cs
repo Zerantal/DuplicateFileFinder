@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 

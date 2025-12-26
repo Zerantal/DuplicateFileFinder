@@ -39,8 +39,6 @@
                                FontFamily="monospace">
                         <TextBlock.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="Quick rescan"
-                                          Command="{Binding QuickRescanCommand}" />
                                 <MenuItem Header="Full rescan"
                                           Command="{Binding FullRescanCommand}" />
                                 <MenuItem Header="Remove scan root"

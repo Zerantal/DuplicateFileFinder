@@ -4,8 +4,8 @@ using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
@@ -25,7 +25,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
     // Map scanRoot.DirId -> scanRoot info (for root full path)
     private Dictionary<long, ScanRootViewEntry> _scanRootByDirId = new();
 
-    private sealed record ScanRootViewEntry(long RootId, string RootPath, string? VolumePath);
+    private sealed record ScanRootViewEntry(string RootPath, string? VolumePath);
 
     public void Rebuild(RepoSnapshotView snapshot, ObservableCollection<FolderNodeViewModel> folderRoots)
     {
@@ -39,7 +39,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             .Where(r => !r.IsDeleted)
             .ToDictionary(
                 r => r.DirId,
-                r => new ScanRootViewEntry(r.RootId, r.RootPath, r.VolumePath));
+                r => new ScanRootViewEntry(r.RootPath, r.VolumePath));
 
         foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
         {
@@ -50,7 +50,8 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             if (rootRec.Status == ScanEntryStatus.None)
                 continue;
             
-            var node = GetOrCreateNode(rootHandle, isScanRoot: true);
+            var scanRootFullPath = GetScanRootFullPath(scanRoot.DirId);
+            var node = GetOrCreateNode(rootHandle, scanRootFullPath);
         
             node.Parent = null;
             node.ShowFullPath = true;
@@ -61,7 +62,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         }
     }
 
-    private FolderNodeViewModel GetOrCreateNode(DirHandle dirHandle, bool isScanRoot)
+    private FolderNodeViewModel GetOrCreateNode(DirHandle dirHandle, string parentPath)
                 {
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called before building nodes.");
@@ -73,10 +74,8 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             return existing;
 
         var name = _snapshot.DecodeDirName(dirHandle);
-        var fullPath = isScanRoot
-            ? GetScanRootFullPath(dirId)
-            : BuildFullPath(dirHandle);
-
+        var fullPath = Path.Combine(parentPath, name);
+        
         var node = new FolderNodeViewModel(dirId, name, fullPath, _scanner)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded
@@ -113,7 +112,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         var childHandles = _treeIndex.GetChildDirs(parentHandle);
         foreach (var childHandle in childHandles)
         {
-            var childNode = GetOrCreateNode(childHandle, isScanRoot: false);
+            var childNode = GetOrCreateNode(childHandle, node.FullPath);
             childNode.Parent = node;
             InsertChildSorted(node, childNode);
         }
@@ -140,27 +139,8 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called before building paths.");
 
-        // Walk parents via ParentDirId (resolved through FileDirIndex) and decode names via per-root pool.
-        // This is only used for nodes you actually materialise (visible nodes), so it’s OK.
-        var parts = new List<string>(capacity: 16);
-
-        var cur = leaf;
-        while (true)
-        {
-            var rec = _snapshot.GetDirRecord(cur);
-            parts.Add(_snapshot.DecodeDirName(cur));
-
-            if (rec.ParentDirId < 0)
-                break;
-
-            if (!_mainIndex.TryGetDir(rec.ParentDirId, out var parent))
-                break;
-
-            cur = parent;
-        }
-
-        parts.Reverse();
-        return Path.Combine(parts.ToArray());
+        _mainIndex.TryGetDirPathByHandle(leaf, out var relativePath);
+        return Path.Combine(relativePath);
     }
 
     private static void InsertRootSorted(ObservableCollection<FolderNodeViewModel> roots, FolderNodeViewModel node)

@@ -19,6 +19,9 @@ public partial class DuplicatesController : ObservableObject
     private string? _selectedFolderPrefix;
     private DuplicateSetRow? _selectedSet;
 
+    // RootId -> full path (e.g. VolumePath + RootPath)
+    private Dictionary<long, string> _scanRootFullPathByRootId = new();
+
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;
     [ObservableProperty] private long _wastedBytes;
@@ -75,6 +78,15 @@ public partial class DuplicatesController : ObservableObject
         _allSets.Clear();
         FilteredSets.Clear();
 
+        // Cache scan-root full paths for this rebuild (RootId is the same id used in handles)
+        _scanRootFullPathByRootId = _repo.ScanRootsView
+            .Where(r => !r.IsDeleted)
+            .ToDictionary(
+                r => r.RootId,
+                r => r.VolumePath != null
+                    ? Path.Combine(r.VolumePath, r.RootPath)
+                    : r.RootPath);
+
         FilesScanned = _mainIndex.FileCount;
 
         // HashIndex provides groups; we map ids -> FileRecord and build DuplicateSetRow
@@ -92,8 +104,22 @@ public partial class DuplicatesController : ObservableObject
                     var name = snapshot.DecodeFileName(handle);
                     var pathResolver = () =>
                     {
-                        var dirPath = _repo.GetDirPath(rec.DirId);
-                        return Path.Combine(dirPath, name);
+                        // FileDirIndexPlugin returns scan-root-relative path; convert to full path.
+                        if (!_mainIndex.TryGetFilePathByHandle(handle, out var relativePath) ||
+                            string.IsNullOrWhiteSpace(relativePath))
+                        {
+                            // Fall back to name (still usable in UI).
+                            return name;
+                        }
+
+                        if (!_scanRootFullPathByRootId.TryGetValue(handle.ScanRootId, out var rootFullPath) ||
+                            string.IsNullOrWhiteSpace(rootFullPath))
+                        {
+                            // No root info => keep relative.
+                        return relativePath;
+                        }
+
+                        return Path.Combine(rootFullPath, relativePath);
                     };
                     return (rec, name, pathResolver);
                 }).ToList();

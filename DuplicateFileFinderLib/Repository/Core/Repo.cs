@@ -2,9 +2,7 @@
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Models;
-using FileRecord = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord;
-using ScanRootSnapshotV2 = DuplicateFileFinderLib.Repository.Storage.Models.ScanRootSnapshotV2;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
