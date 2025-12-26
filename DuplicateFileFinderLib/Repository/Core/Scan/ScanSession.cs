@@ -2,9 +2,7 @@
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
@@ -25,57 +23,114 @@ internal sealed class ScanSession : IScanSession
     private long ScanRootId => Run.ScanRootId;
 
     public DirCursor RootDirCursor { get; }
+    
+    private long _lastCheckpointUtcTicks;
+    private readonly TimeSpan _minCheckpointInterval;
+    private int _hasUncheckpointedChanges;
+    
+    private Func<PendingDir[]>? _getPendingDirs;
+
+    // Deterministic time source for tests (defaults to DateTime.UtcNow.Ticks)
+    private readonly Func<long> _utcNowTicks;
 
     public ScanSession(
         IRepoInternal repo,
         ScanRun run,
         DirScanInput rootDirInput,
-        int maxFilesBeforeFlush,
-        int maxDirsBeforeFlush)
+        TimeSpan? minCheckpointInterval = null,
+        Func<long>? utcNowTicks = null)
     {
         _repo = repo;
         Run = run;
         
-        // Baseline snapshot for this root (may be null for first scan)
+        _minCheckpointInterval = minCheckpointInterval ?? TimeSpan.FromSeconds(300);
+        _utcNowTicks = utcNowTicks ?? (static () => DateTime.UtcNow.Ticks);
+        _lastCheckpointUtcTicks = _utcNowTicks();
+
         var baselineView = _repo.TryGetScanRootView(run.ScanRootId);
 
         _baseline = new BaselineIndex(baselineView);
         _cmp = new DirectoryComparator(_baseline);
         _mut = new MutationBuffer(_repo, scanSequence: run.ScanSequence);
 
-        // Root cursor is opaque to scanner; session chooses stable id
+        // Root cursor should be stable (repo ScanRoot.DirId). If missing, allocate.
         var rootDirId = rootDirInput.DirId > 0 ? rootDirInput.DirId : _repo.AllocateDirId();
         RootDirCursor = new DirCursor(rootDirId);
 
-        // Ensure root exists in current buffers as "known root, not yet enumerated"
+        // Seed root record as "known, not yet enumerated"
         var rootInternal = rootDirInput with { DirId = rootDirId, ParentDirId = -1, Name = "", Status = ScanEntryStatus.None };
         _mut.UpsertDir(rootInternal);
     }
 
-    public async ValueTask DisposeAsync()
+    public void SetPendingDirsProvider(Func<PendingDir[]> getPendingDirs)
     {
-        try
-        {
-            var t = _inflightFlush;
-            if (t is not null)
-                await t.ConfigureAwait(false);
-        }
-        catch
-        {
-            /* ignore */
-        }
-
-        if (!_finished)
-            _repo.MarkScanFailed(ScanSequence, "ScanSession disposed before completion.", true);
+        _getPendingDirs = getPendingDirs ?? throw new ArgumentNullException(nameof(getPendingDirs));
     }
 
-    // ---------------------- Directory enumeration ----------------------
+    public async ValueTask DisposeAsync()
+    {
+        // If disposed without completion/failure, mark failed.
+        if (!_finished)
+            await _repo.MarkScanFailedAsync(ScanSequence, 
+                "ScanSession disposed before completion.", true);
+
+        await Task.CompletedTask;
+    }
+
+    // -------- Resume support --------
+
+    public void ImportPartialSnapshot(in ScanRootSnapshotV2 partial)
+    {
+        // Seed FULL state for final BuildSnapshotV2.
+        // This relies on PackedStringPool.GetString(), which your tests use.
+        lock (_mut.Sync)
+        {
+            foreach (var d in partial.Dirs)
+            {
+                var name = partial.StringPool.GetString(d.NameStrIdx);
+                var err = d.ErrorMessageStrIdx >= 0 ? partial.StringPool.GetString(d.ErrorMessageStrIdx) : null;
+
+                _mut.UpsertDir(new DirScanInput
+                {
+                    DirId = d.DirId,
+                    ParentDirId = d.ParentDirId,
+                    Name = name,
+                    CreatedTicks = d.CreatedTicks,
+                    ModifiedTicks = d.ModifiedTicks,
+                    Status = d.Status,
+                    ErrorMessage = err
+                });
+            }
+
+            foreach (var f in partial.Files)
+            {
+                var name = partial.StringPool.GetString(f.NameStrIdx);
+                var err = f.ErrorMessageStrIdx >= 0 ? partial.StringPool.GetString(f.ErrorMessageStrIdx) : null;
+
+                _mut.UpsertFile(new FileScanInput
+                {
+                    FileId = f.FileId,
+                    DirId = f.DirId,
+                    Name = name,
+                    Size = f.Size,
+                    Hash = f.Hash,
+                    CreatedTicks = f.CreatedTicks,
+                    ModifiedTicks = f.ModifiedTicks,
+                    Status = f.Status,
+                    ErrorMessage = err
+                });
+            }
+        }
+    }
+
+    // -------- Enumeration callbacks --------
+
     public DirEnumerationContext BeginDirectory(DirCursor parentDirId)
     {
-        // Mark root as enumerated the moment the scanner starts enumerating it.
+        // Ensure root is set to enumerated when we actually enumerate it.
         if (parentDirId.DirId == RootDirCursor.DirId)
         {
-            var rootEnumerated = new DirScanInput
+            _mut.UpsertDir(new DirScanInput
             {
                 DirId = RootDirCursor.DirId,
                 ParentDirId = -1,
@@ -84,9 +139,10 @@ internal sealed class ScanSession : IScanSession
                 ModifiedTicks = 0,
                 Status = ScanEntryStatus.Enumerated,
                 ErrorMessage = null
-            };
+            });
 
-            _mut.UpsertDir(rootEnumerated);
+            Volatile.Write(ref _hasUncheckpointedChanges, 1);
+            TryScheduleCheckpointFlush();
         }
 
         return _cmp.Begin(parentDirId);
@@ -94,7 +150,6 @@ internal sealed class ScanSession : IScanSession
 
     public DirCursor OnDirectoryFound(in ObservedDir dir, ref DirEnumerationContext ctx)
     {
-        // Reuse by name if baseline had one.
         var existingId = _cmp.TryConsumeExpectedDirId(ref ctx, dir.Name);
 
         var input = new DirScanInput
@@ -109,6 +164,10 @@ internal sealed class ScanSession : IScanSession
         };
 
         var childId = _mut.UpsertDir(input);
+        
+        Volatile.Write(ref _hasUncheckpointedChanges, 1);
+        TryScheduleCheckpointFlush();
+
         return new DirCursor(childId);
     }
     
@@ -130,7 +189,7 @@ internal sealed class ScanSession : IScanSession
         };
 
         // Decide if hashing is required.
-        var shouldHash = HashPolicy.ShouldHash(internalInput, _baseline);
+        var shouldHash = HashPolicy.ShouldHash(internalInput, _baseline, Run.HashPolicy);
 
         // If not hashing and baseline has a valid hash, reuse it now.
         if (!shouldHash && internalInput.FileId > 0 &&
@@ -142,9 +201,15 @@ internal sealed class ScanSession : IScanSession
 
         _mut.UpsertFile(internalInput);
 
-        return shouldHash
-            ? new FileHashDecision(true, new FileHashToken(internalInput.DirId, internalInput.Name, internalInput.Size, internalInput.CreatedTicks, internalInput.ModifiedTicks))
+        var decision = shouldHash
+            ? new FileHashDecision(true,
+                new FileHashToken(internalInput.DirId, internalInput.Name, internalInput.Size))
             : FileHashDecision.NoHash;
+
+        Volatile.Write(ref _hasUncheckpointedChanges, 1);
+        TryScheduleCheckpointFlush();
+
+        return decision;
     }
     
     public void OnFileHashCompleted(in FileHashToken token, ReadOnlyMemory<byte> hashBytes, string? errorMessage)
@@ -154,10 +219,16 @@ internal sealed class ScanSession : IScanSession
         {
             var hk = new HashKey(hashBytes);
             _mut.ApplyFileHash(token.DirId, token.Name, hk);
+
+            Volatile.Write(ref _hasUncheckpointedChanges, 1);
+            TryScheduleCheckpointFlush();
             return;
         }
 
         _mut.ApplyFileError(token.DirId, token.Name, errorMessage);
+
+        Volatile.Write(ref _hasUncheckpointedChanges, 1);
+        TryScheduleCheckpointFlush();
     }
     
     public void EndDirectory(ref DirEnumerationContext ctx)
@@ -177,6 +248,7 @@ internal sealed class ScanSession : IScanSession
                 Status = ScanEntryStatus.Deleted,
                 ErrorMessage = null
             };
+
             _mut.UpsertFile(f);
         }
 
@@ -192,41 +264,147 @@ internal sealed class ScanSession : IScanSession
                 Status = ScanEntryStatus.Deleted,
                 ErrorMessage = null
             };
+
             _mut.UpsertDir(d);
         }
 
         _cmp.Clear(ref ctx);
+        
+        Volatile.Write(ref _hasUncheckpointedChanges, 1);
+        TryScheduleCheckpointFlush();
     }
 
-    // ---------------------- Flush / Complete / Fail ----------------------
-    public Task FlushProgressAsync(CancellationToken cancellationToken = default)
+    private void TryScheduleCheckpointFlush()
     {
-        // TODO: Stubbed for now.
-        lock (_mut.Sync)
+        if (_finished)
+            return;
+
+        if (Volatile.Read(ref _hasUncheckpointedChanges) == 0)
+            return;
+
+        var now = _utcNowTicks();
+        var last = Interlocked.Read(ref _lastCheckpointUtcTicks);
+
+        // Too soon => skip (time-based policy only).
+        if (last != 0 && now - last < _minCheckpointInterval.Ticks)
+            return;
+
+        // Already flushing => skip
+        var t = _inflightFlush;
+        if (t is { IsCompleted: false })
+            return;
+
+        // Schedule a flush task; do not await (hot path).
+        _inflightFlush = FlushProgressAsync(CancellationToken.None);
+    }
+
+    private PendingDir[] GetPendingDirsForCheckpoint()
+    {
+        try
         {
-            _inflightFlush ??= Task.CompletedTask;
-            return _inflightFlush;
+            return _getPendingDirs?.Invoke() ?? Array.Empty<PendingDir>();
+        }
+        catch
+        {
+            return Array.Empty<PendingDir>();
         }
     }
 
+    internal async Task FlushProgressAsync(CancellationToken ct)
+    {
+        if (_finished)
+            return;
+
+        if (Volatile.Read(ref _hasUncheckpointedChanges) == 0)
+            return;
+
+        var now = _utcNowTicks();
+        var last = Interlocked.Read(ref _lastCheckpointUtcTicks);
+
+        // Too soon => skip
+        if (last != 0 && now - last < _minCheckpointInterval.Ticks)
+            return;
+
+        await _flushGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_finished)
+                return;
+
+            if (Volatile.Read(ref _hasUncheckpointedChanges) == 0)
+                return;
+
+            now = _utcNowTicks();
+            last = Interlocked.Read(ref _lastCheckpointUtcTicks);
+
+            if (last != 0 && now - last < _minCheckpointInterval.Ticks)
+                return;
+
+            ScanRootSnapshotV2 partial;
+            lock (_mut.Sync)
+            {
+                partial = _mut.DrainCheckpointSnapshot(ScanRootId);
+            }
+
+            if (partial.Dirs.Length == 0 && partial.Files.Length == 0)
+            {
+                Volatile.Write(ref _hasUncheckpointedChanges, 0);
+                Interlocked.Exchange(ref _lastCheckpointUtcTicks, now);
+                return;
+            }
+
+            var checkpoint = new ScanCheckpoint
+            {
+                CheckpointVersion = ScanCheckpoint.CurrentCheckpointVersion,
+                ScanRootId = ScanRootId,
+                ScanSequence = Run.ScanSequence,
+                RootPath = Run.RootPath,            
+                PendingDirs = GetPendingDirsForCheckpoint(),
+                PartialSnapshot = partial,
+                CreatedAtUtcTicks = now
+            };
+
+            await _repo.CommitCheckpoint(checkpoint, ct).ConfigureAwait(false);
+        
+            // Mark success
+            Volatile.Write(ref _hasUncheckpointedChanges, 0);
+            Interlocked.Exchange(ref _lastCheckpointUtcTicks, now);
+        }
+        finally
+        {
+            _flushGate.Release();
+        }
+    }
+        
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
         // Build V2 snapshot (dirs/files arrays + PackedStringPool)
         var snapshot = _mut.BuildSnapshotV2(ScanRootId);
-
         await _repo.CommitScanRootSnapshotV2Async(snapshot, cancellationToken).ConfigureAwait(false);
 
-        _repo.MarkScanCompleted(ScanSequence);
+        await _repo.MarkScanCompletedAsync(ScanSequence, cancellationToken).ConfigureAwait(false);
         _finished = true;
+
+        // Successful completion => checkpoint is no longer needed.
+        try
+        {
+            await _repo.DeleteScanCheckpointAsync(ScanRootId, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best effort.
+        }
     }
 
     public async Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
-        _repo.MarkScanFailed(ScanSequence, errorMessage, cancelled);
+        await _repo.MarkScanFailedAsync(ScanSequence, errorMessage, cancelled, cancellationToken).ConfigureAwait(false);
         _finished = true;
+
+    // Intentionally keep checkpoint(s) on failure/cancel for resume.
     }
 }

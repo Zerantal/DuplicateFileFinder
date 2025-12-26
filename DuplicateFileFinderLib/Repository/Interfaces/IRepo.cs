@@ -1,46 +1,33 @@
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 
 internal interface IRepoInternal : IRepo
 {
-    void DeleteScanRoot(long scanRootId);
-    
-    long AllocateRunId();
     long AllocateDirId();
     long AllocateFileId();
 
-    void MarkScanFailed(long sequence, string? errorMessage, bool cancelled);
-    public void MarkScanCompleted(long sequence);
-    Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken);
+    Task MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct = default);
+    Task MarkScanCompletedAsync(long sequence, CancellationToken token = default);
+    Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken = default);
+    Task CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct = default);
+    Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default);
+    Task<ScanContext> BeginScanAsync(
+        string rootPath,
+        ScanOptions options,
+        VolumeInfo? volumeInfo = null,
+        CancellationToken ct = default);
 }
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {
-    [Obsolete]
-    IRepoView GetRepoView();
+    public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct = default);
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
     ScanRootSnapshotView? TryGetScanRootView(long scanRootId);
     public RepoSnapshotView GetRepoSnapshotView();
-
-
-    void CommitDelta(RepoDelta delta);
-    public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default);
-    public void SaveScanSnapshots();
-    public IScanSession BeginScan(
-        string rootPath,
-        ScanOperation scanOperation = ScanOperation.FullScan,
-        VolumeInfo? volumeInfo = null,
-        int maxFilesBeforeFlush = 50_000,
-        int maxDirsBeforeFlush = 10_000);
-    public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default);
-    string GetDirPath(long dirId, bool relativeToVolumePath = false);
-    public string GetDirPathV2ByHandle(DirHandle dirHandle, bool relativeToVolumePath = false);
-    public string GetDirPathV2(long dirId, bool relativeToVolumePath = false);
 }

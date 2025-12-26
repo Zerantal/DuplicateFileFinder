@@ -1,4 +1,4 @@
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 

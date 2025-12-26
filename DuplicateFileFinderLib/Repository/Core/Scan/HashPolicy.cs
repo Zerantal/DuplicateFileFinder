@@ -4,11 +4,15 @@ namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
 internal static class HashPolicy
 {
-    public static bool ShouldHash(in FileScanInput f, BaselineIndex baseline)
+    public static bool ShouldHash(in FileScanInput f, BaselineIndex baseline, HashPolicyMode mode)
     {
         if (f.Size <= 0)
             return false;
 
+        if (mode == HashPolicyMode.ForceRehash)
+            return true;
+
+        // New file => hash
         if (f.FileId <= 0)
             return true;
 
@@ -19,7 +23,6 @@ internal static class HashPolicy
             return true;
 
         return !(old.Size == f.Size &&
-                 old.ModifiedTicks == f.ModifiedTicks &&
-                 old.CreatedTicks == f.CreatedTicks);
+                 old.ModifiedTicks == f.ModifiedTicks);
     }
 }

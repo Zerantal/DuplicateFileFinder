@@ -1,13 +1,13 @@
 using System.Collections.Immutable;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
-public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
+public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
     private volatile ImmutableDictionary<long, FileHandle> _filesById = ImmutableDictionary<long, FileHandle>.Empty;
     private volatile ImmutableDictionary<long, DirHandle> _dirsById = ImmutableDictionary<long, DirHandle>.Empty;
@@ -15,14 +15,13 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
     // cached snapshot of all file/dir records
     private volatile RepoSnapshotView? _snapshotView;
     
-    // Persisted position (only mutated on bootstrap/compaction thread)
+    // Persisted position (only mutated on bootstrap/worker thread)
     private long _lastIndexedGeneration;
-    private long _lastIndexedLogSequence;
     
     private readonly string _dataDirectory;
     private const string StateFileName = "file-dir-index.bin";
 
-    public FileDirIndex(string dataDirectory) : base(4096)
+    public FileDirIndexPlugin(string dataDirectory) : base(4096)
     {
         if (string.IsNullOrWhiteSpace(dataDirectory))
             throw new ArgumentException("Data directory must be non-empty.", nameof(dataDirectory));
@@ -38,35 +37,36 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
         _snapshotView = evt.RepoSnapshotView;
-        var expectedLastLogSequence = evt.NextLogSequence - 1;
         
-        if (!TryLoadState(evt.Generation, expectedLastLogSequence))
+        if (!TryLoadState(evt.Generation))
         {
             // Fallback: rebuild from snapshot and persist.
             RebuildFromSnapshot(evt.RepoSnapshotView);
             _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = expectedLastLogSequence;
             SaveState();
         }
         else
         {
-            // Loaded state is already consistent with generation/log seq.
             _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = expectedLastLogSequence;
         }
     }
 
-    protected override void OnCompactedEvent(CompactedEvent evt)
+    protected override void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt)
     {
-        _snapshotView = evt.RepoSnapshotView;
-        var expectedLastLogSequence = evt.NextLogSequence - 1;
+        // Ignore stale/out-of-order events (channel may drop old items).
+        if (evt.Generation <= _lastIndexedGeneration)
+            return;
 
-        // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
-        RebuildFromSnapshot(evt.RepoSnapshotView);
+        _snapshotView = evt.RepoSnapshotView;
+
+        using (TimingLog.StartPhase($"Rebuilding FileDirIndexPlugin (ScanRoot {evt.ScanRootId}, Gen {evt.Generation})"))
+        {
+            RebuildFromSnapshot(evt.RepoSnapshotView);
+        }
+
         _lastIndexedGeneration = evt.Generation;
-        _lastIndexedLogSequence = expectedLastLogSequence;
         SaveState();
-    }    
+    }
     
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)
@@ -87,16 +87,17 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
                 if (!dirIndexbuilder.TryAdd(dir.DirId, new DirHandle(rootId, i)))
                 {
                     throw new InvalidOperationException(
-                        $"Duplicate dirId {dir.DirId} encountered while rebuilding FileDirIndex.");
+                        $"Duplicate dirId {dir.DirId} encountered while rebuilding FileDirIndexPlugin.");
                 }
             }
+
             for (int i = 0; i < snapshot.Files.Count; i++)
             {
                 var file = snapshot.Files[i];
                 if (!fileIndexbuilder.TryAdd(file.FileId, new FileHandle(rootId, i)))
                 {
                     throw new InvalidOperationException(
-                        $"Duplicate FileId {file.FileId} encountered while rebuilding FileDirIndex.");
+                        $"Duplicate FileId {file.FileId} encountered while rebuilding FileDirIndexPlugin.");
                 }
             }
         }
@@ -120,7 +121,6 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
         var state = new FileDirIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            LastIndexedLogSequence = _lastIndexedLogSequence,
             DirsById = _dirsById.ToDictionary(x => x.Key, x => x.Value),
             FilesById = _filesById.ToDictionary(x => x.Key, x => x.Value)
         };
@@ -133,7 +133,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
         File.WriteAllBytes(path, MemoryPackSerializer.Serialize(state));
     }
 
-    private bool TryLoadState(long expectedGeneration, long expectedLastLogSequence)
+    private bool TryLoadState(long expectedGeneration)
     {
         var path = GetStateFilePath();
         if (!File.Exists(path))
@@ -146,17 +146,17 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
                 return false;
 
             // Only use the state if it matches the current repo position.
-            if (state.LastIndexedGeneration != expectedGeneration ||
-                state.LastIndexedLogSequence != expectedLastLogSequence)
+            if (state.LastIndexedGeneration != expectedGeneration)
                 return false;
 
             // Rehydrate into immutable indexes + publish
-            _dirsById =  state.DirsById.ToImmutableDictionary(x => x.Key, x => x.Value);
-            _filesById =  state.FilesById.ToImmutableDictionary(x => x.Key, x => x.Value);
+            using (TimingLog.StartPhase("Rehydrating into immutable indexes"))
+            {
+                _dirsById = state.DirsById.ToImmutableDictionary();
+                _filesById = state.FilesById.ToImmutableDictionary();
+            }
 
             _lastIndexedGeneration = state.LastIndexedGeneration;
-            _lastIndexedLogSequence = state.LastIndexedLogSequence;
-
             return true;
         }
         catch
@@ -173,11 +173,11 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
     public bool TryGetFile(long fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
     public int FileCount => _filesById.Count;
     public int DirCount => _dirsById.Count;
+
     public bool TryGetFilePathById(long fileId, out string relativePath)
     {
-        relativePath = String.Empty;
-        
-        return TryGetFile(fileId, out FileHandle handle) && TryGetFilePathByHandle(handle, out relativePath);
+        relativePath = string.Empty;
+        return TryGetFile(fileId, out var handle) && TryGetFilePathByHandle(handle, out relativePath);
     }
 
     public bool TryGetFilePathByHandle(FileHandle fileHandle, out string relativePath)
@@ -197,11 +197,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
         var file = snapshot.Files[fileHandle.Index];
 
         // Collect segments bottom-up: [fileName, dirName, dirName, ...]
-        var segments = new List<string>(capacity: 8);
-
-        // File name
-        var pathElement = view.DecodeFileName(fileHandle);
-        segments.Add(pathElement);
+        var segments = new List<string>(capacity: 8) { view.DecodeFileName(fileHandle) };
 
         // Walk parent dirs until "root"
         long dirId = file.DirId;
@@ -217,8 +213,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
                 return false;
 
             var dir = snapshot.Dirs[dh.Index];
-            pathElement = view.DecodeDirName(dh);
-            segments.Add(pathElement);
+            segments.Add(view.DecodeDirName(dh));
             dirId = dir.ParentDirId;
         }
 
@@ -236,9 +231,8 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
 
     public bool TryGetDirPathById(long dirId, out string relativePath)
     {
-        relativePath = String.Empty;
-        
-        return TryGetDir(dirId, out DirHandle handle) && TryGetDirPathByHandle(handle, out relativePath);
+        relativePath = string.Empty;
+        return TryGetDir(dirId, out var handle) && TryGetDirPathByHandle(handle, out relativePath);
     }
 
     public bool TryGetDirPathByHandle(DirHandle dirHandle, out string relativePath)
@@ -258,10 +252,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
         var segments = new List<string>(capacity: 8);
         
         var dir = snapshot.Dirs[dirHandle.Index];
-
-        // Add this dir name first, then climb parents
-        var pathElement = view.DecodeDirName(dirHandle);
-        segments.Add(pathElement);
+        segments.Add(view.DecodeDirName(dirHandle));
 
         long parentId = dir.ParentDirId;
         while (parentId > 0)
@@ -276,8 +267,7 @@ public sealed class FileDirIndex : ChannelRepoPlugin, IFileDirReadModel
                 return false;
 
             var parent = snapshot.Dirs[parentHandle.Index];
-            pathElement = view.DecodeDirName(parentHandle);
-            segments.Add(pathElement);
+            segments.Add(view.DecodeDirName(parentHandle));
             parentId = parent.ParentDirId;
         }
 

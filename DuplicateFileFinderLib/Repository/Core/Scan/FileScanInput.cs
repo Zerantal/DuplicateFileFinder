@@ -3,6 +3,7 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public readonly record struct FileScanInput
 {
     public long FileId { get; init; }                // 0 => allocate
