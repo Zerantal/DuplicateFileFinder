@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using MemoryPack;
@@ -24,7 +23,6 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     private readonly string _dataDirectory;
 
     private long _lastIndexedGeneration;
-    private long _lastIndexedLogSequence;
 
     public TreeIndexPlugin(string dataDirectory)
         : base(4096)
@@ -66,33 +64,34 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
-        if (!TryLoadState(evt.Generation, evt.NextLogSequence - 1))
+        if (!TryLoadState(evt.Generation))
         {
             // Fallback: rebuild from snapshot and persist.
             RebuildFromSnapshot(evt.RepoSnapshotView);
             
             _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = evt.NextLogSequence - 1;
             
             SaveState();
         }
         else
         {
             _lastIndexedGeneration = evt.Generation;
-            _lastIndexedLogSequence = evt.NextLogSequence - 1;
         }
     }
 
-    protected override void OnCompactedEvent(CompactedEvent evt)
+    protected override void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt)
     {
-        // After compaction, it’s safer to rebuild from snapshot and persist a clean state.
+        // Ignore stale/out-of-order events (channel may drop old items).
+        if (evt.Generation <= _lastIndexedGeneration)
+            return;
+
+        // Rebuild from the new snapshot view and persist.
         RebuildFromSnapshot(evt.RepoSnapshotView);
-        
+
         _lastIndexedGeneration = evt.Generation;
-        _lastIndexedLogSequence = evt.NextLogSequence - 1;
-        
         SaveState();
     }
+
 
     // ---------------------------------------------------------------------
     // Core index maintenance
@@ -279,7 +278,6 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         var state = new TreeIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            LastIndexedLogSequence = _lastIndexedLogSequence,
             ChildrenDirsByParentId = _childrenDirsByParentId,
             ChildrenFilesByDirId = _childrenFilesByDirId,
             DirStatsById = _dirStatsById
@@ -295,7 +293,7 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         File.WriteAllBytes(path, bytes);
     }
 
-    private bool TryLoadState(long expectedGeneration, long expectedLastLogSequence)
+    private bool TryLoadState(long expectedGeneration)
     {
         var path = GetStateFilePath();
         if (!File.Exists(path))
@@ -309,12 +307,10 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 return false;
 
             // Only use the state if it matches the current repo position.
-            if (state.LastIndexedGeneration != expectedGeneration ||
-                state.LastIndexedLogSequence != expectedLastLogSequence)
+            if (state.LastIndexedGeneration != expectedGeneration)
                 return false;
             
             _lastIndexedGeneration = state.LastIndexedGeneration;
-            _lastIndexedLogSequence = state.LastIndexedLogSequence;
 
             _childrenDirsByParentId  = state.ChildrenDirsByParentId;
             _childrenFilesByDirId    = state.ChildrenFilesByDirId;
