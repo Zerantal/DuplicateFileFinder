@@ -97,7 +97,6 @@ public static class Ser
 
         // data
         Buffer.BlockCopy(pool.Data, 0, buffer, pos, dataLen);
-        pos += dataLen;
 
         return buffer;
     }
@@ -119,7 +118,6 @@ public static class Ser
 
         var data = new byte[dataLen];
         Buffer.BlockCopy(bytes, pos, data, 0, dataLen);
-        pos += dataLen;
 
         // Optional sanity: sentinel must match data length
         if (offsets[^1] != dataLen)

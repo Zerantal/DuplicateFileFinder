@@ -1,13 +1,15 @@
 using System.Text.Json;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace RepoCompareTool;
 
 public sealed class SemanticComparisonResult
 {
     public bool SemanticallyIdentical => Differences.Count == 0;
-    public List<string> Differences { get; } = new();
+    public List<string> Differences { get; } = [];
 }
 
 public static class SemanticRepoComparer
@@ -23,15 +25,16 @@ public static class SemanticRepoComparer
         IRepo repoB, string repoPathB)
     {
         var diff = new SemanticComparisonResult();
-
-        var snapA = repoA.GetRepoView();
-        var snapB = repoB.GetRepoView();
+        
+        var snapA = repoA.GetRepoSnapshotView();
+        var snapB = repoB.GetRepoSnapshotView();
 
         CompareMeta(repoPathA, repoPathB, diff);
         CompareScanRoots(repoA, repoB, diff);
-        CompareDirs(repoA, snapA, repoB, snapB, diff);
-        CompareFiles(repoA, snapA, repoB, snapB, diff);
         // CompareHashIndex(repoA, snapA, repoB, snapB, diff);
+        CompareDirs(snapA, snapB, diff);
+        CompareFiles(snapA, snapB, diff);
+        
 
         return diff;
     }
@@ -151,36 +154,28 @@ public static class SemanticRepoComparer
     // DIRS: full path + ScanEntryStatus
     // ------------------------------
     private static void CompareDirs(
-        IRepo repoA, IRepoView snapA,
-        IRepo repoB, IRepoView snapB,
+        RepoSnapshotView snapA,
+        RepoSnapshotView snapB,
         SemanticComparisonResult diff)
     {
-        var mapA = snapA.Dirs.Values
-            .ToDictionary(
-                d => NormalizePath(repoA.GetDirPath(d.DirId)),
-                d => d);
-
-        var mapB = snapB.Dirs.Values
-            .ToDictionary(
-                d => NormalizePath(repoB.GetDirPath(d.DirId)),
-                d => d);
+        var mapA = BuildDirPathMapV2(snapA);
+        var mapB = BuildDirPathMapV2(snapB);
 
         var allPaths = mapA.Keys.Union(mapB.Keys).Order().ToArray();
-
         var section = new List<string>();
 
         foreach (var path in allPaths)
         {
-            mapA.TryGetValue(path, out var a);
-            mapB.TryGetValue(path, out var b);
+            bool aIsMissing = !mapA.TryGetValue(path, out var a);
+            bool bIsMissing = !mapB.TryGetValue(path, out var b);
 
-            if (a is null && b is null)
+            if (aIsMissing && bIsMissing)
                 continue;
 
-            if (a is null || b is null)
+            if (aIsMissing || bIsMissing)
             {
-                var left = a is null ? "<missing>" : a.Status.ToString();
-                var right = b is null ? "<missing>" : b.Status.ToString();
+                var left = aIsMissing ? "<missing>" : a.Status.ToString();
+                var right = bIsMissing ? "<missing>" : b.Status.ToString();
                 section.Add($"DIR {path}");
                 section.Add(SideBySide("Status", left, right));
                 section.Add(string.Empty);
@@ -207,34 +202,42 @@ public static class SemanticRepoComparer
     // FILES: full path + Size + Hash + Created + Status
     // ------------------------------
     private static void CompareFiles(
-        IRepo repoA, IRepoView snapA,
-        IRepo repoB, IRepoView snapB,
+        RepoSnapshotView snapA,
+        RepoSnapshotView snapB,
         SemanticComparisonResult diff)
     {
-        var dirPathsA = snapA.Dirs.Values
-            .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetDirPath(d.DirId)));
+        var dirPathsA = BuildDirIdToPathV2(snapA);
+        var dirPathsB = BuildDirIdToPathV2(snapB);
 
-        var dirPathsB = snapB.Dirs.Values
-            .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetDirPath(d.DirId)));
-
-        var mapA = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in snapA.Files.Values)
+        var mapA = new Dictionary<string, FileRecordV2>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, entry) in snapA.Snapshots)
         {
-            var dirPath = dirPathsA.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-            var fullPath = NormalizePath(Path.Combine(dirPath, f.Name));
-            mapA[fullPath] = f;
+            var files = entry.Files;
+            for (int i = 0; i < files.Count; i++)
+            {
+                var f = files[i];
+                var dirPath = dirPathsA.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
+                var name = f.NameStrIdx >= 0 ? entry.StringPool.GetString(f.NameStrIdx) : "";
+                var fullPath = NormalizePath(Path.Combine(dirPath, name));
+                mapA[fullPath] = f;
+            }
         }
 
-        var mapB = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in snapB.Files.Values)
+        var mapB = new Dictionary<string, FileRecordV2>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, entry) in snapB.Snapshots)
         {
-            var dirPath = dirPathsB.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-            var fullPath = NormalizePath(Path.Combine(dirPath, f.Name));
-            mapB[fullPath] = f;
+            var files = entry.Files;
+            for (int i = 0; i < files.Count; i++)
+            {
+                var f = files[i];
+                var dirPath = dirPathsB.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
+                var name = f.NameStrIdx >= 0 ? entry.StringPool.GetString(f.NameStrIdx) : "";
+                var fullPath = NormalizePath(Path.Combine(dirPath, name));
+                mapB[fullPath] = f;
+            }
         }
 
         var allPaths = mapA.Keys.Union(mapB.Keys).Order().ToArray();
-
         var section = new List<string>();
 
         foreach (var path in allPaths)
@@ -242,15 +245,16 @@ public static class SemanticRepoComparer
             mapA.TryGetValue(path, out var a);
             mapB.TryGetValue(path, out var b);
 
-            if (a is null && b is null)
+            if (a.Equals(default(FileRecordV2)) && b.Equals(default(FileRecordV2)))
                 continue;
 
-            if (a is null || b is null)
+            var aPresent = mapA.ContainsKey(path);
+            var bPresent = mapB.ContainsKey(path);
+
+            if (!aPresent || !bPresent)
             {
                 section.Add($"FILE {path}");
-                var left = a is null ? "<missing>" : "present";
-                var right = b is null ? "<missing>" : "present";
-                section.Add(SideBySide("Exists", left, right));
+                section.Add(SideBySide("Exists", aPresent ? "present" : "<missing>", bPresent ? "present" : "<missing>"));
                 section.Add(string.Empty);
                 continue;
             }
@@ -258,8 +262,8 @@ public static class SemanticRepoComparer
             var hashA = HashToString(a.Hash);
             var hashB = HashToString(b.Hash);
 
-            var createdA = a.Created?.ToUniversalTime().ToString("o");
-            var createdB = b.Created?.ToUniversalTime().ToString("o");
+            var createdA = a.CreatedTicks == 0 ? null : new DateTime(a.CreatedTicks, DateTimeKind.Utc).ToString("o");
+            var createdB = b.CreatedTicks == 0 ? null : new DateTime(b.CreatedTicks, DateTimeKind.Utc).ToString("o");
 
             var sizeA = a.Size;
             var sizeB = b.Size;
@@ -268,7 +272,6 @@ public static class SemanticRepoComparer
             var statusB = b.Status;
 
             var changed = false;
-
             var fileSection = new List<string>();
 
             if (sizeA != sizeB)
@@ -283,10 +286,10 @@ public static class SemanticRepoComparer
                 fileSection.Add(SideBySide("Hash", hashA, hashB));
             }
 
-            if (createdA != createdB)
+            if (!string.Equals(createdA, createdB, StringComparison.Ordinal))
             {
                 changed = true;
-                fileSection.Add(SideBySide("Created", createdA!, createdB!));
+                fileSection.Add(SideBySide("Created", createdA ?? "<null>", createdB ?? "<null>"));
             }
 
             if (statusA != statusB)
@@ -312,95 +315,111 @@ public static class SemanticRepoComparer
     }
 
     // ------------------------------
-    // HASH INDEX: hash -> sorted full paths
+    // V2 path building
     // ------------------------------
-    // private static void CompareHashIndex(
-    //     IRepo repoA, RepoViewSnapshot snapA,
-    //     IRepo repoB, RepoViewSnapshot snapB,
-    //     SemanticComparisonResult diff)
-    // {
-    //     IHashIndexService hashIndexService = new  HashIndexService();
-    //     
-    //     var dirPathsA = snapA.Dirs.Values
-    //         .ToDictionary(d => d.DirId, d => NormalizePath(repoA.GetDirPath(d.DirId)));
-    //
-    //     var dirPathsB = snapB.Dirs.Values
-    //         .ToDictionary(d => d.DirId, d => NormalizePath(repoB.GetDirPath(d.DirId)));
-    //
-    //     // Build semantic hash -> paths map for A
-    //     var indexA = hashIndexService.BuildIndex(snapA)
-    //         .GroupBy(kv => HashToString(kv.Key))
-    //         .ToDictionary(
-    //             g => g.Key,
-    //             g => g.SelectMany(kv => kv.Value.Select(fid =>
-    //                 {
-    //                     var f = snapA.Files[fid];
-    //                     var dirPath = dirPathsA.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-    //                     return NormalizePath(Path.Combine(dirPath, f.Name));
-    //                 }))
-    //                 .Distinct()
-    //                 .OrderBy(p => p)
-    //                 .ToArray()
-    //         );
-    //
-    //     // Build semantic hash -> paths map for B
-    //     var indexB = hashIndexService.BuildIndex(snapB)
-    //         .GroupBy(kv => HashToString(kv.Key))
-    //         .ToDictionary(
-    //             g => g.Key,
-    //             g => g.SelectMany(kv => kv.Value.Select(fid =>
-    //                 {
-    //                     var f = snapB.Files[fid];
-    //                     var dirPath = dirPathsB.TryGetValue(f.DirId, out var p) ? p : $"<missing-dir:{f.DirId}>";
-    //                     return NormalizePath(Path.Combine(dirPath, f.Name));
-    //                 }))
-    //                 .Distinct()
-    //                 .OrderBy(p => p)
-    //                 .ToArray()
-    //         );
-    //
-    //     var section = new List<string>();
-    //
-    //     var keysA = indexA.Keys.OrderBy(k => k).ToArray();
-    //     var keysB = indexB.Keys.OrderBy(k => k).ToArray();
-    //
-    //     if (!keysA.SequenceEqual(keysB))
-    //     {
-    //         var aOnly = keysA.Except(keysB).ToArray();
-    //         var bOnly = keysB.Except(keysA).ToArray();
-    //
-    //         foreach (var h in aOnly)
-    //             section.Add(SideBySide("Hash", h, "<missing>"));
-    //
-    //         foreach (var h in bOnly)
-    //             section.Add(SideBySide("Hash", "<missing>", h));
-    //     }
-    //     else
-    //     {
-    //         foreach (var hash in keysA)
-    //         {
-    //             var pathsA = indexA[hash];
-    //             var pathsB = indexB[hash];
-    //
-    //             if (pathsA.SequenceEqual(pathsB))
-    //                 continue;
-    //
-    //             var left = string.Join(", ", pathsA);
-    //             var right = string.Join(", ", pathsB);
-    //
-    //             section.Add($"HASH {hash}");
-    //             section.Add(SideBySide("Paths", left, right));
-    //             section.Add(string.Empty);
-    //         }
-    //     }
-    //
-    //     if (section.Count > 0)
-    //     {
-    //         diff.Differences.Add($"{Yellow}HASH INDEX DIFFERENCES{Reset}");
-    //         diff.Differences.AddRange(section);
-    //         diff.Differences.Add(string.Empty);
-    //     }
-    // }
+
+    private static Dictionary<string, DirRecordV2> BuildDirPathMapV2(RepoSnapshotView snap)
+    {
+        var dirIdToPath = BuildDirIdToPathV2(snap);
+        var map = new Dictionary<string, DirRecordV2>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (_, entry) in snap.Snapshots)
+        {
+            var dirs = entry.Dirs;
+            for (int i = 0; i < dirs.Count; i++)
+            {
+                var d = dirs[i];
+                if (!dirIdToPath.TryGetValue(d.DirId, out var p))
+                    continue;
+
+                map[NormalizePath(p)] = d;
+            }
+        }
+
+        return map;
+    }
+
+    private static Dictionary<long, string> BuildDirIdToPathV2(RepoSnapshotView snap)
+    {
+        // Build resolver: dirId -> (scanRootId, index)
+        var handleById = new Dictionary<long, DirHandle>();
+        foreach (var (scanRootId, entry) in snap.Snapshots)
+        {
+            var dirs = entry.Dirs;
+            for (int i = 0; i < dirs.Count; i++)
+            {
+                var dirId = dirs[i].DirId;
+                if (!handleById.TryAdd(dirId, new DirHandle(scanRootId, i)))
+                    throw new InvalidOperationException($"Duplicate dirId {dirId} across scan roots.");
+            }
+        }
+
+        // Memoized path builder by dirId (full path)
+        var memo = new Dictionary<long, string>();
+        foreach (var dirId in handleById.Keys)
+            _ = GetPath(dirId);
+
+        return memo;
+
+        string GetPath(long dirId)
+        {
+            if (memo.TryGetValue(dirId, out var cached))
+                return cached;
+
+            if (!handleById.TryGetValue(dirId, out var h))
+                return memo[dirId] = $"<missing-dir:{dirId}>";
+
+            var snapView = snap.Snapshots[h.ScanRootId];
+            var d = snapView.Dirs[h.Index];
+
+            // Build leaf->root segments within snapshot
+            var parts = new List<string>(16);
+
+            // name (may be empty for root dir record)
+            if (d.NameStrIdx >= 0)
+            {
+                var name = snapView.StringPool.GetString(d.NameStrIdx);
+                if (!string.IsNullOrEmpty(name))
+                    parts.Add(name);
+            }
+
+            if (d.ParentDirId >= 0)
+            {
+                var parentPath = GetPath(d.ParentDirId);
+                var full = NormalizePath(Path.Combine(parentPath, parts.Count == 0 ? "" : parts[0]));
+                memo[dirId] = full;
+                return full;
+            }
+
+            // reached scan-root dir: prepend VolumePath + RootPath
+            var scanRoot = snap.ScanRoots[h.ScanRootId];
+            AddPathSegments(parts, scanRoot.VolumePath);
+            AddPathSegments(parts, scanRoot.RootPath);
+
+            parts.Reverse();
+
+            string fullPath;
+            if (OperatingSystem.IsWindows())
+                fullPath = Path.Combine(parts.ToArray());
+            else
+                fullPath = Path.DirectorySeparatorChar + Path.Combine(parts.ToArray());
+
+            fullPath = NormalizePath(fullPath);
+
+            memo[dirId] = fullPath;
+            return fullPath;
+        }
+
+        static void AddPathSegments(List<string> leafToRoot, string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return;
+
+            var segs = path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+            for (int i = segs.Length - 1; i >= 0; i--)
+                leafToRoot.Add(segs[i]);
+        }
+    }
 
     // ------------------------------
     // Helpers
@@ -414,10 +433,7 @@ public static class SemanticRepoComparer
     }
 
     private static string HashToString(HashKey key)
-    {
-        // Canonical 32-hex-character representation
-        return $"{key.A:X16}{key.B:X16}";
-    }
+        => $"{key.A:X16}{key.B:X16}";
 
     private static string SideBySide(string label, string left, string right)
     {

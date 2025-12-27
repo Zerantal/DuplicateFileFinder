@@ -28,6 +28,7 @@ public class PoolBench
     private int[] _sampleIndices = default!;
 
     // Prevent dead-code elimination
+    // ReSharper disable once NotAccessedField.Local
     private volatile int _sink;
 
     [GlobalSetup]

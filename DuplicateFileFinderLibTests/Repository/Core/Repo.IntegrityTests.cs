@@ -8,7 +8,7 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using Xunit;
 
-namespace DuplicateFileFinderLibTests.Repository;
+namespace DuplicateFileFinderLibTests.Repository.Core;
 
 public sealed class RepoIntegrityTests : IDisposable
 {

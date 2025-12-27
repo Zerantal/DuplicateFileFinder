@@ -1,127 +1,89 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
 
 internal sealed class CapturingScanSession : IScanSession
 {
-    private long _dirCounter = 1;
-    public ScanRun Run { get; }
-    
-    public long ScanSequence => Run.ScanSequence;
-    public string RootPath => Run.RootPath;
-    public DirRecord RootDir { get; init; }
-    
-    public readonly List<ObservedDir> ObservedDirectories = new();
-    public readonly List<ObservedFile> ObservedFiles = new();
+    private long _dirCounter = 1000;
+    private readonly MethodCounter _methodCounter = new();
+    public string? LastFailMessage { get; private set; }
+    public bool LastFailCancelled { get; private set; }
 
-    public CapturingScanSession(string rootPath = "/root")
+    public Dictionary<string, bool> FileDecisionsByName { get; } = new(StringComparer.Ordinal);
+
+    public List<(FileHashToken token, ReadOnlyMemory<byte> hashBytes, string? errorMessage)> HashCompletions { get; } =
+        new();
+
+    public DirCursor RootDirCursor { get; private set; } = new(1);
+
+    public void SetPendingDirsProvider(Func<PendingDir[]> getPendingDirs)
     {
-        Run = new ScanRun
-        {
-            ScanSequence = 1,
-            RootPath = rootPath,
-            StartedAt = DateTimeOffset.UtcNow,
-            Status = ScanRunStatus.InProgress,
-            ScanRootId = 88,
-            Operation = ScanOperation.FullScan,
-        };
-            
-        RootDir = new DirRecord
-        {
-            DirId = 121,
-            ParentDirId = null,
-            Name = "",
-            LastSeenScanSequence = 99,
-            Status = ScanEntryStatus.None, // “known root, not yet enumerated”
-            ErrorMessage = null
-        };
+        _methodCounter.IncrementMethodCalCount();
     }
-    
-    public List<ObservedDir> FinalDirs => ObservedDirectories.GroupBy(d => d.FullPath).Select(g => g.Last()).ToList();
-    public List<ObservedFile> FinalFiles => ObservedFiles.GroupBy(f => f.FullPath).Select(f => f.Last()).ToList();
-        
-    public int FlushCallCount { get; private set; }
-    public int CompleteCallCount { get; private set; }
-    public List<(string? Error, bool Cancelled)> FailCalls { get; } = new();
-    public int DisposeCallCount { get; private set; }
-    
+
+    public DirEnumerationContext BeginDirectory(DirCursor parent)
+    {
+        return new DirEnumerationContext(parent.DirId,
+            new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(
+                StringComparer.Ordinal),
+            new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(
+                StringComparer.Ordinal));
+    }
+
+    public DirCursor OnDirectoryFound(in ObservedDir dir, ref DirEnumerationContext ctx)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return new DirCursor(_dirCounter++);
+    }
+
+    public FileHashDecision OnFileFound(in ObservedFile file, ref DirEnumerationContext ctx)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        var shouldHash = FileDecisionsByName.GetValueOrDefault(file.Name, true);
+        return shouldHash
+            ? new FileHashDecision(true,
+                new FileHashToken(ctx.ParentDirId, file.Name, file.Size))
+            : FileHashDecision.NoHash;
+    }
+
+    public void EndDirectory(ref DirEnumerationContext ctx)
+    {
+    }
+
+    public Task CompleteAsync(CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return Task.CompletedTask;
+    }
+
+    public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        LastFailMessage = errorMessage;
+        LastFailCancelled = cancelled;
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync()
     {
-        DisposeCallCount++;
+        _methodCounter.IncrementMethodCalCount();
         return ValueTask.CompletedTask;
     }
-    
-    public long AddOrUpdateDirectory(DirRecord dir)
+
+    public void OnFileHashCompleted(in FileHashToken token, ReadOnlyMemory<byte> hashBytes, string? errorMessage)
     {
-        dir = dir with { DirId = _dirCounter++ };
-        var parentId = dir.ParentDirId;
-        string dirPath;
-        if (parentId is null)
-            dirPath = RootPath;
-        else
-        {
-            dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == parentId)?.FullPath ??
-                      RootPath;   
-        }
-            
-        var fullPath = Path.Combine(dirPath, dir.Name);
-        ObservedDirectories.Add(new ObservedDir(fullPath, dir));
-            
-        return dir.DirId;
+        HashCompletions.Add((token, hashBytes, errorMessage));
     }
-    
-    public void AddOrUpdateFile(ref FileRecord file)
+
+    public void SetRootDirId(long dirId)
     {
-        var dirId = file.DirId;
-        var dirPath = ObservedDirectories.FirstOrDefault(d => d.DirRecord.DirId == dirId)?.FullPath ??
-                      RootPath;
-            
-        var fullPath = Path.Combine(dirPath, file.Name);
-        ObservedFiles.Add(new ObservedFile(fullPath, file));
+        RootDirCursor = new DirCursor(dirId);
     }
-    
-    public Task FlushProgressAsync(CancellationToken cancellationToken = default)
-    {
-        FlushCallCount++;
-        return Task.CompletedTask;
-    }
-    
-    public Task CompleteAsync(CancellationToken cancellationToken = default)
-    {
-        CompleteCallCount++;
-        return Task.CompletedTask;
-    }
-    
-    public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
-    {
-        FailCalls.Add((errorMessage, cancelled));
-        return Task.CompletedTask;
-    }
-}
-    
-internal sealed class ObservedDir(string fullPath, DirRecord dir)
-{
-    public string FullPath { get; } = fullPath;
-    public DirRecord DirRecord { get; } = dir;
-        
-    public ScanEntryStatus Status => DirRecord.Status;
-}
-internal sealed class ObservedFile(string fullPathOnDisk, FileRecord file)
-{
-    public string FullPath { get; } = fullPathOnDisk;
-        
-    public FileRecord FileRecord { get; } = file;
-        
-    public ScanEntryStatus Status => FileRecord.Status;
-        
-    public HashKey? Hash => FileRecord.Hash;
-    public long Size => FileRecord.Size;
-    public DateTimeOffset? Created => FileRecord.Created;
 }
