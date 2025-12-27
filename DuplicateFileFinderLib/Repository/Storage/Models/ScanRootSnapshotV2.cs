@@ -1,6 +1,5 @@
 // Repository/Models/ScanRootSnapshot.cs
 
-using DuplicateFileFinderLib.Repository.Models;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Storage.Models;

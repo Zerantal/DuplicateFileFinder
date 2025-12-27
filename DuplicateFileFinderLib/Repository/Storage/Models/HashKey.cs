@@ -1,15 +1,16 @@
 // Repo/Models/HashKey.cs
 
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
-[MemoryPackable]
+[MemoryPackable(SerializeLayout.Sequential)]
 public readonly partial struct HashKey : IEquatable<HashKey>
 {
-    [MemoryPackOrder(0)] public ulong A { get; init; } // first 8 bytes
-    [MemoryPackOrder(1)] public ulong B { get; init; } // next 8 bytes
+    public ulong A { get; } // first 8 bytes
+    public ulong B { get; } // next 8 bytes
 
     /// <summary>
     /// Sentinel: hash has not been computed yet. This is also the default(HashKey) value.
@@ -24,16 +25,19 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     /// <summary>
     /// True if this value is the <see cref="NotComputed"/> sentinel.
     /// </summary>
-    public bool IsNotComputed => A == 0 && B == 0;
+    [MemoryPackIgnore]
+    public bool IsNotComputed => Equals(NotComputed);
 
     /// <summary>
     /// True if this value is the <see cref="CannotCompute"/> sentinel.
     /// </summary>
-    public bool IsCannotCompute => A == ulong.MaxValue && B == ulong.MaxValue;
+    [MemoryPackIgnore]
+    public bool IsCannotCompute => Equals(CannotCompute);
 
     /// <summary>
     /// True if this represents a real hash value (neither NotComputed nor CannotCompute).
     /// </summary>
+    [MemoryPackIgnore]
     public bool IsComputed => !IsNotComputed && !IsCannotCompute;
 
     /// <summary>
@@ -79,9 +83,14 @@ public readonly partial struct HashKey : IEquatable<HashKey>
         return obj is HashKey h && Equals(h);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
     {
-        return HashCode.Combine(A, B);
+        unchecked
+        {
+            ulong x = A ^ B;
+            return (int)x ^ (int)(x >> 32);
+        }
     }
 
     public static bool operator ==(HashKey left, HashKey right)

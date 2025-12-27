@@ -1,8 +1,7 @@
-// DuplicateFileFinderLib/Repository/Models/ScanRoot.cs
-
 using MemoryPack;
+// ReSharper disable UnusedAutoPropertyAccessor.Global
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable]
 public partial record ScanRoot
@@ -26,6 +25,6 @@ public partial record ScanRoot
     [MemoryPackOrder(10)] public string? DevicePath               { get; init; }
     [MemoryPackOrder(11)] public string? DeviceModel              { get; init; }
     [MemoryPackOrder(12)] public string? VolumePath               { get; init; }
-    [MemoryPackOrder(13)] public bool IsDeleted                   { get; init; } = false;
+    [MemoryPackOrder(13)] public bool IsDeleted                   { get; init; }
     [MemoryPackOrder(14)] public DateTimeOffset? DeletedAtUtc     { get; init; }
 }

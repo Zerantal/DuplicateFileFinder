@@ -255,7 +255,6 @@ public sealed partial class Repo
                 {
                     SchemaVersion = RepoSchemaVersion,
                     Generation = 1,
-                    LastSnapshottedLogSequence = -1,
                     RepoId = Guid.NewGuid(),
                     RepoPath = repoPath,
                     RepoHostName = Environment.MachineName,

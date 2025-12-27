@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DuplicateFileFinderLib.Util;
+namespace DuplicateFileFinderLib.Repository.Storage;
 
 /// <summary>
 /// Builds a PackedStringPool by interning strings into a single UTF-8 byte buffer + offsets.
@@ -15,12 +15,12 @@ public sealed class PackedStringBuilder
 
     public PackedStringBuilder(int initialCapacityStrings = 1024, int initialCapacityBytes = 1024 * 1024)
     {
-        if (initialCapacityStrings < 0) throw new ArgumentOutOfRangeException(nameof(initialCapacityStrings));
-        if (initialCapacityBytes < 0) throw new ArgumentOutOfRangeException(nameof(initialCapacityBytes));
+        ArgumentOutOfRangeException.ThrowIfNegative(initialCapacityStrings);
+        ArgumentOutOfRangeException.ThrowIfNegative(initialCapacityBytes);
 
         _indexByString = new Dictionary<string, int>(initialCapacityStrings, StringComparer.Ordinal);
         _offsets = new List<int>(initialCapacityStrings);
-        _buffer = initialCapacityBytes == 0 ? Array.Empty<byte>() : new byte[initialCapacityBytes];
+        _buffer = initialCapacityBytes == 0 ? [] : new byte[initialCapacityBytes];
         _length = 0;
     }
 
@@ -28,7 +28,7 @@ public sealed class PackedStringBuilder
 
     public int Intern(string value)
     {
-        if (value is null) throw new ArgumentNullException(nameof(value));
+        ArgumentNullException.ThrowIfNull(value);
 
         if (_indexByString.TryGetValue(value, out var existing))
             return existing;
@@ -51,7 +51,7 @@ public sealed class PackedStringBuilder
     public int InternOrMinusOne(string? value)
         => value is null ? -1 : Intern(value);
 
-    public Repository.Storage.Models.PackedStringPool Build()
+    public Models.PackedStringPool Build()
     {
         // Offsets array has a sentinel at the end
         var n = _offsets.Count;
@@ -64,7 +64,7 @@ public sealed class PackedStringBuilder
 
         var data = _length == 0 ? Array.Empty<byte>() : _buffer.AsSpan(0, _length).ToArray();
 
-        return new Repository.Storage.Models.PackedStringPool(data, offsets);
+        return new Models.PackedStringPool(data, offsets);
     }
 
     public void Reset(bool keepCapacity = true)

@@ -1,5 +1,6 @@
 // DuplicateFileFinderLib/Repository/Storage/RepoStore.Checkpoints.cs
 
+using System.Globalization;
 using MemoryPack;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
@@ -12,8 +13,26 @@ internal static partial class RepoStore
     private static string GetCheckpointDir(string repoPath)
         => Path.Combine(repoPath, CheckpointDirName);
 
-    private static string GetCheckpointPath(string repoPath, long scanRootId)
-        => Path.Combine(GetCheckpointDir(repoPath), $"{scanRootId}.checkpoint.mpk");
+    private static string GetCheckpointPrefix(long scanRootId)
+        => $"{scanRootId}.";
+
+    // File name format:
+    //   {scanRootId}.{createdAtUtcTicks:D19}.{scanSequence}.checkpoint.mpk
+    private static string FormatCheckpointFileName(ScanCheckpoint checkpoint)
+        => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{checkpoint.ScanRootId}.{checkpoint.CreatedAtUtcTicks:D19}.{checkpoint.ScanSequence}.checkpoint.mpk");
+
+    public static bool HasScanCheckpoint(string repoPath, long scanRootId)
+    {
+        var dir = GetCheckpointDir(repoPath);
+        if (!Directory.Exists(dir))
+            return false;
+
+        var prefix = GetCheckpointPrefix(scanRootId);
+        return Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk").Any(p =>
+            Path.GetFileName(p).StartsWith(prefix, StringComparison.Ordinal));
+    }
 
     public static async Task SaveScanCheckpointAsync(
         string repoPath,
@@ -21,48 +40,116 @@ internal static partial class RepoStore
         CancellationToken ct = default)
     {
         Directory.CreateDirectory(GetCheckpointDir(repoPath));
-        var path = GetCheckpointPath(repoPath, checkpoint.ScanRootId);
 
-        // MemoryPack serialize
-        var bytes = MemoryPackSerializer.Serialize(checkpoint);
+        // Never overwrite: append-only file per checkpoint
+        var fileName = FormatCheckpointFileName(checkpoint);
+        var path = Path.Combine(GetCheckpointDir(repoPath), fileName);
 
-        // Durable-ish write: write temp then move.
-        var tmp = path + ".tmp";
-        await File.WriteAllBytesAsync(tmp, bytes, ct).ConfigureAwait(false);
+        var tmp = NewUniqueTmpPath(path);
 
-        // Replace existing.
-        File.Move(tmp, path, overwrite: true);
-    }
-
-    public static async Task<ScanCheckpoint?> TryLoadScanCheckpointAsync(
-        string repoPath,
-        long scanRootId,
-        CancellationToken ct = default)
-    {
-        var path = GetCheckpointPath(repoPath, scanRootId);
-        if (!File.Exists(path))
-            return null;
-
-        var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-        return MemoryPackSerializer.Deserialize<ScanCheckpoint>(bytes);
-    }
-
-    public static Task DeleteScanCheckpointAsync(
-        string repoPath,
-        long scanRootId,
-        CancellationToken ct = default)
-    {
-        var path = GetCheckpointPath(repoPath, scanRootId);
+        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (File.Exists(path))
-                File.Delete(path);
+            try
+            {
+                await using (var fs = new FileStream(
+                                 tmp,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                {
+                    await MemoryPackSerializer.SerializeAsync(fs, checkpoint, cancellationToken: ct).ConfigureAwait(false);
+                    await fs.FlushAsync(ct).ConfigureAwait(false);
+                }
+
+                // append-only intent, but overwrite is safe if something left an old file
+                File.Move(tmp, path, overwrite: true);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tmp))
+                        File.Delete(tmp);
+                }
+                catch { /* best-effort */ }
+            }
         }
-        catch
+        finally
         {
-            // tolerate
+            WriteGate.Release();
+        }
+    }
+
+    public static async Task<ScanCheckpoint[]> LoadScanCheckpointsAsync(
+        string repoPath,
+        long scanRootId,
+        CancellationToken ct = default)
+    {
+        var dir = GetCheckpointDir(repoPath);
+        if (!Directory.Exists(dir))
+            return Array.Empty<ScanCheckpoint>();
+
+        // Load all matching files; sort by CreatedAtUtcTicks (embedded as D19)
+        var paths = Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk")
+            .OrderBy(p => p, StringComparer.Ordinal) // lexical order matches ticks due to D19
+            .ToArray();
+
+        if (paths.Length == 0)
+            return Array.Empty<ScanCheckpoint>();
+
+        var result = new List<ScanCheckpoint>(paths.Length);
+
+        foreach (var path in paths)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+                var cp = MemoryPackSerializer.Deserialize<ScanCheckpoint>(bytes);
+                if (cp is not null && cp.ScanRootId == scanRootId)
+                    result.Add(cp);
+            }
+            catch
+            {
+                // tolerate: skip corrupt/partial files
+            }
         }
 
-        return Task.CompletedTask;
+        // Defensive: ensure ordered by tick even if filenames were odd
+        return result.OrderBy(c => c.CreatedAtUtcTicks).ToArray();
+    }
+
+    public static async Task DeleteScanCheckpointAsync(
+        string repoPath,
+        long scanRootId,
+        CancellationToken ct = default)
+    {
+        var dir = GetCheckpointDir(repoPath);
+        if (!Directory.Exists(dir))
+            return;
+
+        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk"))
+                {
+                    try { File.Delete(path); } catch { /* tolerate */ }
+                }
+            }
+            catch
+            {
+                // tolerate
+            }
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 }

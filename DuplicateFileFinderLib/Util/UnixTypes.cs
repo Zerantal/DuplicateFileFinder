@@ -1,46 +1,26 @@
 // Linux-only type checks without allocations beyond path string
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-
-// ReSharper disable All
+// ReSharper disable InconsistentNaming
 
 namespace DuplicateFileFinderLib.Util;
 
-internal static class UnixTypes
+internal static partial class UnixTypes
 {
-#if NET8_0_OR_GREATER
     private const string LibC = "libc";
-#else
-    private const string LibC = "libc.so.6";
-#endif
-
-    // Matches glibc's struct stat on x86_64. We only read st_mode.
+    
+    // Big enough that native lstat cannot write past it (avoids clobbering managed stack args).
+    // 256 should be plenty for current Linux libcs;
     [StructLayout(LayoutKind.Sequential)]
-    private struct Stat
+    private unsafe struct StatBuf
     {
-        public ulong st_dev;
-        public ulong st_ino;
-        public ulong st_nlink;
-        public uint st_mode; // <-- file type + perms        
-        public uint st_uid;
-        public uint st_gid;
-        private uint __pad0;
-        public ulong st_rdev;
-        public long st_size;
-        public long st_blksize;
-        public long st_blocks;
-        public long st_atime;
-        public ulong st_atime_nsec;
-        public long st_mtime;
-        public ulong st_mtime_nsec;
-        public long st_ctime;
-        public ulong st_ctime_nsec;
-        public long __unused4;
-        public long __unused5;
+        public fixed byte Data[256];
     }
 
-    [DllImport(LibC, SetLastError = true, EntryPoint = "lstat", CharSet = CharSet.Ansi)]
-    private static extern int lstat_legacy(string path, out Stat buf);
+    // .NET 8+ source-generated P/Invoke, correct UTF-8 string marshalling on Linux.
+    [LibraryImport(LibC, EntryPoint = "lstat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int lstat_legacy(string path, out StatBuf buf);
 
     // S_IFMT and kinds
     private const uint S_IFMT = 0xF000;
@@ -68,46 +48,32 @@ internal static class UnixTypes
     {
         kind = UnixKind.Unknown;
 
-        // Fast exits
         if (!OperatingSystem.IsLinux()) return false;
         if (string.IsNullOrEmpty(path)) return false;
-        // Reject embedded NUL which would truncate in libc
-        if (path!.IndexOf('\0') >= 0) return false;
-
-        try
-        {
-            if (lstat_legacy(path, out var st) != 0)
-                return false;
-
-            switch (st.st_mode & S_IFMT)
-            {
-                case S_IFREG:
-                    kind = UnixKind.Regular;
-                    return true;
-                case S_IFDIR:
-                    kind = UnixKind.Directory;
-                    return true;
-                case S_IFLNK:
-                    kind = UnixKind.Symlink;
-                    return true;
-                case S_IFIFO:
-                    kind = UnixKind.Fifo;
-                    return true;
-                case S_IFSOCK:
-                    kind = UnixKind.Socket;
-                    return true;
-                case S_IFCHR:
-                    kind = UnixKind.CharDev;
-                    return true;
-                case S_IFBLK:
-                    kind = UnixKind.BlockDev;
-                    return true;
-                default: return false;
-            }
-        }
-        catch
-        {
+        if (path.IndexOf('\0') >= 0) return false;
+        
+        if (lstat_legacy(path, out var st) != 0)
             return false;
+
+        // Linux x86_64: st_mode is at offset 24
+        uint mode;
+        unsafe
+        {
+            byte* p = (byte*)Unsafe.AsPointer(ref st);
+            mode = Unsafe.ReadUnaligned<uint>(p + 24);
         }
+        
+        switch (mode & S_IFMT)
+        {
+            case S_IFREG: kind = UnixKind.Regular; return true;
+            case S_IFDIR: kind = UnixKind.Directory; return true;
+            case S_IFLNK: kind = UnixKind.Symlink; return true;
+            case S_IFIFO: kind = UnixKind.Fifo; return true;
+            case S_IFSOCK: kind = UnixKind.Socket; return true;
+            case S_IFCHR: kind = UnixKind.CharDev; return true;
+            case S_IFBLK: kind = UnixKind.BlockDev; return true;
+            default: return false;
+        }
+        
     }
 }

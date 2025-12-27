@@ -2,7 +2,7 @@
 
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable]
 public partial record RepoMetaFile
