@@ -31,7 +31,7 @@ public sealed partial class Repo
     /// <summary>
     /// Validate the integrity of this repo.
     /// - Shallow operation checks in-memory referential integrity and on-disk presence.
-    /// - Deep operation rebuilds state from store (per-root snapshots + deltas) and compares with in-memory.
+    /// - Deep operation rebuilds state from store (per-root snapshots) and compares with in-memory.
     /// </summary>
     public IReadOnlyList<RepoIntegrityIssue> ValidateIntegrity(
         bool deepConsistencyCheck = false,
@@ -481,7 +481,7 @@ public sealed partial class Repo
                     continue;
                 }
 
-                if (snap.StringPool is not null && (uint)d.NameStrIdx >= (uint)poolCount)
+                if (snap.StringPool is not null && (uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
                 {
                     issues.Add(new RepoIntegrityIssue
                     {
@@ -568,7 +568,7 @@ public sealed partial class Repo
                 });
             }
 
-            if ((uint)d.NameStrIdx >= (uint)poolCount)
+            if ((uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
             {
                 issues.Add(new RepoIntegrityIssue
                 {

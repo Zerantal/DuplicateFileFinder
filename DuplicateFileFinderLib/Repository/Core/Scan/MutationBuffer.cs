@@ -181,6 +181,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
 
     private void UpsertFileInto(Buffer b, in FileScanInput input, long fileId)
     {
+        // Build a candidate record from the new observation.
         var rec = new FileRecordV2
         {
             FileId = fileId,
@@ -199,15 +200,115 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
 
         if (b.FileIdToIndex.TryGetValue(fileId, out var idx))
         {
-            b.Files[idx] = rec;
+            var existing = b.Files[idx];
+
+            b.Files[idx] = MergeFile(existing, rec);
             b.FileKeyToIndex[key] = idx;
             return;
         }
+
+        // New record: ensure status is consistent with hash.
+        rec = NormalizeNewFile(rec);
 
         idx = b.Files.Count;
         b.Files.Add(rec);
         b.FileIdToIndex.Add(fileId, idx);
         b.FileKeyToIndex[key] = idx;
+    }
+
+    private static FileRecordV2 NormalizeNewFile(FileRecordV2 rec)
+    {
+        // Ensure basic invariants:
+        // - if hash is computed => Hashed unless explicitly Deleted/Error
+        if (rec.Status is ScanEntryStatus.Deleted or ScanEntryStatus.Error)
+            return rec;
+
+        if (rec.Hash != HashKey.NotComputed)
+        {
+            rec = rec with
+            {
+                Status = ScanEntryStatus.Hashed,
+                ErrorMessageStrIdx = -1
+            };
+        }
+        else if (rec.Status == ScanEntryStatus.Hashed)
+        {
+            // Guard: Hashed implies computed hash.
+            rec = rec with { Status = ScanEntryStatus.Enumerated };
+        }
+
+        return rec;
+    }
+
+    private static FileRecordV2 MergeFile(FileRecordV2 existing, FileRecordV2 incoming)
+    {
+        // Deleted/Error are explicit states: honor incoming if it declares them.
+        if (incoming.Status == ScanEntryStatus.Deleted)
+        {
+            // For deleted entries, we keep the record but mark deleted. Hash is not meaningful.
+            return incoming with
+            {
+                Hash = HashKey.NotComputed,
+                ErrorMessageStrIdx = -1
+            };
+        }
+
+        if (incoming.Status == ScanEntryStatus.Error)
+        {
+            // Error entry: keep as error; hash not meaningful unless you want to preserve old hash.
+            // (Keep NotComputed to avoid "hashed but error".)
+            return incoming with
+            {
+                Hash = HashKey.NotComputed
+            };
+        }
+
+        // If incoming supplies a computed hash (baseline reuse or newly hashed),
+        // that is authoritative for this observation.
+        if (incoming.Hash != HashKey.NotComputed)
+        {
+            return incoming with
+            {
+                Status = ScanEntryStatus.Hashed,
+                ErrorMessageStrIdx = -1
+            };
+        }
+
+        // Incoming does not supply a hash. Decide whether we can preserve the existing hash.
+        var existingHasHash = existing.Hash != HashKey.NotComputed;
+
+        if (existingHasHash)
+        {
+            var changed =
+                existing.Size != incoming.Size ||
+                existing.ModifiedTicks != incoming.ModifiedTicks;
+
+            if (!changed)
+            {
+                // Unchanged: preserve hash and keep Hashed.
+                return incoming with
+                {
+                    Hash = existing.Hash,
+                    Status = ScanEntryStatus.Hashed,
+                    ErrorMessageStrIdx = -1
+                };
+            }
+
+            // Changed: invalidate hash; enumeration indicates it exists but needs rehashing.
+            return incoming with
+            {
+                Hash = HashKey.NotComputed,
+                Status = ScanEntryStatus.Enumerated,
+                ErrorMessageStrIdx = -1
+            };
+        }
+
+        // No hash to preserve; keep enumerated.
+        // Also normalize "Hashed with no hash" if that ever occurs.
+        if (incoming.Status == ScanEntryStatus.Hashed)
+            return incoming with { Status = ScanEntryStatus.Enumerated };
+
+        return incoming;
     }
 
     private void EnsureDeltaFileExists(long dirId, string name)
@@ -251,19 +352,26 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
             ErrorMessageStrIdx = err is null ? -1 : _delta.Sb.Intern(err)
         };
 
+        // Normalize in case we copied a computed hash but stale status.
+        rec = NormalizeNewFile(rec);
+
         var idx = _delta.Files.Count;
         _delta.Files.Add(rec);
         _delta.FileIdToIndex[rec.FileId] = idx;
         _delta.FileKeyToIndex[(dirId, name)] = idx;
     }
 
-
     private static bool TryUpdateFileHashInBuffer(Buffer b, long dirId, string name, HashKey hash)
     {
         if (!b.FileKeyToIndex.TryGetValue((dirId, name), out var idx))
             return false;
 
-        b.Files[idx] = b.Files[idx] with { Hash = hash };
+        b.Files[idx] = b.Files[idx] with
+        {
+            Hash = hash, 
+            Status = ScanEntryStatus.Hashed,
+            ErrorMessageStrIdx = -1,
+        };
         return true;
     }
 
@@ -275,6 +383,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         b.Files[idx] = b.Files[idx] with
         {
             Status = ScanEntryStatus.Error,
+            Hash = HashKey.NotComputed,
             ErrorMessageStrIdx = b.Sb.Intern(errorMessage)
         };
         return true;

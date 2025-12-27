@@ -191,12 +191,12 @@ internal sealed class ScanSession : IScanSession
         // Decide if hashing is required.
         var shouldHash = HashPolicy.ShouldHash(internalInput, _baseline, Run.HashPolicy);
 
-        // If not hashing and baseline has a valid hash, reuse it now.
+        // If not hashing and baseline has a valid hash, reuse it now and mark as Hashed.
         if (!shouldHash && internalInput.FileId > 0 &&
             _baseline.TryGetBaselineFile(internalInput.FileId, out var old) &&
             old.Hash != HashKey.NotComputed)
         {
-            internalInput = internalInput with { Hash = old.Hash };
+            internalInput = internalInput with { Hash = old.Hash, Status = ScanEntryStatus.Hashed };
         }
 
         _mut.UpsertFile(internalInput);

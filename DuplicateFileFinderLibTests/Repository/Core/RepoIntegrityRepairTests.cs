@@ -361,9 +361,6 @@ public sealed class RepoIntegrityRepairTests
     {
         SchemaVersion = 6,
         Generation = 1,
-        NextLogSequence = 1,
-        LastSnapshottedLogSequence = -1,
-        LastCompaction = DateTimeOffset.UtcNow,
         RepoId = Guid.NewGuid(),
         RepoPath = repoDir,
         RepoHostName = Environment.MachineName,
