@@ -5,17 +5,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
+using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
-using DirRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.DirRecordV2;
-using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecordV2;
-using HashKey = DuplicateFileFinderLib.Repository.Storage.Models.HashKey;
-using PackedStringPool = DuplicateFileFinderLib.Repository.Storage.Models.PackedStringPool;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins;
 
-public sealed class FileDirIndexTests
+public sealed class FileDirIndexPluginTests
 {
     [Fact]
     public async Task BootstrapEvent_RebuildsIndex_FromSnapshot_AndResolvesHandles()
@@ -23,14 +21,13 @@ public sealed class FileDirIndexTests
         var dir = CreateTempDir();
         try
         {
-            await using var plugin = new FileDirIndex(dir);
+            await using var plugin = new FileDirIndexPlugin(dir);
 
             var snapshot = MakeTwoRootSnapshot();
 
             plugin.Post(new BootstrapEvent
             {
                 Generation = 1,
-                NextLogSequence = 10, // expectedLastLogSequence = 9
                 RepoSnapshotView = snapshot
             });
 
@@ -73,14 +70,13 @@ public sealed class FileDirIndexTests
         try
         {
             // First instance builds and persists state
-            await using (var plugin1 = new FileDirIndex(dir))
+            await using (var plugin1 = new FileDirIndexPlugin(dir))
             {
                 var snapshot1 = MakeTwoRootSnapshot();
 
                 plugin1.Post(new BootstrapEvent
                 {
                     Generation = 1,
-                    NextLogSequence = 10, // expected last = 9
                     RepoSnapshotView = snapshot1
                 });
 
@@ -92,14 +88,13 @@ public sealed class FileDirIndexTests
 
             // Second instance: give it a *different* snapshot, but same (gen, seq).
             // It should load the persisted index, not rebuild from the new snapshot.
-            await using (var plugin2 = new FileDirIndex(dir))
+            await using (var plugin2 = new FileDirIndexPlugin(dir))
             {
                 var differentSnapshot = MakeDifferentSnapshotSameRoots();
 
                 plugin2.Post(new BootstrapEvent
                 {
                     Generation = 1,
-                    NextLogSequence = 10, // matches persisted state
                     RepoSnapshotView = differentSnapshot
                 });
 
@@ -128,12 +123,11 @@ public sealed class FileDirIndexTests
         try
         {
             // Build persisted state at (gen=1, lastLogSeq=9)
-            await using (var plugin1 = new FileDirIndex(dir))
+            await using (var plugin1 = new FileDirIndexPlugin(dir))
             {
                 plugin1.Post(new BootstrapEvent
                 {
                     Generation = 1,
-                    NextLogSequence = 10,
                     RepoSnapshotView = MakeTwoRootSnapshot()
                 });
                 await plugin1.WhenReadyAsync(CancellationToken.None);
@@ -141,14 +135,13 @@ public sealed class FileDirIndexTests
 
             // Now bootstrap with different repo position (gen or seq differs):
             // plugin must ignore state and rebuild from provided snapshot
-            await using (var plugin2 = new FileDirIndex(dir))
+            await using (var plugin2 = new FileDirIndexPlugin(dir))
             {
                 var newSnapshot = MakeDifferentSnapshotSameRoots();
 
                 plugin2.Post(new BootstrapEvent
                 {
                     Generation = 2,        // changed
-                    NextLogSequence = 10,  // expected last = 9
                     RepoSnapshotView = newSnapshot
                 });
 
@@ -173,61 +166,18 @@ public sealed class FileDirIndexTests
     }
 
     [Fact]
-    public async Task CompactedEvent_RebuildsAndPersists_NewState()
-    {
-        var dir = CreateTempDir();
-        try
-        {
-            await using var plugin = new FileDirIndex(dir);
-
-            // Bootstrap with initial snapshot
-            plugin.Post(new BootstrapEvent
-            {
-                Generation = 1,
-                NextLogSequence = 10,
-                RepoSnapshotView = MakeTwoRootSnapshot()
-            });
-            await plugin.WhenReadyAsync(CancellationToken.None);
-
-            Assert.True(plugin.TryGetDir(101, out _));
-            Assert.False(plugin.TryGetDir(99901, out _));
-
-            // Compacted with new snapshot
-            plugin.Post(new CompactedEvent
-            {
-                Generation = 2,
-                NextLogSequence = 20,
-                RepoSnapshotView = MakeDifferentSnapshotSameRoots()
-            });
-            await Task.Delay(20, TestContext.Current.CancellationToken);
-
-            // Should now reflect compacted snapshot
-            Assert.False(plugin.TryGetDir(101, out _));
-            Assert.True(plugin.TryGetDir(99901, out var h));
-            Assert.Equal(new DirHandle(1, 0), h);
-
-            Assert.True(File.Exists(Path.Combine(dir, "file-dir-index.bin")));
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    [Fact]
     public async Task BootstrapEvent_RebuildsIndex_FromSnapshot_AndResolvesRelativePaths()
     {
         var dir = CreateTempDir();
         try
         {
-            await using var plugin = new FileDirIndex(dir);
+            await using var plugin = new FileDirIndexPlugin(dir);
 
             var snapshot = MakeHierarchicalSnapshot();
 
             plugin.Post(new BootstrapEvent
             {
                 Generation = 1,
-                NextLogSequence = 2, // expectedLastLogSequence = 1
                 RepoSnapshotView = snapshot
             });
 
@@ -264,7 +214,7 @@ public sealed class FileDirIndexTests
         var dir = CreateTempDir();
         try
         {
-            await using var plugin = new FileDirIndex(dir);
+            await using var plugin = new FileDirIndexPlugin(dir);
 
             // No bootstrap => no snapshot published; path resolution should fail.
             Assert.False(plugin.TryGetFilePathById(1001, out _));
@@ -282,12 +232,11 @@ public sealed class FileDirIndexTests
         var dir = CreateTempDir();
         try
         {
-            await using var plugin = new FileDirIndex(dir);
+            await using var plugin = new FileDirIndexPlugin(dir);
 
             plugin.Post(new BootstrapEvent
             {
                 Generation = 1,
-                NextLogSequence = 2,
                 RepoSnapshotView = MakeHierarchicalSnapshot()
             });
 
@@ -295,6 +244,48 @@ public sealed class FileDirIndexTests
 
             Assert.False(plugin.TryGetFilePathById(999999, out _));
             Assert.False(plugin.TryGetDirPathById(888888, out _));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ScanRootSnapshotCommittedEvent_RebuildsIndex_WhenGenerationIncreases()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndexPlugin(dir);
+
+            plugin.Post(new BootstrapEvent
+            {
+                Generation = 1,
+                RepoSnapshotView = MakeTwoRootSnapshot()
+            });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.True(plugin.TryGetDir(101, out _));
+            Assert.False(plugin.TryGetDir(99901, out _));
+
+            // Post committed event with gen=2 and different snapshot
+            var newSnapshot = MakeDifferentSnapshotSameRoots();
+
+            plugin.Post(new ScanRootSnapshotCommittedEvent
+            {
+                Generation = 2,
+                ScanRootId = 1,
+                RepoSnapshotView = newSnapshot
+            });
+
+            await AsyncUtil.WaitForConditionAsync(
+                () => plugin.TryGetDir(99901, out _) && plugin.TryGetFile(999001, out _),
+                TimeSpan.FromSeconds(2));
+
+            Assert.False(plugin.TryGetDir(101, out _));
+            Assert.False(plugin.TryGetFile(1001, out _));
         }
         finally
         {
@@ -364,7 +355,7 @@ public sealed class FileDirIndexTests
 
     private static ScanRootSnapshotView MakeRoot(long scanRootId, long[] dirIds, long[] fileIds)
     {
-        // Minimal pool (indexing not used by FileDirIndex, but required by view).
+        // Minimal pool (indexing not used by FileDirIndexPlugin, but required by view).
         var pool = PackedStringPool.FromStrings(["x", ""]);
 
         var dirs = new DirRecordV2[dirIds.Length];

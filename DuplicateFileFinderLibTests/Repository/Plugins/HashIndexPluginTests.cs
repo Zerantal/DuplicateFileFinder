@@ -5,8 +5,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.Repository.Core;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLibTests.TestUtils;
 using Xunit;
 
@@ -28,7 +30,16 @@ public sealed class HashIndexPluginTests
         return new BootstrapEvent
         {
             Generation = 1,
-            NextLogSequence = 1,
+            RepoSnapshotView = snapshot
+        };
+    }
+
+    private static RepoEvent MakeSnapshotCommittedEvent(long gen, long scanRootId, RepoSnapshotView snapshot)
+    {
+        return new ScanRootSnapshotCommittedEvent
+        {
+            Generation = gen,
+            ScanRootId = scanRootId,
             RepoSnapshotView = snapshot
         };
     }
@@ -39,52 +50,16 @@ public sealed class HashIndexPluginTests
         var hashDup = NewHash(1);
         var hashUnique = NewHash(2);
 
-        var files = new FileRecord[]
-        {
-            new()
-            {
-                FileId = 1,
-                DirId = 10,
-                Name = "a.bin",
-                Size = 100,
-                Hash = hashDup,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
-            },
-
-            new()
-            {
-                FileId = 2,
-                DirId = 11,
-                Name = "b.bin",
-                Size = 100,
-                Hash = hashDup,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
-            },
-
-            new()
-            {
-                FileId = 3,
-                DirId = 12,
-                Name = "c.bin",
-                Size = 100,
-                Hash = hashUnique,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
-            }
-        };
-
-        var snapshot = RepoUtil.MakeSnapshot(1, [], files);
+        var snapshot = RepoUtil.MakeSnapshotV2(
+            1,
+            dirs: [],
+            files:
+            [
+                ("a.bin", dirId: 10L, fileId: 1L, size: 100L, hash: hashDup),
+                ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: hashDup),
+                ("c.bin", dirId: 12L, fileId: 3L, size: 100L, hash: hashUnique)
+            ]);
+        
 
         await using var plugin = new HashIndexPlugin(_fs.Root);
 
@@ -111,39 +86,16 @@ public sealed class HashIndexPluginTests
     public async Task DefaultHash_IsIgnored_AndDoesNotProduceGroup()
     {
         var defaultHash = default(HashKey);
-
-        var files = new FileRecord[]
-        {
-            new()
-            {
-                FileId = 1,
-                DirId = 10,
-                Name = "a.bin",
-                Size = 100,
-                Hash = defaultHash,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
-            },
-
-            new()
-            {
-                FileId = 2,
-                DirId = 11,
-                Name = "b.bin",
-                Size = 100,
-                Hash = defaultHash,
-                Modified = DateTimeOffset.UtcNow,
-                Created = DateTimeOffset.UtcNow,
-                LastSeenScanSequence = 1,
-                Status = ScanEntryStatus.Enumerated,
-                ErrorMessage = null
-            }
-        };
-
-        var snapshot = RepoUtil.MakeSnapshot(1, [], files);
+        
+        var snapshot = RepoUtil.MakeSnapshotV2(
+            1,
+            dirs: [],
+            files:
+            [
+                ("a.bin", dirId: 10L, fileId: 1L, size: 100L, hash: defaultHash),
+                ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: defaultHash)
+            ]);
+        
 
         await using var plugin = new HashIndexPlugin(_fs.Root);
 
@@ -183,13 +135,12 @@ public sealed class HashIndexPluginTests
                         [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h, size: 100),
                         [2] = MakeRoot(scanRootId: 2, dirId: 20, hash: h, size: 100)
                     },
-                ScanRoots = null
+                ScanRoots = null!
             };
 
             plugin.Post(new BootstrapEvent
             {
                 Generation = 1,
-                NextLogSequence = 10,
                 RepoSnapshotView = snapshot
             });
 
@@ -202,6 +153,112 @@ public sealed class HashIndexPluginTests
             Assert.Single(groups);
             Assert.Equal(100, groups[0].size);
             Assert.Equal(4, groups[0].list.Count); // 2 files per root => 4 total handles
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ScanRootSnapshotCommittedEvent_RebuildsIndex_WhenGenerationIncreases()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "HashIndexTests_" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            await using var plugin = new HashIndexPlugin(dir);
+
+            // Initial snapshot: one duplicate group of size 100 (2 files => 1 duplicate file)
+            var h1 = NewHash(1);
+            var snap1 = new RepoSnapshotView
+            {
+                Snapshots = new Dictionary<long, ScanRootSnapshotView>
+                {
+                    [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h1, size: 100)
+                },
+                ScanRoots = null!
+            };
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap1 });
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.Equal(1, plugin.TotalDuplicateFileCount);
+            Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+            // Committed snapshot: new duplicate group of size 777 (3 files => 2 duplicate files)
+            var h2 = NewHash(2);
+            var snap2 = new RepoSnapshotView
+            {
+                Snapshots = new Dictionary<long, ScanRootSnapshotView>
+                {
+                    [1] = MakeRoot3Files(scanRootId: 1, dirId: 10, hash: h2, size: 777)
+                },
+                ScanRoots = null!
+            };
+
+            plugin.Post(MakeSnapshotCommittedEvent(gen: 2, scanRootId: 1, snapshot: snap2));
+
+            await AsyncUtil.WaitForConditionAsync(
+                () => plugin is { TotalDuplicateFileCount: 2, TotalSpaceTakenByDuplicates: 2 * 777 },
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(2, plugin.TotalDuplicateFileCount);
+            Assert.Equal(2 * 777, plugin.TotalSpaceTakenByDuplicates);
+
+            var groups = plugin.GetDuplicateGroups(minDuplicates: 2, minSize: 1);
+            var group = Assert.Single(groups);
+            Assert.Equal(777, group.size);
+            Assert.Equal(3, group.list.Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ScanRootSnapshotCommittedEvent_IsIgnored_WhenGenerationDoesNotIncrease()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "HashIndexTests_" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            await using var plugin = new HashIndexPlugin(dir);
+
+            var h1 = NewHash(1);
+            var snap1 = new RepoSnapshotView
+            {
+                Snapshots = new Dictionary<long, ScanRootSnapshotView>
+                {
+                    [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h1, size: 100)
+                },
+                ScanRoots = null!
+            };
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap1 });
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.Equal(1, plugin.TotalDuplicateFileCount);
+
+            // Create a different snapshot but send event with stale generation (1)
+            var h2 = NewHash(2);
+            var snap2 = new RepoSnapshotView
+            {
+                Snapshots = new Dictionary<long, ScanRootSnapshotView>
+                {
+                    [1] = MakeRoot3Files(scanRootId: 1, dirId: 10, hash: h2, size: 777)
+                },
+                ScanRoots = null!
+            };
+
+            plugin.Post(MakeSnapshotCommittedEvent(gen: 1, scanRootId: 1, snapshot: snap2));
+
+            // Wait briefly and assert it didn't change
+            await Task.Delay(150, TestContext.Current.CancellationToken);
+            Assert.Equal(1, plugin.TotalDuplicateFileCount);
         }
         finally
         {
@@ -260,6 +317,78 @@ public sealed class HashIndexPluginTests
                 CreatedTicks = 0,
                 ModifiedTicks = 0
             }
+        };
+
+        return new ScanRootSnapshotView
+        {
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs = dirs,
+            Files = files
+        };
+    }
+
+    private static ScanRootSnapshotView MakeRoot3Files(long scanRootId, long dirId, HashKey hash, long size)
+    {
+        // One dir, three files => duplicate count = 2
+        var pool = PackedStringPool.FromStrings(["root", "", "a.bin", "", "b.bin", "", "c.bin", ""]);
+
+        var dirs = new[]
+        {
+            new DirRecordV2
+            {
+                DirId = dirId,
+                ParentDirId = -1,
+                NameStrIdx = 0,
+                ErrorMessageStrIdx = 1,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            }
+        };
+
+        var files = new[]
+        {
+            new FileRecordV2
+            {
+                FileId = scanRootId * 1000 + 1,
+                DirId = dirId,
+                NameStrIdx = 2,
+                ErrorMessageStrIdx = 3,
+                Size = size,
+                Hash = hash,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            },
+            new FileRecordV2
+            {
+                FileId = scanRootId * 1000 + 2,
+                DirId = dirId,
+                NameStrIdx = 4,
+                ErrorMessageStrIdx = 5,
+                Size = size,
+                Hash = hash,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+            },
+            new FileRecordV2
+            {
+                FileId = scanRootId * 1000 + 3,
+                DirId = dirId,
+                NameStrIdx = 6,
+                ErrorMessageStrIdx = 7,
+                Size = size,
+                Hash = hash,
+                Status = ScanEntryStatus.Enumerated,
+                LastSeenScanSequence = 1,
+                CreatedTicks = 0,
+                ModifiedTicks = 0
+}
         };
 
         return new ScanRootSnapshotView

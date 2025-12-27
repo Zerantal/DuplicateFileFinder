@@ -18,7 +18,7 @@ internal static partial class RepoStore
 
     // ---------------- meta ----------------
 
-    public static async Task SaveMetaAsync(string repoPath, RepoMetaFile meta, CancellationToken ct = default)
+    internal static async Task SaveMetaAsync(string repoPath, RepoMetaFile meta, CancellationToken ct = default)
     {
         repoPath = Path.GetFullPath(repoPath);
         Directory.CreateDirectory(repoPath);
@@ -61,7 +61,7 @@ internal static partial class RepoStore
         }
     }
 
-    public static async Task<RepoMetaFile?> LoadMetaAsync(string repoPath, CancellationToken ct = default)
+    internal static async Task<RepoMetaFile?> LoadMetaAsync(string repoPath, CancellationToken ct = default)
     {
         repoPath = Path.GetFullPath(repoPath);
 

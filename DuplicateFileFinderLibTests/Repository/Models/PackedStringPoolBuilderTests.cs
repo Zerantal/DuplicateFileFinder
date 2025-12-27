@@ -1,7 +1,7 @@
 // DuplicateFileFinderLibTests/Repository/Models/PackedStringBuilderTests.cs
 
 using System;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Models;

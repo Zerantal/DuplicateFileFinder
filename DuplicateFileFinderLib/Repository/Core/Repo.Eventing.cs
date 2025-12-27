@@ -25,7 +25,7 @@ public sealed partial class Repo
 
             bootstrap = new BootstrapEvent
             {
-                Generation = Meta.Generation,
+                Generation = _meta.Generation,
                 RepoSnapshotView = snapshots
             };
 

@@ -2,8 +2,8 @@
 
 using System;
 using System.Linq;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using Xunit;
-using DuplicateFileFinderLib.Repository.Models;
 
 namespace DuplicateFileFinderLibTests.Repository.Models;
 
@@ -63,7 +63,7 @@ public sealed class PackedStringPoolTests
     [Fact]
     public void GetString_OutOfRange_Throws()
     {
-        var pool = PackedStringPool.FromStrings(new[] { "a", "b" });
+        var pool = PackedStringPool.FromStrings(["a", "b"]);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.GetString(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.GetString(2));
@@ -86,7 +86,7 @@ public sealed class PackedStringPoolTests
     [Fact]
     public void EmptyInput_ProducesEmptyPoolWithSentinelOffsetOnly()
     {
-        var pool = PackedStringPool.FromStrings(Array.Empty<string>());
+        var pool = PackedStringPool.FromStrings([]);
 
         Assert.Equal(0, pool.Count);
         Assert.Empty(pool.Data);
@@ -100,7 +100,7 @@ public sealed class PackedStringPoolTests
     {
         // Current implementation will throw because Encoding.GetByteCount(null) throws.
         // If you later choose to treat null as "", update this test accordingly.
-        var input = new string[] { "a", null!, "b" };
+        var input = new[] { "a", null!, "b" };
 
         Assert.ThrowsAny<Exception>(() => PackedStringPool.FromStrings(input));
     }

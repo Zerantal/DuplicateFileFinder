@@ -12,8 +12,6 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    private RepoMeta Meta { get; set; } = null!;
-
     // Public read-only views
     public IReadOnlyList<ScanRoot> ScanRootsView
     {

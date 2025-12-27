@@ -1,5 +1,5 @@
 using System;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
 using Xunit;
 
@@ -18,7 +18,6 @@ public sealed class ScanRunTests
             FinishedAt = new DateTimeOffset(2024, 2, 3, 5, 6, 7, TimeSpan.Zero),
             Status = ScanRunStatus.Completed,
             ErrorMessage = "none",
-            Operation = ScanOperation.FullScan,
             ScanRootId = 84,
         };
 
@@ -43,8 +42,8 @@ public sealed class ScanRunTests
         Assert.Equal(2, (byte)ScanRunStatus.Failed);
         Assert.Equal(3, (byte)ScanRunStatus.Cancelled);
         
-        Assert.Equal(0, (byte)ScanOperation.FullScan);
-        Assert.Equal(1, (byte)ScanOperation.QuickScan);
+        Assert.Equal(0, (byte)HashPolicyMode.Default);
+        Assert.Equal(1, (byte)HashPolicyMode.ForceRehash);
         
     }
 }

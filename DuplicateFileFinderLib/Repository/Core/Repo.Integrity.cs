@@ -49,7 +49,7 @@ public sealed partial class Repo
             repoPath     = _repoPath;
             rootsDirPath = Path.Combine(_repoPath, "roots");
 
-            meta      = Meta;
+            meta      = _meta;
             scanRoots = new Dictionary<long, ScanRoot>(_scanRoots);
             scanRuns  = new List<ScanRun>(_scanRuns);
             scanRootSnapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
@@ -283,7 +283,7 @@ public sealed partial class Repo
             {
                 Severity = RepoIntegritySeverity.Warning,
                 Code = "META_NEXTSCANSEQ_NOT_ADVANCED",
-                Message = $"Meta.NextScanSequence ({meta.NextScanSequence}) is not greater than max ScanRun id ({maxRunId})."
+                Message = $"_meta.NextScanSequence ({meta.NextScanSequence}) is not greater than max ScanRun id ({maxRunId})."
             });
         }
 

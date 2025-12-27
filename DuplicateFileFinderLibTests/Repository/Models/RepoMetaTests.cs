@@ -1,5 +1,5 @@
 using System;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
 using Xunit;
 
@@ -15,9 +15,6 @@ public sealed class RepoMetaTests
         {
             SchemaVersion = 4,
             Generation = 2,
-            NextLogSequence = 10,
-            LastSnapshottedLogSequence = 8,
-            LastCompaction = new DateTimeOffset(2024, 3, 4, 5, 6, 7, TimeSpan.Zero),
             RepoId = repoId,
             RepoPath = "/repo/path",
             RepoHostName = "host-name",
@@ -29,9 +26,6 @@ public sealed class RepoMetaTests
 
         Assert.Equal(original.SchemaVersion, roundTripped.SchemaVersion);
         Assert.Equal(original.Generation, roundTripped.Generation);
-        Assert.Equal(original.NextLogSequence, roundTripped.NextLogSequence);
-        Assert.Equal(original.LastSnapshottedLogSequence, roundTripped.LastSnapshottedLogSequence);
-        Assert.Equal(original.LastCompaction, roundTripped.LastCompaction);
         Assert.Equal(original.RepoId, roundTripped.RepoId);
         Assert.Equal(original.RepoPath, roundTripped.RepoPath);
         Assert.Equal(original.RepoHostName, roundTripped.RepoHostName);

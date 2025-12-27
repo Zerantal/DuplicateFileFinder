@@ -40,9 +40,7 @@ public sealed class ScanSessionTests
                 ModifiedTicks = 0,
                 Status = ScanEntryStatus.None,
                 ErrorMessage = null
-            },
-            maxFilesBeforeFlush: 10,
-            maxDirsBeforeFlush: 10);
+            });
 
         Assert.Equal(100, session.RootDirCursor.DirId);
         Assert.Equal(101, repo.NextDirId);
@@ -180,7 +178,7 @@ public sealed class ScanSessionTests
             new ObservedFile { Name = "X.bin", Size = 5, CreatedTicks = 0, ModifiedTicks = 0, ErrorMessage = null },
             ref ctx);
 
-        var token = new FileHashToken(DirId: 50, Name: "X.bin", Size: 5, CreatedTicks: 0, ModifiedTicks: 0);
+        var token = new FileHashToken(DirId: 50, Name: "X.bin", Size: 5);
         var bytes = new byte[16];
         for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i + 1);
 
@@ -206,7 +204,7 @@ public sealed class ScanSessionTests
             new ObservedFile { Name = "X.bin", Size = 5, CreatedTicks = 0, ModifiedTicks = 0, ErrorMessage = null },
             ref ctx);
 
-        var token = new FileHashToken(DirId: 50, Name: "X.bin", Size: 5, CreatedTicks: 0, ModifiedTicks: 0);
+        var token = new FileHashToken(DirId: 50, Name: "X.bin", Size: 5);
 
         session.OnFileHashCompleted(token, ReadOnlyMemory<byte>.Empty, errorMessage: "hash failed");
 
@@ -228,8 +226,8 @@ public sealed class ScanSessionTests
         await session.CompleteAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, repo.GetMethodCount("CommitScanRootSnapshotV2Async"));
-        Assert.Equal(1,  repo.GetMethodCount("MarkScanCompleted"));
-        Assert.Equal(0, repo.GetMethodCount("MarkScanFailed"));
+        Assert.Equal(1, repo.GetMethodCount("MarkScanCompletedAsync"));
+        Assert.Equal(0, repo.GetMethodCount("MarkScanFailedAsync"));
         Assert.NotNull(repo.LastCommittedSnapshot);
         Assert.Equal(7, repo.LastCommittedSnapshot!.Value.ScanRootId);
     }
@@ -244,8 +242,8 @@ public sealed class ScanSessionTests
         await session.FailAsync("boom", cancelled: false, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(0, repo.GetMethodCount("CommitScanRootSnapshotV2Async"));
-        Assert.Equal(0, repo.GetMethodCount("MarkScanCompleted"));
-        Assert.Equal(1, repo.GetMethodCount("MarkScanFailed"));
+        Assert.Equal(0, repo.GetMethodCount("MarkScanCompletedAsync"));
+        Assert.Equal(1, repo.GetMethodCount("MarkScanFailedAsync"));
         Assert.Equal("boom", repo.LastFailedMessage);
         Assert.False(repo.LastFailedCancelled);
     }
@@ -259,7 +257,7 @@ public sealed class ScanSessionTests
 
         await session.DisposeAsync();
 
-        Assert.Equal(1, repo.GetMethodCount("MarkScanFailed"));
+        Assert.Equal(1, repo.GetMethodCount("MarkScanFailedAsync"));
         Assert.True(repo.LastFailedCancelled);
     }
     
@@ -289,9 +287,7 @@ public sealed class ScanSessionTests
                 ModifiedTicks = 0,
                 Status = ScanEntryStatus.None,
                 ErrorMessage = null
-            },
-            maxFilesBeforeFlush: 10,
-            maxDirsBeforeFlush: 10);
+            });
 
         // Enumerate the root directory once (empty)
         var ctx = session.BeginDirectory(session.RootDirCursor);
@@ -337,9 +333,7 @@ public sealed class ScanSessionTests
                 ModifiedTicks = 0,
                 Status = ScanEntryStatus.None,
                 ErrorMessage = null
-            },
-            maxFilesBeforeFlush: 10,
-            maxDirsBeforeFlush: 10);
+            });
 
         // allocation should have happened in ctor
         Assert.Equal(1000, session.RootDirCursor.DirId);
@@ -358,6 +352,88 @@ public sealed class ScanSessionTests
         Assert.Equal(ScanEntryStatus.Enumerated, root.Status);
     }
     
+    [Fact]
+    public async Task FlushProgressAsync_TimeBased_NoFasterThanInterval_WritesAtMostOneCheckpoint()
+    {
+        // Fake clock
+        long now = new DateTime(2025, 01, 01, 0, 0, 0, DateTimeKind.Utc).Ticks;
+        // ReSharper disable once AccessToModifiedClosure
+        long Clock() => now;
+
+        var repo = new CapturingRepo();
+        var run = new ScanRun
+        {
+            ScanSequence = 10,
+            ScanRootId = 1,
+            RootPath = "/tmp",
+            StartedAt = DateTimeOffset.UtcNow,
+            Status = ScanRunStatus.InProgress
+        };
+
+        // Create session with short interval for test
+        var session = new ScanSession(
+            repo,
+            run,
+            rootDirInput: new DirScanInput
+            {
+                DirId = 50,
+                ParentDirId = -1,
+                Name = "",
+                CreatedTicks = 0,
+                ModifiedTicks = 0,
+                Status = ScanEntryStatus.None,
+                ErrorMessage = null
+            },
+            minCheckpointInterval: TimeSpan.FromSeconds(30),
+            utcNowTicks: Clock);
+
+        // Ensure root is enumerated so it can appear in drained delta if your Drain captures it
+        var ctx = session.BeginDirectory(session.RootDirCursor);
+        session.EndDirectory(ref ctx);
+
+        // Mutate: add a file (marks "dirty" inside ScanSession via Volatile.Write)
+        var ctx2 = session.BeginDirectory(session.RootDirCursor);
+        session.OnFileFound(
+            new ObservedFile
+            {
+                Name = "a.bin",
+                Size = 10,
+                CreatedTicks = 1,
+                ModifiedTicks = 2,
+                ErrorMessage = null
+            },
+            ref ctx2);
+        session.EndDirectory(ref ctx2);
+
+        // Immediate second flush should not write (interval not elapsed, and likely no new drained deltas)
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, repo.GetMethodCount("CommitCheckpoint"));
+
+        // Mutate again within interval
+        var ctx3 = session.BeginDirectory(session.RootDirCursor);
+        session.OnFileFound(
+            new ObservedFile
+            {
+                Name = "b.bin",
+                Size = 10,
+                CreatedTicks = 3,
+                ModifiedTicks = 4,
+                ErrorMessage = null
+            },
+            ref ctx3);
+        session.EndDirectory(ref ctx3);
+
+        // Still within 30s => no checkpoint
+        now += TimeSpan.FromSeconds(10).Ticks;
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, repo.GetMethodCount("CommitCheckpoint"));
+
+        // Advance beyond interval => checkpoint written
+        now += TimeSpan.FromSeconds(25).Ticks; // total 35s since last
+        await session.FlushProgressAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, repo.GetMethodCount("CommitCheckpoint"));
+    }
+    
     // ---------------- helpers ----------------
 
     private static ScanSession NewSession(CapturingRepo repo, ScanRun run, long rootDirId = -1)
@@ -373,9 +449,7 @@ public sealed class ScanSessionTests
                 ModifiedTicks = 0,
                 Status = ScanEntryStatus.None,
                 ErrorMessage = null
-            },
-            maxFilesBeforeFlush: 10,
-            maxDirsBeforeFlush: 10);
+            });
 
     private static ScanRun CreateRun(long scanSequence, long scanRootId)
         => new()
@@ -384,8 +458,7 @@ public sealed class ScanSessionTests
             ScanRootId = scanRootId,
             RootPath = "/tmp",
             StartedAt = DateTimeOffset.UtcNow,
-            Status = ScanRunStatus.InProgress,
-            Operation = ScanOperation.FullScan
+            Status = ScanRunStatus.InProgress
         };
     
     

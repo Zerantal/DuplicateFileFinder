@@ -5,7 +5,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    // Meta persistence dirty/version tracking (under _sync)
+    // _meta persistence dirty/version tracking (under _sync)
     private long _metaVersion;
     private long _persistedMetaVersion;
 
@@ -26,7 +26,7 @@ public sealed partial class Repo
         // Ensure _metaFile mirrors the current in-memory state
         metaFile = new RepoMetaFile
         {
-            Meta = Meta,
+            Meta = _meta,
             ScanRoots = _scanRoots.Values.ToList(),
             ScanRuns = _scanRuns.ToList()
         };
@@ -70,7 +70,7 @@ public sealed partial class Repo
     {
         _metaFile = metaFile;
 
-        Meta = metaFile.Meta with
+        _meta = metaFile.Meta with
         {
             // ensure schema version is current
             SchemaVersion = RepoSchemaVersion

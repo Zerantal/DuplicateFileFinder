@@ -165,7 +165,7 @@ public sealed class MutationBufferTests
     }
 
     [Fact]
-    public void ApplyFileHash_WhenFileExists_UpdatesHashOnly()
+    public void ApplyFileHash_WhenFileExists_UpdatesHashAndStatus()
     {
         var repo = new CapturingRepo {NextDirId = 1, NextFileId = 1, NextRunId = 1};
         var buf = new MutationBuffer(repo, scanSequence: 9);
@@ -190,7 +190,7 @@ public sealed class MutationBufferTests
         var f = Assert.Single(snap.Files);
         Assert.Equal(h, f.Hash);
         Assert.Equal(999, f.Size); // unchanged
-        Assert.Equal(ScanEntryStatus.Enumerated, f.Status); // unchanged
+        Assert.Equal(ScanEntryStatus.Hashed, f.Status); // unchanged
     }
 
     [Fact]
@@ -362,5 +362,151 @@ public sealed class MutationBufferTests
 
         // At least one file should have the updated hash
         Assert.Contains(snap.Files, f => f.Hash.Equals(h));
+    }
+    
+    [Fact]
+    public void DrainCheckpointSnapshot_MutateDrainMutateDrain_NoDuplication()
+    {
+        // Arrange
+        var repo = new CapturingRepo();
+        var scanSequence = 123;
+        var scanRootId = 7;
+
+        var buf = new MutationBuffer(repo, scanSequence);
+
+        // First batch of mutations
+        var rootDirId = buf.UpsertDir(new DirScanInput
+        {
+            DirId = -1,
+            ParentDirId = -1,
+            Name = "",
+            CreatedTicks = 0,
+            ModifiedTicks = 0,
+            Status = ScanEntryStatus.Enumerated,
+            ErrorMessage = null
+        });
+
+        buf.UpsertFile(new FileScanInput
+        {
+            FileId = -1,
+            DirId = rootDirId,
+            Name = "a.bin",
+            Size = 10,
+            Hash = HashKey.NotComputed,
+            CreatedTicks = 1,
+            ModifiedTicks = 2,
+            Status = ScanEntryStatus.Enumerated,
+            ErrorMessage = null
+        });
+
+        // Act 1: drain checkpoint
+        // NOTE: this test assumes MutationBuffer has been extended with an incremental drain method:
+        //   internal ScanRootSnapshotV2 DrainCheckpointSnapshot(long scanRootId)
+        // that returns only changes since the previous drain (and clears drained state).
+        var snap1 = buf.DrainCheckpointSnapshot(scanRootId);
+
+        // Assert 1: first drain contains the first batch
+        Assert.Equal(scanRootId, snap1.ScanRootId);
+        Assert.Single(snap1.Dirs);
+        Assert.Single(snap1.Files);
+
+        var a1 = Assert.Single(snap1.Files);
+        Assert.Equal("a.bin", snap1.StringPool.GetString(a1.NameStrIdx));
+
+        var snap1FileIds = snap1.Files.Select(f => f.FileId).ToHashSet();
+
+        // Second batch of mutations (new file; don't touch the first file/dir)
+        buf.UpsertFile(new FileScanInput
+        {
+            FileId = -1,
+            DirId = rootDirId,
+            Name = "b.bin",
+            Size = 20,
+            Hash = HashKey.NotComputed,
+            CreatedTicks = 3,
+            ModifiedTicks = 4,
+            Status = ScanEntryStatus.Enumerated,
+            ErrorMessage = null
+        });
+
+        // Act 2: drain checkpoint again
+        var snap2 = buf.DrainCheckpointSnapshot(scanRootId);
+
+        // Assert 2: second drain contains only new mutations, and does NOT duplicate previous ones
+        Assert.Equal(scanRootId, snap2.ScanRootId);
+        Assert.Empty(snap2.Dirs);          // no new dirs in 2nd batch
+        Assert.Single(snap2.Files);        // only b.bin
+
+        var b1 = Assert.Single(snap2.Files);
+        Assert.Equal("b.bin", snap2.StringPool.GetString(b1.NameStrIdx));
+
+        Assert.DoesNotContain(b1.FileId, snap1FileIds);
+        Assert.Equal(rootDirId, b1.DirId);              // parent dir is the same
+        Assert.DoesNotContain(b1.FileId, snap1FileIds); // file ids should differ
+        Assert.Empty(snap2.Dirs);                       // no dir records repeated in checkpoint 2
+
+
+        // Act 3: third drain with no further mutations
+        var snap3 = buf.DrainCheckpointSnapshot(scanRootId);
+
+        // Assert 3: no duplication / no phantom replays
+        Assert.Empty(snap3.Dirs);
+        Assert.Empty(snap3.Files);
+    }
+
+    [Fact]
+    public void DrainCheckpointSnapshot_UpdatesAfterDrain_AppearOnlyInLaterDrain()
+    {
+        // This test is useful to pin the intended semantics:
+        // A record only reappears in a later drain if it was mutated after the previous drain.
+        var repo = new CapturingRepo();
+        var scanSequence = 1;
+        var scanRootId = 1;
+
+        var buf = new MutationBuffer(repo, scanSequence);
+
+        var dirId = buf.UpsertDir(new DirScanInput
+        {
+            DirId = -1,
+            ParentDirId = -1,
+            Name = "",
+            CreatedTicks = 0,
+            ModifiedTicks = 0,
+            Status = ScanEntryStatus.Enumerated,
+            ErrorMessage = null
+        });
+
+        buf.UpsertFile(new FileScanInput
+        {
+            FileId = -1,
+            DirId = dirId,
+            Name = "x.bin",
+            Size = 1,
+            Hash = HashKey.NotComputed,
+            CreatedTicks = 0,
+            ModifiedTicks = 0,
+            Status = ScanEntryStatus.Enumerated,
+            ErrorMessage = null
+        });
+
+        var snap1 = buf.DrainCheckpointSnapshot(scanRootId);
+        Assert.Single(snap1.Files);
+
+        // Mutate same file after drain (by name key)
+        var newHashBytes = new byte[16];
+        newHashBytes[0] = 0xAB;
+        buf.ApplyFileHash(dirId, "x.bin", new HashKey(newHashBytes));
+
+        var snap2 = buf.DrainCheckpointSnapshot(scanRootId);
+
+        // Should contain the updated file (because it changed after drain)
+        Assert.Single(snap2.Files);
+        Assert.Equal("x.bin", snap2.StringPool.GetString(snap2.Files[0].NameStrIdx));
+        Assert.Equal(new HashKey(newHashBytes), snap2.Files[0].Hash);
+
+        // No further mutations => empty
+        var snap3 = buf.DrainCheckpointSnapshot(scanRootId);
+        Assert.Empty(snap3.Files);
+        Assert.Empty(snap3.Dirs);
     }
 }

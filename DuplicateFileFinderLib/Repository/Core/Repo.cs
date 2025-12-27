@@ -16,6 +16,7 @@ public sealed partial class Repo : IRepoInternal
     private readonly string _repoPath;
     
     // live state
+    private RepoMeta _meta = null!;
     private readonly Dictionary<long, ScanRootSnapshotV2> _scanRootSnapshots = new(); 
     private List<ScanRun> _scanRuns = new();
     private Dictionary<long, ScanRoot>   _scanRoots  = new();

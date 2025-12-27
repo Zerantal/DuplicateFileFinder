@@ -1,5 +1,4 @@
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Storage.Models;

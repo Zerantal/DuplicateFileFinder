@@ -282,7 +282,7 @@ public sealed partial class Repo
                 // Update in-memory meta file snapshot; persist outside lock.
                 _metaFile = new RepoMetaFile
                 {
-                    Meta = Meta,
+                    Meta = _meta,
                     ScanRoots = _scanRoots.Values.ToList(),
                     ScanRuns = _scanRuns.ToList()
                 };

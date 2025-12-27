@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.IO;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
@@ -19,8 +20,8 @@ public sealed partial class Repo
 
     private long AllocateRunId_NoLock()
     {
-        var seq = Meta.NextScanSequence;
-        Meta = Meta with { NextScanSequence = seq + 1 };
+        var seq = _meta.NextScanSequence;
+        _meta = _meta with { NextScanSequence = seq + 1 };
         MarkMetaDirty_NoLock();
         return seq;
     }
@@ -35,8 +36,8 @@ public sealed partial class Repo
 
     private long AllocateDirId_NoLock()
     {
-        var id = Meta.NextDirId;
-        Meta = Meta with { NextDirId = id + 1 };
+        var id = _meta.NextDirId;
+        _meta = _meta with { NextDirId = id + 1 };
         MarkMetaDirty_NoLock();
         return id;
     }
@@ -51,16 +52,16 @@ public sealed partial class Repo
 
     private long AllocateFileId_NoLock()
     {
-        var id = Meta.NextFileId;
-        Meta = Meta with { NextFileId = id + 1 };
+        var id = _meta.NextFileId;
+        _meta = _meta with { NextFileId = id + 1 };
         MarkMetaDirty_NoLock();
         return id;
     }
 
     private long AllocateRootId_NoLock()
     {
-        var id = Meta.NextScanRootId;
-        Meta = Meta with { NextScanRootId = id + 1 };
+        var id = _meta.NextScanRootId;
+        _meta = _meta with { NextScanRootId = id + 1 };
         MarkMetaDirty_NoLock();
         return id;
     }
@@ -88,8 +89,8 @@ public sealed partial class Repo
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
 
-            generation = Meta.Generation + 1;
-            Meta = Meta with { Generation = generation };
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
         }
     
@@ -122,8 +123,8 @@ public sealed partial class Repo
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
 
-            generation = Meta.Generation + 1;
-            Meta = Meta with { Generation = generation };
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
         }
 
@@ -134,38 +135,43 @@ public sealed partial class Repo
     // Find existing ScanRoot by canonical path or create a new one.
     private ScanRoot FindOrCreateScanRoot_NoLock(string? volumePath, string relativeRootPath)
     {
-        foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
+        ScanRoot newRoot;
+        
+        lock (_sync)
         {
-            if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
-                string.Equals(root.RootPath,  relativeRootPath, StringComparison.Ordinal))
+            foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
             {
-                return root;
+                if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
+                    string.Equals(root.RootPath, relativeRootPath, StringComparison.Ordinal))
+                {
+                    return root;
+                }
             }
+
+            var now = DateTimeOffset.UtcNow;
+
+            newRoot = new ScanRoot
+            {
+                RootId = AllocateRootId_NoLock(),
+                VolumePath = volumePath,
+                RootPath = relativeRootPath,
+                DirId = 0,
+                CreatedAt = now,
+                LastScannedAt = now,
+                VolumeId = null,
+                VolumeLabel = null,
+                IsRotational = null,
+                FileSystemType = null,
+                DevicePath = null,
+                DeviceModel = null,
+                IsDeleted = false,
+                DeletedAtUtc = null
+            };
+
+            _scanRoots[newRoot.RootId] = newRoot;
+            MarkMetaDirty_NoLock();
         }
-
-        var now = DateTimeOffset.UtcNow;
-
-        var newRoot = new ScanRoot
-        {
-            RootId        = AllocateRootId_NoLock(),
-            VolumePath     = volumePath,
-            RootPath = relativeRootPath,
-            DirId         = 0,
-            CreatedAt     = now,
-            LastScannedAt = now,
-            VolumeId      = null,
-            VolumeLabel   = null,
-            IsRotational  = null,
-            FileSystemType = null,
-            DevicePath    = null,
-            DeviceModel   = null,
-            IsDeleted     = false,
-            DeletedAtUtc  = null
-        };
-
-        _scanRoots[newRoot.RootId] = newRoot;
-        MarkMetaDirty_NoLock();
-
+        
         return newRoot;
     }
 
@@ -197,8 +203,8 @@ public sealed partial class Repo
         {
             _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
 
-            generation = Meta.Generation + 1;
-            Meta = Meta with { Generation = generation };
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
 
             // Capture a coherent view that corresponds to this in-memory state.
