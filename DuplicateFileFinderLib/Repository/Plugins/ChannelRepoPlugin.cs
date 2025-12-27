@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
@@ -59,20 +60,19 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
         switch (evt)
         {
             case BootstrapEvent bootstrap:
-                OnBootstrapEvent(bootstrap);
+                using (TimingLog.Start($"Processing bootstrap event ({GetType().Name})"))
+                {
+                    OnBootstrapEvent(bootstrap);
+                }
                 SignalReady();
                 break;
 
-            case DeltaCommittedEvent deltaEvt:
-                OnDeltaCommittedEvent(deltaEvt);
+            case ScanRunFinalisedEvent finalised:
+                OnScanRunFinalisedEvent(finalised);
                 break;
 
-            case CompactedEvent compacted:
-                OnCompactedEvent(compacted);
-                break;
-
-            case ScanRunCompletedEvent  scanRunCompleted:
-                OnScanRunCompletedEvent(scanRunCompleted);
+            case ScanRootSnapshotCommittedEvent snapCommitted:
+                OnScanRootSnapshotCommittedEvent(snapCommitted);
                 break;
         }
 
@@ -80,9 +80,8 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
     }
 
     protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
-    protected virtual void OnDeltaCommittedEvent(DeltaCommittedEvent evt) { }
-    protected virtual void OnCompactedEvent(CompactedEvent evt) { }
-    protected virtual void OnScanRunCompletedEvent(ScanRunCompletedEvent scanRunCompleted) { }
+    protected virtual void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt) { }
+    protected virtual void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt) { }
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
     {
@@ -92,7 +91,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
     /// <summary>
     /// Call this from derived class once the bootstrap event is fully processed.
     /// </summary>
-    protected void SignalReady()
+    private void SignalReady()
         => _readyTcs.TrySetResult();
 
     public async Task WhenReadyAsync(CancellationToken ct = default)
@@ -103,13 +102,13 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
             return;
         }
 
-        using var reg = ct.Register(() => _readyTcs.TrySetCanceled(ct));
+        await using var reg = ct.Register(() => _readyTcs.TrySetCanceled(ct));
         await _readyTcs.Task.ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
+        await _cts.CancelAsync();
         _channel.Writer.TryComplete();
         await _workerTask.ConfigureAwait(false);
     }

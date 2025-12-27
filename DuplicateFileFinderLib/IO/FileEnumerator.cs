@@ -67,7 +67,7 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             e = new FileSystemEnumerable<FsEntry>(
                 dir,
-                (ref FileSystemEntry fe) => new FsEntry(
+                (ref fe) => new FsEntry(
                     fe.IsDirectory,
                     fe.ToFullPath(),
                     fe.FileName.ToString(),
@@ -76,7 +76,7 @@ public sealed class FileEnumerator : IFileEnumerator
                     fe.LastWriteTimeUtc),
                 EnumOpts)
             {
-                ShouldIncludePredicate = (ref FileSystemEntry fe) =>
+                ShouldIncludePredicate = (ref fe) =>
                 {
                     if (OperatingSystem.IsLinux())
                     {

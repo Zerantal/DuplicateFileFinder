@@ -1,273 +1,108 @@
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage;
-using MemoryPack;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    private void ReplayDeltas()
+    // _meta persistence dirty/version tracking (under _sync)
+    private long _metaVersion;
+    private long _persistedMetaVersion;
+
+    private void MarkMetaDirty_NoLock()
     {
-        if (!Directory.Exists(_logDirPath))
-            return;
-
-        var generation = Meta.Generation;
-        var baseline = Meta.LastSnapshottedLogSequence;
-
-        var pattern = $"{generation}-*.delta";
-
-        var files = Directory
-            .GetFiles(_logDirPath, pattern)
-            .OrderBy(f => f, StringComparer.Ordinal);
-
-        foreach (var path in files)
-        {
-            var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<logId>"
-            var dash = name.IndexOf('-');
-            if (dash <= 0) continue;
-
-            var idPart = name[(dash + 1)..];
-            if (!long.TryParse(idPart, out var logId))
-                continue;
-
-            if (logId <= baseline)
-                continue;
-
-            var bytes = File.ReadAllBytes(path);
-            var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
-            if (delta is not null)
-                ApplyDelta_NoLock(delta);
-        }
+        _metaVersion++;
     }
 
-    private void ApplyDelta_NoLock(RepoDelta delta)
+    private bool TryBuildMetaFileForPersist_NoLock(out RepoMetaFile metaFile, out long version)
     {
-        // dirs
-        foreach (var d in delta.Dirs)
+        if (_persistedMetaVersion == _metaVersion)
         {
-            if (d.Status == ScanEntryStatus.Deleted)
-                _dirs.Remove(d.DirId);
-            else
-                _dirs[d.DirId] = d;
+            metaFile = null!;
+            version = _persistedMetaVersion;
+            return false;
         }
 
-        // files
-        foreach (var f in delta.Files)
+        // Ensure _metaFile mirrors the current in-memory state
+        metaFile = new RepoMetaFile
         {
-            if (f.Status == ScanEntryStatus.Deleted)
-                _files.Remove(f.FileId);
-            else
-                _files[f.FileId] = f;
-        }
-
-    }
-
-
-    private void DeleteObsoleteDeltas_NoLock()
-    {
-        if (!Directory.Exists(_logDirPath)) return;
-
-        foreach (var path in Directory.GetFiles(_logDirPath, $"{Meta.Generation}-*.delta"))
-        {
-            var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<seq>"
-            var dash = name.IndexOf('-');
-            if (dash <= 0) continue;
-            var seqPart = name[(dash + 1)..];
-            if (long.TryParse(seqPart, out var seq) && seq <= Meta.LastSnapshottedLogSequence)
-                try
-                {
-                    File.Delete(path);
-                }
-                catch
-                {
-                    // tolerate
-                }
-        }
-    }
-
-    // ------------------ new repo store ------------------------
-
-    private async Task PersistMetaAsync(CancellationToken ct = default)
-    {
-        await RepoStore.SaveMetaAsync(_repoPath, _metaFile, ct).ConfigureAwait(false);
-    }
-
-    private void SyncMetaFile_NoLock()
-    {
-        // Ensure _metaFile mirrors the current in-memory state (_meta, _scanRoots, _scanRuns)
-        _metaFile = new RepoMetaFile
-        {
-            Meta = Meta,
+            Meta = _meta,
             ScanRoots = _scanRoots.Values.ToList(),
             ScanRuns = _scanRuns.ToList()
         };
+
+        version = _metaVersion;
+        return true;
     }
 
-
-    private async Task PersistScanRootSnapshotAsync(
-        long scanRootId,
-        IReadOnlyDictionary<long, DirRecord> allDirs,
-        IReadOnlyDictionary<long, FileRecord> allFiles,
-        CancellationToken ct = default)
+    private async Task PersistMetaIfDirtyAsync(CancellationToken ct = default)
     {
-        // Find the ScanRoot
-        var scanRoot = _metaFile.ScanRoots.FirstOrDefault(r => r.RootId == scanRootId);
-        if (scanRoot is null)
-            throw new InvalidOperationException($"Unknown ScanRoot {scanRootId}.");
+        RepoMetaFile metaFile;
+        long versionToPersist;
 
-        // Collect all DirIds under this ScanRoot.DirId (subtree)
-        var dirsById = allDirs; // shorthand
-
-        var dirIds = CollectDirSubtree(scanRoot.DirId, dirsById);
-
-        var dirRecords = dirIds.Select(id => dirsById[id]).ToArray();
-
-        // Collect all files whose DirId is in that subtree
-        var filesByDir = allFiles.Values
-            .GroupBy(f => f.DirId)
-            .ToDictionary(g => g.Key, g => g.ToArray());
-
-        var fileList = new List<FileRecord>();
-        foreach (var dirId in dirIds)
-            if (filesByDir.TryGetValue(dirId, out var filesInDir))
-                fileList.AddRange(filesInDir);
-
-        var rootSnap = new ScanRootSnapshotOnDisk
+        lock (_sync)
         {
-            ScanRootId = scanRootId,
-            Dirs = dirRecords,
-            Files = fileList.ToArray()
+            if (!TryBuildMetaFileForPersist_NoLock(out metaFile, out versionToPersist))
+                return;
+
+            // Update _metaFile snapshot we track in memory
+            _metaFile = metaFile;
+        }
+
+        // Persist outside lock; RepoStore is gated
+        await RepoStore.SaveMetaAsync(_repoPath, metaFile, ct).ConfigureAwait(false);
+
+        lock (_sync)
+        {
+            // If we persisted the current version, advance persisted marker
+            if (_persistedMetaVersion < versionToPersist)
+                _persistedMetaVersion = versionToPersist;
+        }
+    }
+
+    private Task PersistScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken ct = default)
+    {
+        // single place to write V2 snapshots (RepoStore is gated + tmp unique)
+        return RepoStore.SaveScanRootSnapshotV2Async(_repoPath, snapshot, ct);
+    }
+    
+    private void LoadFromMetaFile(RepoMetaFile metaFile)
+    {
+        _metaFile = metaFile;
+
+        _meta = metaFile.Meta with
+        {
+            // ensure schema version is current
+            SchemaVersion = RepoSchemaVersion
         };
 
-        await RepoStore.SaveScanRootSnapshotAsync(_repoPath, rootSnap, ct).ConfigureAwait(false);
-    }
+        _scanRoots.Clear();
+        foreach (var root in metaFile.ScanRoots)
+            _scanRoots[root.RootId] = root;
 
-    private static HashSet<long> CollectDirSubtree(
-        long rootDirId,
-        IReadOnlyDictionary<long, DirRecord> allDirs)
-    {
-        var result = new HashSet<long>();
+        _scanRuns.Clear();
+        _scanRuns.AddRange(metaFile.ScanRuns);
 
-        // Root not present? Nothing to do.
-        if (!allDirs.ContainsKey(rootDirId))
-            return result;
-
-        // Build parent -> children index once for this call.
-        // This is O(N) over allDirs and avoids N * N scanning.
-        var childrenByParent = new Dictionary<long, List<long>>(allDirs.Count);
-
-        foreach (var dir in allDirs.Values)
-            if (dir.ParentDirId is { } parentId)
-            {
-                if (!childrenByParent.TryGetValue(parentId, out var list))
-                {
-                    list = new List<long>();
-                    childrenByParent[parentId] = list;
-                }
-
-                list.Add(dir.DirId);
-            }
-
-        var queue = new Queue<long>();
-        result.Add(rootDirId);
-        queue.Enqueue(rootDirId);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-
-            if (!childrenByParent.TryGetValue(current, out var children))
-                continue;
-
-            for (var i = 0; i < children.Count; i++)
-            {
-                var childId = children[i];
-                if (result.Add(childId))
-                    queue.Enqueue(childId);
-            }
-        }
-
-        return result;
-    }
-
-
-    // ---------- util ----------
-
-    private static void Fsync(string path)
-    {
-        using var fs = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-        fs.Flush(true);
-    }
-
-    // ReSharper disable once UnusedMember.Local
-    private (long logBytes, int count) GetLogSizeAndCount()
-    {
-        if (!Directory.Exists(_logDirPath)) return (0L, 0);
-
-        long bytes = 0;
-        var count = 0;
-        foreach (var p in Directory.GetFiles(_logDirPath, $"{Meta.Generation}-*.delta"))
-        {
-            var fi = new FileInfo(p);
-            if (fi.Exists)
-            {
-                bytes += fi.Length;
-                count++;
-            }
-        }
-
-        return (bytes, count);
+        _scanRunIndex.Clear();
+        foreach (var run in _scanRuns)
+            _scanRunIndex[run.ScanSequence] = run;
+        
+        _metaVersion = 1;
+        _persistedMetaVersion = 1;
     }
 
     private async Task InitialiseStateFromStoreAsync(CancellationToken ct)
     {
-        _dirs.Clear();
-        _files.Clear();
-        _dirPathCache.Clear();
-
-        // 1. Load per-root snapshots
+        // Load per-root snapshots
         foreach (var root in _scanRoots.Values)
         {
             ct.ThrowIfCancellationRequested();
 
-            var snap = await RepoStore.LoadScanRootSnapshotAsync(_repoPath, root.RootId, ct)
+            var snap = await RepoStore.LoadScanRootSnapshotV2Async(_repoPath, root.RootId, ct)
                 .ConfigureAwait(false);
+
             if (snap is null) continue;
-
-            foreach (var d in snap.Dirs)
-                _dirs[d.DirId] = d;
-
-            foreach (var f in snap.Files)
-                _files[f.FileId] = f;
+            _scanRootSnapshots[root.RootId] = snap.Value;
         }
-
-        ReplayDeltas();
-    }
-
-    // Writes per-root snapshots and updates meta. Caller must hold _sync.
-    private void SaveScanSnapshots_NoLock()
-    {
-        var lastSnapLog = Meta.NextLogSequence - 1; // -1 when no logs yet
-
-        // Advance meta baseline
-        Meta = Meta with { LastSnapshottedLogSequence = lastSnapLog };
-
-        // Persist updated meta (including roots/runs) via RepoStore
-        SyncMetaFile_NoLock();
-        _ = PersistMetaAsync();
-
-        // Take copies so we snapshot a stable view
-        var dirsCopy = new Dictionary<long, DirRecord>(_dirs);
-        var filesCopy = new Dictionary<long, FileRecord>(_files);
-
-        // Persist snapshots per scan root
-        foreach (var scanRoot in _scanRoots.Values)
-            PersistScanRootSnapshotAsync(
-                    scanRoot.RootId,
-                    dirsCopy,
-                    filesCopy,
-                    CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
     }
 }

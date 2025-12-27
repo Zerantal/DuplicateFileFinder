@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
@@ -10,19 +11,23 @@ public partial class TreeMapController : ObservableObject
 {
     private readonly IRepo _repo;
     private readonly ITreeIndexReadModel _treeIndex;
+    private readonly IFileDirReadModel _fileDirIndex;
 
-    private IRepoView? _lastSnapshot;
+    private RepoSnapshotView? _lastSnapshot;
     [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
 
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _root;
 
-    public TreeMapController(IRepo repo, ITreeIndexReadModel treeIndex)
+    public TreeMapController(IRepoHost host)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
-        _treeIndex = treeIndex ?? throw new ArgumentNullException(nameof(treeIndex));
+        ArgumentNullException.ThrowIfNull(host);
+        
+        _repo = host.Repo;
+        _treeIndex = host.TreeIndex;
+        _fileDirIndex = host.FileDirIndex;
     }
 
-    public TreeMapBuildOptions Options { get; } = TreeMapBuildOptions.Default;
+    public TreeMapBuildOptions Options { get; init; } = TreeMapBuildOptions.Default;
 
     public bool IsMetricBytes
     {
@@ -46,7 +51,7 @@ public partial class TreeMapController : ObservableObject
         }
     }
 
-    public void Rebuild(IRepoView snapshot)
+    public void Rebuild(RepoSnapshotView snapshot)
     {
         _lastSnapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
 
@@ -54,9 +59,14 @@ public partial class TreeMapController : ObservableObject
             snapshot,
             _repo.ScanRootsView,
             _treeIndex,
+            _fileDirIndex,
             Metric,
             Options,
-            (dirId) => _repo.GetDirPath(dirId, true));
+            (dirId) =>
+            {
+                _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
+                return dirPath;
+            });
     }
 
     partial void OnMetricChanged(TreeMapMetric value)
@@ -68,9 +78,14 @@ public partial class TreeMapController : ObservableObject
             _lastSnapshot,
             _repo.ScanRootsView,
             _treeIndex,
+            _fileDirIndex,
             value,
             Options,
-            (dirId) =>  _repo.GetDirPath(dirId, true));
+            (dirId) =>
+            {
+                _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
+                return dirPath;
+            });
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));

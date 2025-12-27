@@ -7,4 +7,5 @@ public interface IRepoHost : IAsyncDisposable
     IRepo Repo { get; }
     IHashIndexReadModel HashIndex { get; }
     ITreeIndexReadModel TreeIndex { get; }
+    IFileDirReadModel FileDirIndex { get; }
 }

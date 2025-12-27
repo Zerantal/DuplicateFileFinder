@@ -3,37 +3,25 @@ namespace Bench;
 
 public static class LongExtensions
 {
-    public static string ToSizeString(this long l)
+    public static string ToSizeString(this long bytes)
     {
-        long KB = 1024;
-        long MB = KB * 1024;
-        long GB = MB * 1024;
-        long TB = GB * 1024;
-        double size = l;
+        const long KB = 1024;
+        const long MB = KB * 1024;
+        const long GB = MB * 1024;
+        const long TB = GB * 1024;
 
-        if (l >= TB)
-        {
-            size = Math.Round((double)l / TB, 2);
-            return $"{size:N} TB";
-        }
-        else if (l >= GB)
-        {
-            size = Math.Round((double)l / GB, 2);
-            return $"{size:N} GB";
-        }
-        else if (l >= MB)
-        {
-            size = Math.Round((double)l / MB, 2);
-            return $"{size:N} MB";
-        }
-        else if (l >= KB)
-        {
-            size = Math.Round((double)l / KB, 2);
-            return $"{size:N} KB";
-        }
-        else
-        {
-            return $"{size:N} Bytes";
-        }
+        if (bytes < KB)
+            return $"{bytes} B";
+
+        if (bytes < MB)
+            return $"{bytes / (double)KB:0.##} KB";
+
+        if (bytes < GB)
+            return $"{bytes / (double)MB:0.##} MB";
+
+        if (bytes < TB)
+            return $"{bytes / (double)GB:0.##} GB";
+
+        return $"{bytes / (double)TB:0.##} TB";
     }
 }

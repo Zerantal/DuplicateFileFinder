@@ -8,19 +8,19 @@ public sealed partial class Repo
     /// if any migration actually ran.
     /// </summary>
     // ReSharper disable once UnusedMember.Local
-    private void MigrateToLatest()
+    internal async Task MigrateToLatest()
     {
         bool migrated = false;
 
         lock (_sync)
         {
-            while (Meta.SchemaVersion < RepoSchemaVersion)
+            while (_meta.SchemaVersion < RepoSchemaVersion)
             {
-                switch (Meta.SchemaVersion)
+                switch (_meta.SchemaVersion)
                 {
                     default:
                         throw new InvalidOperationException(
-                            $"Unknown repo schema version: {Meta.SchemaVersion}. " +
+                            $"Unknown repo schema version: {_meta.SchemaVersion}. " +
                             $"Cannot migrate to {RepoSchemaVersion}.");
                 }
             }
@@ -28,22 +28,14 @@ public sealed partial class Repo
             // If nothing changed, ensure meta schema is at least RepoSchemaVersion and leave.
             if (!migrated)
             {
-                if (Meta.SchemaVersion != RepoSchemaVersion)
+                if (_meta.SchemaVersion != RepoSchemaVersion)
                 {
-                    Meta = Meta with { SchemaVersion = RepoSchemaVersion };
-                    SyncMetaFile_NoLock();
-                    _ = PersistMetaAsync();
+                    _meta = _meta with { SchemaVersion = RepoSchemaVersion };
+                    MarkMetaDirty_NoLock();
                 }
-                return;
             }
-
-            // After migration(s), write a fresh snapshot + meta + scanroots/scanruns.
-            // SaveScanSnapshots_NoLock will include the migrated _meta (with new SchemaVersion).
-
-            SyncMetaFile_NoLock();
-            _ = PersistMetaAsync();
-            
-            SaveScanSnapshots_NoLock();
         }
+
+        await PersistMetaIfDirtyAsync().ConfigureAwait(false);
     }
 }

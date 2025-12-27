@@ -6,12 +6,28 @@ namespace DuplicateFileFinderLibTests.TestUtils;
 
 public sealed class TempFsFixture : IDisposable
 {
-    public string Root { get; init; }
-
     public TempFsFixture(string root = "DFFTests_")
     {
         Root = Path.Combine(Path.GetTempPath(), root + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
+    }
+
+    public string Root { get; }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                RestorePermissionsRecursive(Root);
+
+            if (Directory.Exists(Root))
+                Directory.Delete(Root, true);
+        }
+        catch
+        {
+            /* ignore */
+        }
     }
 
     public string Dir(params string[] parts)
@@ -31,9 +47,40 @@ public sealed class TempFsFixture : IDisposable
         return full;
     }
 
-    public void Dispose()
+
+    private static void RestorePermissionsRecursive(string root)
     {
-        try { if (Directory.Exists(Root)) Directory.Delete(Root, true); }
-        catch { /* ignore */ }
+        if (OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                try
+                {
+                    System.IO.File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                catch
+                {
+                    /* ignored */
+                }
+
+            foreach (var d in Directory
+                         .EnumerateDirectories(root, "*", SearchOption.AllDirectories))
+                try
+                {
+                    System.IO.File.SetUnixFileMode(
+                        d,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                catch
+                {
+                    /* ignored */
+                }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 }

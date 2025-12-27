@@ -11,8 +11,8 @@ namespace DuplicateFileFinderLibTests.Util
         {
             var source = new Dictionary<string, List<int>>
             {
-                ["a"] = new() { 1, 2 },
-                ["b"] = new() { 3 }
+                ["a"] = [1, 2],
+                ["b"] = [3]
             };
 
             var ro = new ReadOnlyDictionaryOfLists<string, int>(source);
@@ -27,7 +27,7 @@ namespace DuplicateFileFinderLibTests.Util
 
             var listA = ro["a"];
             Assert.Equal(2, listA.Count);
-            Assert.Equal(new[] { 1, 2 }, listA);
+            Assert.Equal([1, 2], listA);
         }
 
         [Fact]
@@ -35,7 +35,7 @@ namespace DuplicateFileFinderLibTests.Util
         {
             var source = new Dictionary<string, List<int>>
             {
-                ["x"] = new() { 10, 20 }
+                ["x"] = [10, 20]
             };
 
             var ro = new ReadOnlyDictionaryOfLists<string, int>(source);
@@ -43,7 +43,7 @@ namespace DuplicateFileFinderLibTests.Util
             var found = ro.TryGetValue("x", out var list);
             Assert.True(found);
             Assert.NotNull(list);
-            Assert.Equal(new[] { 10, 20 }, list);
+            Assert.Equal([10, 20], list);
         }
 
         [Fact]
@@ -62,7 +62,7 @@ namespace DuplicateFileFinderLibTests.Util
         {
             var source = new Dictionary<string, List<int>>
             {
-                ["k"] = new() { 1 }
+                ["k"] = [1]
             };
 
             var ro = new ReadOnlyDictionaryOfLists<string, int>(source);
@@ -72,7 +72,7 @@ namespace DuplicateFileFinderLibTests.Util
             source["k"].Add(2);
 
             // ...and the read-only view reflects it
-            Assert.Equal(new[] { 1, 2 }, list);
+            Assert.Equal([1, 2], list);
 
             // But attempts to modify via the read-only list fail
             // if (list is IList<int> asIList)
@@ -86,7 +86,7 @@ namespace DuplicateFileFinderLibTests.Util
         {
             var source = new Dictionary<string, List<int>>
             {
-                ["a"] = new() { 1 }
+                ["a"] = [1]
             };
 
             var ro = new ReadOnlyDictionaryOfLists<string, int>(source);
@@ -94,14 +94,14 @@ namespace DuplicateFileFinderLibTests.Util
             Assert.Single(ro.Keys);
 
             // Add new key to source
-            source["b"] = new() { 2, 3 };
+            source["b"] = [2, 3];
 
             // Wrapper should see it
             Assert.Equal(2, ro.Count);
             Assert.True(ro.ContainsKey("b"));
 
             var listB = ro["b"];
-            Assert.Equal(new[] { 2, 3 }, listB);
+            Assert.Equal([2, 3], listB);
         }
     }
 }

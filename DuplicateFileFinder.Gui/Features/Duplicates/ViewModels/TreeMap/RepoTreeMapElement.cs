@@ -1,43 +1,46 @@
 using Avalonia.Controls;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
-public abstract class RepoTreeMapElement : ITreeMapNodeElement
+public abstract class RepoTreeMapElement(Func<string> nameResolver) : ITreeMapNodeElement
 {
-    private readonly Lock _toolTipLock = new();
-
-    private Func<Control>? _toolTipFactory;
+    private Func<string> NameResolver { get; } = nameResolver;
 
     // Common data for dir/file
-    protected string? VolumeLabel => ScanRoot?.VolumeLabel;
-    public required string RelativePath { get; init; }
-    public required string Name { get; init; }
-    protected ScanRoot? ScanRoot { get; init; }
+    public required Func<string> RelativePathFactory { get; init; }
 
-    // ITreeMapNodeElement interface
-    public double Value { get; init; }
-
-    public Control CreateToolTip()
+    public string Name
     {
-        var f = _toolTipFactory;
-        if (f != null)
-            return f();
-
-        lock (_toolTipLock)
+        get
         {
-            f = _toolTipFactory;
-            if (f != null)
-                return f();
+            field ??= SafeInvoke(NameResolver);
 
-            // Build factory ONCE, not the control
-            _toolTipFactory = BuildToolTipFactory();
-            return _toolTipFactory();
+            return field;
         }
-    }
+        
+    } = null;
 
     public required string Label { get; init; }
+
+    public Func<Control> ToolTipFactory => () => new ContentControl
+    {
+        Content = this
+    };
     
-    protected abstract Func<Control> BuildToolTipFactory();
+    public required double Value { get; init; }
+
+    protected ScanRoot? ScanRoot { get; init; }
+
+    // Bindable convenience
+    public string VolumeLabel => ScanRoot?.VolumeLabel ?? "(unknown)";
+    public string RelativePath => SafeInvoke(RelativePathFactory);
+
+    private static string SafeInvoke(Func<string> f)
+    {
+        try { return f(); }
+        catch { return string.Empty; }
+    }
 }
+    

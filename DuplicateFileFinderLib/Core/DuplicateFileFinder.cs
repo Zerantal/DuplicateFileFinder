@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.IO.Platforms;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 namespace DuplicateFileFinderLib.Core;
@@ -11,8 +12,6 @@ namespace DuplicateFileFinderLib.Core;
 public sealed class DuplicateFileFinder
 {
     private readonly FullScanOperation _fullScan;
-    private readonly QuickScanOperation _quickScan;
-    private readonly RemoveRootOperation _removeRoot;
 
     private readonly bool _throttleProgress = true;
 
@@ -20,11 +19,12 @@ public sealed class DuplicateFileFinder
     {
     }
 
+    // ReSharper disable once MemberCanBePrivate.Global
     internal DuplicateFileFinder(
         IRepoHost host,
         IVolumeInfoProvider? volumeInfoProvider = null,
         IFileEnumerator? fs = null,
-        IChecksumPipeline? checksums = null)
+        IHashingRunner<FileHashToken>? hashingRunner = null)
     {
         fs ??= new FileEnumerator();
 
@@ -32,12 +32,14 @@ public sealed class DuplicateFileFinder
             volumeInfoProvider = new WindowsVolumeInfoProvider();
         if (volumeInfoProvider is null && RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             volumeInfoProvider = new LinuxVolumeInfoProvider();
-        
-        checksums ??= new ChecksumPipelineMD5();
 
-        _fullScan = new FullScanOperation(host, fs, checksums, volumeInfoProvider);
-        _quickScan = new QuickScanOperation(host, fs, checksums, volumeInfoProvider);
-        _removeRoot = new RemoveRootOperation(host);
+        if (hashingRunner is null)
+        {
+            var checksumPipeline = new ChecksumPipelineMD5();
+            hashingRunner = new HashingRunner<FileHashToken>(checksumPipeline);
+        }
+
+        _fullScan = new FullScanOperation(host, fs, hashingRunner, volumeInfoProvider);
     }
 
     internal DuplicateFileFinder(IRepoHost host, bool throttleProgress)
@@ -52,20 +54,6 @@ public sealed class DuplicateFileFinder
         CancellationToken ct = default)
     {
         return _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
-    }
-
-    public Task QuickScanAsync(
-        string rootPath,
-        IProgress<DuplicateFileFinderProgressReport>? progress = null,
-        bool skipUnchangedDirectories = true,
-        CancellationToken ct = default)
-    {
-        return _quickScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
-    }
-
-    public void RemoveScanRoot(long scanRootId)
-    {
-        _removeRoot.Execute(scanRootId);
     }
 
     // helper

@@ -1,6 +1,7 @@
-// DuplicateFileFinderLib/Repository/Repo.IntegrityRepair.cs
+// DuplicateFileFinderLib/Repository/Core/Repo.IntegrityRepair.cs
 
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository.Core;
@@ -8,355 +9,385 @@ namespace DuplicateFileFinderLib.Repository.Core;
 public sealed partial class Repo
 {
     /// <summary>
-    /// One-off repair for migrated / messy repos.
-    /// It:
-    /// - Promotes dirs whose ParentDirId is missing to roots.
-    /// - Recreates missing ScanRoots for ScanRuns.
-    /// - Binds ScanRoot.DirId (creating dummy root dirs as needed).
-    /// - Removes ScanRuns that are not referenced by any Dir/File record.
-    /// - Removes ScanRoots with no remaining runs.
-    /// - Deduplicates ScanRoots per RootPath (keeping the best candidate).
+    /// One-off repair for migrated / messy repos (best-effort).
+    ///
+    /// Repairs:
+    /// - In each per-root snapshot: any dir whose ParentDirId is missing is promoted to a root (ParentDirId = -1).
+    /// - Ensures ScanRoots referenced by ScanRuns exist.
+    /// - Ensures ScanRoot.DirId != 0 (allocates if missing).
+    /// - Removes ScanRuns not referenced by any snapshot dir/file LastSeenScanSequence.
+    /// - Removes non-deleted ScanRoots with no remaining runs.
+    /// - Deduplicates non-deleted ScanRoots by (VolumePath, RootPath).
     /// - Deletes orphan per-root snapshot files (no matching ScanRoot).
+    ///
+    /// Persistence:
+    /// - Writes ONLY changed snapshots.
+    /// - Writes meta only if it changed.
     /// </summary>
-    public void RepairMigratedRepo()
+    public async Task RepairMigratedRepoAsync(CancellationToken ct = default)
     {
-        string rootsDirPath;
+        // Capture repo path (no locking needed after construction)
+        string repoPath;
         lock (_sync)
         {
-            rootsDirPath = Path.Combine(_repoPath, "roots");
+            repoPath = _repoPath;
         }
 
+        var rootsDirPath = Path.Combine(repoPath, "roots");
         Directory.CreateDirectory(rootsDirPath);
 
+        // Track changes we need to persist outside lock.
+        var changedSnapshots = new List<ScanRootSnapshotV2>();
+        bool metaChanged = false;
+
+        // ------------------------------
+        // 1) Fix per-root snapshots: parent missing => promote to root
+        // ------------------------------
         lock (_sync)
         {
-            bool changedDirs      = false;
-            bool changedScanRoots = false;
-            bool changedScanRuns  = false;
-
-            // ------------------------------------
-            // 1. Fix DIR_PARENT_MISSING
-            // ------------------------------------
-            var knownDirIds = new HashSet<long>(_dirs.Keys);
-            var newDirs     = new Dictionary<long, DirRecord>(_dirs);
-
-            foreach (var (id, dir) in _dirs)
+            foreach (var (rootId, snap) in _scanRootSnapshots.ToArray())
             {
-                if (dir.ParentDirId is { } pid && !knownDirIds.Contains(pid))
-                {
-                    // Parent is missing: promote this directory to a root.
-                    var fixedDir = dir with { ParentDirId = null };
-                    newDirs[id]  = fixedDir;
-                    changedDirs  = true;
-                }
-            }
-
-            if (changedDirs)
-                _dirs = newDirs;
-
-            // ------------------------------------
-            // 2. Fix RUN_ROOT_MISSING (recreate ScanRoots)
-            // ------------------------------------
-            var rootsById = _scanRoots.ToDictionary<KeyValuePair<long, ScanRoot>, long, ScanRoot>(kv => kv.Key, kv => kv.Value);
-
-            foreach (var run in _scanRuns)
-            {
-                if (run.ScanRootId == 0)
+                var dirs = snap.Dirs;
+                if (dirs.Length == 0)
                     continue;
 
-                if (rootsById.ContainsKey(run.ScanRootId))
+                var knownDirIds = new HashSet<long>(dirs.Length);
+                foreach (var d in dirs)
+                    knownDirIds.Add(d.DirId);
+
+                bool changed = false;
+                var newDirs = (DirRecordV2[])dirs.Clone();
+
+                for (int i = 0; i < newDirs.Length; i++)
+                {
+                    var d = newDirs[i];
+
+                    // ParentDirId == -1 is already a root/sentinel.
+                    if (d.ParentDirId >= 0 && !knownDirIds.Contains(d.ParentDirId))
+                    {
+                        newDirs[i] = d with { ParentDirId = -1 };
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    var updated = snap with { Dirs = newDirs };
+                    _scanRootSnapshots[rootId] = updated;
+                    changedSnapshots.Add(updated);
+                }
+            }
+        }
+
+        // Persist changed snapshots (outside lock). RepoStore is gated; writes are temp+move.
+        foreach (var s in changedSnapshots)
+        {
+            ct.ThrowIfCancellationRequested();
+            await RepoStore.SaveScanRootSnapshotV2Async(repoPath, s, ct).ConfigureAwait(false);
+        }
+
+        // ------------------------------
+        // 2) Fix meta: ensure ScanRoots exist for ScanRuns, bind DirId, remove orphan runs/roots, dedupe roots
+        // ------------------------------
+        lock (_sync)
+        {
+            // 2a) Ensure ScanRoots referenced by runs exist (best-effort).
+            foreach (var run in _scanRuns.ToArray())
+            {
+                if (run.ScanRootId <= 0)
+                    continue;
+
+                if (_scanRoots.ContainsKey(run.ScanRootId))
                     continue;
 
                 if (string.IsNullOrWhiteSpace(run.RootPath))
                     continue; // cannot recover without a path
 
-                var canonical = PathUtils.NormalizePath(run.RootPath);
-                var dirId = TryGetDirIdForFullPath_NoLock(canonical) ?? 0;
+                var canonicalRootPath = PathUtils.NormalizePath(run.RootPath);
+
+                // If we have a snapshot for this ScanRootId, attempt to pick a plausible root DirId.
+                long dirId = 0;
+                if (_scanRootSnapshots.TryGetValue(run.ScanRootId, out var snap))
+                {
+                    dirId = PickSnapshotRootDirId_NoLock(snap, canonicalRootPath);
+                }
 
                 var root = new ScanRoot
                 {
                     RootId        = run.ScanRootId,
+                    RootPath = canonicalRootPath,
                     DirId         = dirId,
-                    RootPath      = canonical,
                     CreatedAt     = run.StartedAt,
                     LastScannedAt = run.FinishedAt ?? run.StartedAt,
 
                     VolumeId      = null,
                     VolumeLabel   = null,
+                    DisplayName = null,
                     IsRotational  = null,
                     FileSystemType = null,
                     DevicePath    = null,
                     DeviceModel   = null,
-                    DisplayName   = null
+                    VolumePath = null,
+                    IsDeleted = false,
+                    DeletedAtUtc = null
                 };
 
-                rootsById[root.RootId] = root;
-                changedScanRoots   = true;
+                _scanRoots[root.RootId] = root;
+                metaChanged = true;
             }
 
-            _scanRoots = rootsById;
-
-            // ------------------------------------
-            // 3. Bind ROOT_DIRID_EMPTY (ScanRoot.DirId)
-            // ------------------------------------
+            // 2b) Ensure ScanRoot.DirId != 0 (allocate if missing).
             foreach (var (id, root) in _scanRoots.ToArray())
             {
-                if (root.DirId != 0)
+                if (root.DirId > 0)
                     continue;
 
-                if (string.IsNullOrWhiteSpace(root.RootPath))
-                    continue;
-
-                var canonical = PathUtils.NormalizePath(root.RootPath);
-
-                // 3a. Try full-path match using existing helper
-                var dirId = TryGetDirIdForFullPath_NoLock(canonical);
-
-                // 3b. If that fails, try leaf-name match ANYWHERE in the tree
-                if (dirId is null)
+                long dirId = 0;
+                if (_scanRootSnapshots.TryGetValue(id, out var snap))
                 {
-                    var trimmed  = canonical.TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar);
-                    var leafName = Path.GetFileName(trimmed);
-                    if (string.IsNullOrEmpty(leafName))
-                        leafName = canonical;
-
-                    var candidates = _dirs.Values
-                        .Where(d => string.Equals(d.Name, leafName, StringComparison.Ordinal))
-                        .Select(d => d.DirId)
-                        .ToList();
-
-                    if (candidates.Count == 1)
-                        dirId = candidates[0];
+                    dirId = PickSnapshotRootDirId_NoLock(snap, root.RootPath);
                 }
 
-                // 3c. If still nothing, create a dummy root dir
-                if (dirId is null)
+                if (dirId <= 0)
                 {
-                    var trimmed  = canonical.TrimEnd(
-                        Path.DirectorySeparatorChar,
-                        Path.AltDirectorySeparatorChar);
-                    var leafName = Path.GetFileName(trimmed);
-                    if (string.IsNullOrEmpty(leafName))
-                        leafName = canonical;
-
-                    var newDirId = AllocateDirId_NoLock();
-                    
-                    var newRootDir = new DirRecord
-                    {
-                        DirId            = newDirId,
-                        ParentDirId         = null,
-                        Name             = leafName,
-                        LastSeenScanSequence = 0,
-                        Status           = ScanEntryStatus.None,
-                        ErrorMessage     = null
-                    };
-
-                    _dirs[newDirId] = newRootDir;
-                    changedDirs      = true;
-                    dirId            = newDirId;
+                    dirId = AllocateDirId_NoLock(); // stable id; snapshot may not contain it, but this is “repair”.
                 }
 
-                if (dirId is { } boundId && boundId != 0)
-                {
-                    var updated = root with { DirId = boundId };
-                    _scanRoots[id] = updated;
-                    changedScanRoots = true;
-                }
+                _scanRoots[id] = root with { DirId = dirId };
+                metaChanged = true;
             }
 
-            // ------------------------------------
-            // 4. Remove orphan ScanRuns (no dir/file references)
-            // ------------------------------------
+            // 2c) Remove orphan runs (no references in any snapshot LastSeenScanSequence).
             var usedSequences = new HashSet<long>();
-            foreach (var d in _dirs.Values)
+
+            foreach (var snap in _scanRootSnapshots.Values)
             {
-                if (d.LastSeenScanSequence > 0)
-                    usedSequences.Add(d.LastSeenScanSequence);
+                foreach (var d in snap.Dirs)
+                    if (d.LastSeenScanSequence > 0)
+                        usedSequences.Add(d.LastSeenScanSequence);
+
+                foreach (var f in snap.Files)
+                    if (f.LastSeenScanSequence > 0)
+                        usedSequences.Add(f.LastSeenScanSequence);
             }
 
-            foreach (var f in _files.Values)
+            if (usedSequences.Count > 0)
             {
-                if (f.LastSeenScanSequence > 0)
-                    usedSequences.Add(f.LastSeenScanSequence);
-            }
-
-            var keptRuns      = new List<ScanRun>();
-
-            foreach (var run in _scanRuns)
-            {
-                if (!usedSequences.Contains(run.ScanSequence))
+                var keptRuns = new List<ScanRun>(_scanRuns.Count);
+                foreach (var run in _scanRuns)
                 {
-                    changedScanRuns = true;
-                    continue;
+                    if (usedSequences.Contains(run.ScanSequence))
+                        keptRuns.Add(run);
+                    else
+                        metaChanged = true;
                 }
 
-                keptRuns.Add(run);
+                if (keptRuns.Count != _scanRuns.Count)
+                {
+                    _scanRuns    = keptRuns;
+                    _scanRunIndex.Clear();
+                    foreach (var run in keptRuns)
+                        _scanRunIndex[run.ScanSequence] = run;
+                }
             }
 
-            if (changedScanRuns)
-            {
-                _scanRuns    = keptRuns;
-                _scanRunIndex.Clear();
-                foreach (var run in keptRuns) _scanRunIndex.Add(run.ScanSequence, run);
-            }
-
-            // ------------------------------------
-            // 5. Remove ScanRoots with no remaining runs
-            // ------------------------------------
+            // 2d) Remove non-deleted roots with no remaining runs.
             var runsByRootId = _scanRuns
                 .GroupBy(r => r.ScanRootId)
-                .ToDictionary(g => g.Key, g => g.ToList());
+                .ToDictionary(g => g.Key, g => g.Count());
 
-            var newRoots = new Dictionary<long, ScanRoot>();
-            foreach (var (id, root) in _scanRoots)
+            foreach (var (id, root) in _scanRoots.ToArray())
             {
                 if (root.IsDeleted)
-                {
-                    // Soft-deleted roots are valid even with no runs; keep them.
-                    newRoots[id] = root;
                     continue;
-                }
 
-                if (runsByRootId.TryGetValue(id, out var runs) && runs.Count > 0)
+                if (!runsByRootId.TryGetValue(id, out var count) || count == 0)
                 {
-                    newRoots[id] = root;
-                }
-                else
-                {
-                    // legacy/root-with-no-runs case: drop it
-                    changedScanRoots = true;
+                    _scanRoots.Remove(id);
+                    _scanRootSnapshots.Remove(id);
+                    metaChanged = true;
                 }
             }
 
-            _scanRoots = newRoots;
-
-
-            // ------------------------------------
-            // 6. Deduplicate ScanRoots per RootPath
-            // ------------------------------------
+            // 2e) Deduplicate non-deleted roots by (VolumePath, RootPath)
             var liveRoots    = _scanRoots.Values.Where(r => !r.IsDeleted).ToList();
             var deletedRoots = _scanRoots.Values.Where(r => r.IsDeleted).ToList();
 
-            var rootsByPath = liveRoots
-                .GroupBy(r => r.RootPath, StringComparer.Ordinal)
+            var grouped = liveRoots
+                .GroupBy(r => (VolumePath: r.VolumePath ?? string.Empty, r.RootPath),
+                    VolumeRootKeyComparer.Ordinal)
                 .ToList();
 
-            var canonicalRoots   = new Dictionary<long, ScanRoot>();
-            var rootIdRemap      = new Dictionary<long, long>(); // oldId -> canonicalId
 
-            foreach (var grp in rootsByPath)
+            var canonical = new Dictionary<long, ScanRoot>();
+            var remap = new Dictionary<long, long>(); // oldRootId -> canonicalRootId
+
+            foreach (var grp in grouped)
             {
-                var roots = grp.ToList();
-                if (roots.Count == 1)
+                var list = grp.ToList();
+                if (list.Count == 1)
                 {
-                    var single = roots[0];
-                    canonicalRoots[single.RootId] = single;
+                    canonical[list[0].RootId] = list[0];
                     continue;
                 }
 
                 // Choose canonical:
-                // 1. prefer one with non-empty DirId
-                // 2. among those, prefer latest LastScannedAt
-                var candidates = roots.Where(r => r.DirId != 0).ToList();
+                // 1) prefer DirId != 0
+                // 2) prefer latest LastScannedAt
+                var candidates = list.Where(r => r.DirId != 0).ToList();
                 if (candidates.Count == 0)
-                    candidates = roots;
+                    candidates = list;
 
-                var canonical = candidates
-                    .OrderByDescending(r => r.LastScannedAt)
+                var chosen = candidates
+                    .OrderByDescending(r => r.LastScannedAt ?? DateTimeOffset.MinValue)
                     .First();
 
-                canonicalRoots[canonical.RootId] = canonical;
+                canonical[chosen.RootId] = chosen;
 
-                // Map others to canonical
-                foreach (var r in roots)
+                foreach (var r in list)
                 {
-                    if (r.RootId == canonical.RootId)
-                        continue;
-
-                    rootIdRemap[r.RootId] = canonical.RootId;
+                    if (r.RootId == chosen.RootId) continue;
+                    remap[r.RootId] = chosen.RootId;
                 }
+
+                metaChanged = true;
             }
 
-            // Remap runs to canonical root ids
-            if (rootIdRemap.Count > 0)
+            // Remap ScanRuns to canonical root ids
+            if (remap.Count > 0)
             {
                 var newRuns     = new List<ScanRun>(_scanRuns.Count);
-
                 foreach (var run in _scanRuns)
                 {
-                    if (rootIdRemap.TryGetValue(run.ScanRootId, out var canonicalId))
-                    {
-                        var updated = run with { ScanRootId = canonicalId };
-                        newRuns.Add(updated);
-                    }
+                    if (remap.TryGetValue(run.ScanRootId, out var newId))
+                        newRuns.Add(run with { ScanRootId = newId });
                     else
-                    {
                         newRuns.Add(run);
-                    }
                 }
 
                 _scanRuns     = newRuns;
                 _scanRunIndex.Clear();
-                foreach (var run in newRuns) _scanRunIndex.Add(run.ScanSequence, run);
-                changedScanRuns = true;
+                foreach (var run in newRuns)
+                    _scanRunIndex[run.ScanSequence] = run;
             }
             
-            // finally, add back deleted roots unchanged
-            foreach (var deleted in deletedRoots)
+            // Add back deleted roots unchanged.
+            foreach (var r in deletedRoots)
+                canonical[r.RootId] = r;
+
+            _scanRoots = canonical;
+
+            if (metaChanged)
             {
-                canonicalRoots[deleted.RootId] = deleted;
-            }
-
-            _scanRoots      = canonicalRoots;
-
-
-            // ------------------------------------
-            // 7. Delete orphan per-root snapshot files
-            // ------------------------------------
-            if (Directory.Exists(rootsDirPath))
-            {
-                var validRootIds = new HashSet<long>(_scanRoots.Keys);
-                
-                foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
+                // Update in-memory meta file snapshot; persist outside lock.
+                _metaFile = new RepoMetaFile
                 {
-                    var name = Path.GetFileNameWithoutExtension(path);
-                    if (!long.TryParse(name, out var id))
-                        continue;
+                    Meta = _meta,
+                    ScanRoots = _scanRoots.Values.ToList(),
+                    ScanRuns = _scanRuns.ToList()
+                };
+            }
+        }
+
+        if (metaChanged)
+        {
+            await RepoStore.SaveMetaAsync(repoPath, _metaFile, ct).ConfigureAwait(false);
+        }
+
+        // ------------------------------
+        // 3) Delete orphan per-root snapshot files (no matching ScanRoot)
+        // ------------------------------
+        var validRootIds = new HashSet<long>();
+        lock (_sync)
+        {
+            foreach (var id in _scanRoots.Keys)
+                validRootIds.Add(id);
+        }
+
+        if (Directory.Exists(rootsDirPath))
+        {
+            foreach (var file in Directory.GetFiles(rootsDirPath, "*.mp"))
+            {
+                ct.ThrowIfCancellationRequested();
                 
-                    if (!validRootIds.Contains(id))
-                    {
-                        try
-                        {
-                            File.Delete(path);
-                        }
-                        catch
-                        {
-                            // ignore IO errors in repair
-                        }
-                    }
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (!long.TryParse(name, out var id))
+                    continue;
+                
+                if (!validRootIds.Contains(id))
+                {
+                    try { File.Delete(file); } catch { /* tolerate */ }
                 }
             }
+        }
+    }
 
-            // ------------------------------------
-            if (changedDirs || changedScanRoots || changedScanRuns)
+    /// <summary>
+    /// Best-effort: pick a plausible root directory id from a snapshot.
+    /// Prefers: a dir whose ParentDirId == -1 and name matches the leaf of rootPath.
+    /// Falls back to: first dir with ParentDirId == -1.
+    /// </summary>
+    private static long PickSnapshotRootDirId_NoLock(ScanRootSnapshotV2 snap, string rootPath)
+    {
+        if (snap.Dirs.Length == 0)
+            return 0;
+
+        var pool = snap.StringPool;
+
+        static string Leaf(string p)
+        {
+            var trimmed = p.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var leaf = Path.GetFileName(trimmed);
+            return string.IsNullOrEmpty(leaf) ? trimmed : leaf;
+        }
+
+        var leafName = Leaf(rootPath);
+
+        long firstRoot = 0;
+
+        foreach (var d in snap.Dirs)
+        {
+            if (d.ParentDirId != -1)
+                continue;
+
+            if (firstRoot == 0)
+                firstRoot = d.DirId;
+
+            try
             {
-                SaveMeta_NoLock();
-                SaveScanSnapshots_NoLock();
+                var name = pool.GetString(d.NameStrIdx);
+                if (string.Equals(name, leafName, StringComparison.Ordinal))
+                    return d.DirId;
+            }
+            catch
+            {
+                // tolerate broken string index
+            }
+        }
+
+        return firstRoot;
+    }
+    
+    private sealed class VolumeRootKeyComparer : IEqualityComparer<(string VolumePath, string RootPath)>
+    {
+        public static readonly VolumeRootKeyComparer Ordinal = new(StringComparer.Ordinal);
+
+        private readonly StringComparer _cmp;
+
+        private VolumeRootKeyComparer(StringComparer cmp) => _cmp = cmp;
+
+        public bool Equals((string VolumePath, string RootPath) x, (string VolumePath, string RootPath) y)
+            => _cmp.Equals(x.VolumePath, y.VolumePath) && _cmp.Equals(x.RootPath, y.RootPath);
+
+        public int GetHashCode((string VolumePath, string RootPath) obj)
+        {
+            unchecked
+            {
+                int h1 = _cmp.GetHashCode(obj.VolumePath);
+                int h2 = _cmp.GetHashCode(obj.RootPath);
+                return (h1 * 397) ^ h2;
             }
         }
     }
-    
-    private long? TryGetDirIdForFullPath_NoLock(string canonicalFullPath)
-    {
-        foreach (var kv in _dirs)
-        {
-            var full = GetDirPath(kv.Key);
-            if (PathUtils.IsSamePath(full, canonicalFullPath))
-                return kv.Key;
-        }
 
-        return null;
-    }
 }

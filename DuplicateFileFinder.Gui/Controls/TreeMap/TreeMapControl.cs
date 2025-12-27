@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using DuplicateFileFinderLib.Logging;
 
 // ReSharper disable MemberCanBePrivate.Global
 
@@ -10,8 +11,15 @@ namespace DuplicateFileFinder.Gui.Controls.TreeMap;
 
 public sealed class TreeMapControl : Control
 {
+    private readonly Dictionary<uint, SolidColorBrush> _brushCache = new();
     private readonly Dictionary<TreeMapNode<ITreeMapNodeElement>, double> _valueCache = new();
-    private Control? _currentTooltip;
+    private int _shadeLevelsCached = 16;
+    private int _maxRectanglesCached = 25_000;
+    private bool _valuesArePreSummedCached;
+    
+    // Scratch buffers to avoid per-call allocations.
+    private readonly List<TreeItem> _itemsScratch = new(256);
+    private readonly List<TreeItem> _rowScratch   = new(64);
     
     // ----------------- Styled properties -----------------
 
@@ -87,6 +95,10 @@ public sealed class TreeMapControl : Control
             ctrl.InvalidateMeasure();
             ctrl.InvalidateVisual();
         });
+        ShadeLevelsProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
+        MaxRectanglesProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
+        ValuesArePreSummedProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
+
     }
 
     // -------- CLR wrappers --------
@@ -168,47 +180,57 @@ public sealed class TreeMapControl : Control
         set => SetValue(ValuesArePreSummedProperty, value);
     }
 
+    private void RefreshCachedProps()
+    {
+        _shadeLevelsCached = Math.Max(1, ShadeLevels);
+
+        _maxRectanglesCached = MaxRectangles;
+        _valuesArePreSummedCached = ValuesArePreSummed;
+    }
+
+    
     protected override Size ArrangeOverride(Size finalSize)
     {
-        _layout.Clear();
-        _valueCache.Clear();
-        _rectCount = 0;
-
-        if (Root == null || finalSize.Width <= 0 || finalSize.Height <= 0)
-            return finalSize;
-
-        var total = GetNodeValue(Root);
-        if (total <= 0)
-            return finalSize;
-
-        var bounds = new Rect(0, 0, finalSize.Width, finalSize.Height);
-
-        // Lay out the dummy root rect itself (optional but harmless).
-        EmitRect(Root, bounds, 0, null, 0, out var rootBaseColor, out var rootBaseDepth);
-
-        // Best-first expansion: expand biggest rectangles first.
-        var pq = new PriorityQueue<ExpandFrame, double>();
-
-        // Phase A: layout children of root once so ALL nodes immediately under root appear.
-        foreach (var childFrame in LayoutChildrenFrames(Root, bounds, 0, rootBaseColor, rootBaseDepth))
-            // PriorityQueue in .NET is min-heap; use negative area for max-heap behavior.
-            pq.Enqueue(childFrame, -childFrame.Bounds.Width * childFrame.Bounds.Height);
-
-        // Phase B: expand the largest directory rects first until cap.
-        while (_rectCount < MaxRectangles && pq.TryDequeue(out var frame, out _))
+        using (TimingLog.Start("TreeMapControl.ArrangeOverride"))
         {
-            if (_rectCount >= MaxRectangles)
-                break;
+            RefreshCachedProps();
+            
+            _layout.Clear();
+            _layout.EnsureCapacity(_maxRectanglesCached + _shadeLevelsCached);
+            _valueCache.Clear();
+            _rectCount = 0;
 
-            if (!frame.Node.HasChildren)
-                continue;
+            if (Root == null || finalSize.Width <= 0 || finalSize.Height <= 0)
+                return finalSize;
 
-            foreach (var next in LayoutChildrenFrames(frame.Node, frame.Bounds, frame.Depth, frame.BaseColor,
-                         frame.BaseDepth)) pq.Enqueue(next, -next.Bounds.Width * next.Bounds.Height);
+            var total = GetNodeValue(Root);
+            if (total <= 0)
+                return finalSize;
+
+            var bounds = new Rect(0, 0, finalSize.Width, finalSize.Height);
+
+            // Emit root
+            EmitRect(Root, bounds, 0, null, 0, out var rootBaseColor, out var rootBaseDepth);
+
+            // Best-first expansion: expand biggest rectangles first.
+            var pq = new PriorityQueue<ExpandFrame, double>();
+
+            // Phase A: expand root's children once so all top-level nodes appear.
+            LayoutChildrenFrames(Root, bounds, 0, rootBaseColor, rootBaseDepth, pq);
+
+            // Phase B: expand the largest directory rects until cap.
+            while (_rectCount < _maxRectanglesCached && pq.TryDequeue(out var frame, out _))
+            {
+                if (!frame.Node.HasChildren)
+                    continue;
+
+                LayoutChildrenFrames(frame.Node, frame.Bounds, frame.Depth, frame.BaseColor, frame.BaseDepth, pq);
+            }
         }
 
         return finalSize;
     }
+
 
     private void EmitRect(
         TreeMapNode<ITreeMapNodeElement> node,
@@ -244,171 +266,215 @@ public sealed class TreeMapControl : Control
         _rectCount++;
     }
 
-    private IEnumerable<ExpandFrame> LayoutChildrenFrames(
+    private void LayoutChildrenFrames(
         TreeMapNode<ITreeMapNodeElement> node,
         Rect bounds,
         int depth,
         Color? inheritedBaseColor,
-        int baseDepth)
+        int baseDepth,
+        PriorityQueue<ExpandFrame, double> pq)
     {
-        if (_rectCount >= MaxRectangles)
-            yield break;
-
+        if (_rectCount >= _maxRectanglesCached)
+            return;
+    
         if (!node.HasChildren)
-            yield break;
-
-        // Only reserve margin if we expect to draw a border on this node.
+            return;
+    
+        // Border margin logic (same semantics as before).
         var minSize = MinBorderSize;
         var canDrawBorder = bounds.Width >= minSize && bounds.Height >= minSize;
         var usePrimary = depth <= PrimaryBorderDepth;
         var thickness = usePrimary ? PrimaryBorderThickness : SecondaryBorderThickness;
-        var margin = canDrawBorder && thickness > 0 ? thickness : 0.0;
-
+        var margin = (canDrawBorder && thickness > 0) ? thickness : 0.0;
+    
         var inner = bounds.Deflate(new Thickness(margin));
         if (inner.Width <= 0 || inner.Height <= 0)
-            yield break;
-
-        // Build treemap items (children must have Value set; dirs are aggregated by GetNodeValue).
-        var items = node.Children
-            .Select(c => new TreeItem { Node = c, Value = Math.Max(0, c.Value) })
-            .Where(i => i.Value > 0)
-            .ToList();
-
-        if (items.Count == 0)
-            yield break;
-
-        var total = items.Sum(i => i.Value);
-        if (total <= 0)
-            yield break;
-
+            return;
+    
+        // Build treemap items (single pass, reuse scratch list).
+        _itemsScratch.Clear();
+        var children = node.Children;
+        if (_itemsScratch.Capacity < children.Count)
+            _itemsScratch.Capacity = children.Count;
+    
+        double total = 0;
+        foreach (var c in children)
+        {
+            var v = Math.Max(0, GetNodeValue(c));
+            if (v <= 0)
+                continue;
+    
+            _itemsScratch.Add(new TreeItem { Node = c, Value = v });
+            total += v;
+        }
+    
+        if (_itemsScratch.Count == 0 || total <= 0)
+            return;
+    
+        // Scale values into areas for this rect.
         var totalArea = inner.Width * inner.Height;
         var scale = totalArea / total;
-        foreach (var item in items)
-            item.Area = item.Value * scale;
-
-        // Squarify items into rectangles within 'inner' WITHOUT recursing into grandchildren.
-        // For each produced child rectangle: emit rect + yield frame if directory.
-        foreach (var (child, rect) in SquarifyFlat(items, inner))
+    
+        for (int i = 0; i < _itemsScratch.Count; i++)
         {
-            if (_rectCount >= MaxRectangles)
-                yield break;
-
-            EmitRect(child, rect, depth + 1, inheritedBaseColor, baseDepth, out var childBaseColor,
-                out var childBaseDepth);
-
-            if (child.HasChildren)
-                yield return new ExpandFrame
-                {
-                    Node = child,
-                    Bounds = rect,
-                    Depth = depth + 1,
-                    BaseColor = childBaseColor,
-                    BaseDepth = childBaseDepth
-                };
+            var ti = _itemsScratch[i];
+            ti.Area = ti.Value * scale;
+            _itemsScratch[i] = ti;
         }
+    
+        // Consume produced rects immediately: emit + enqueue frames.
+        var consumer = new ChildRectConsumer(
+            owner: this,
+            pq: pq,
+            childDepth: depth + 1,
+            inheritedBaseColor: inheritedBaseColor,
+            baseDepth: baseDepth);
+    
+        SquarifyFlat(_itemsScratch, inner, ref consumer);
     }
 
-    private IEnumerable<(TreeMapNode<ITreeMapNodeElement> Node, Rect Rect)> SquarifyFlat(List<TreeItem> items, Rect rect)
-    {
-        var index = 0;
 
+    private void SquarifyFlat<T>(List<TreeItem> items, Rect rect, ref T consumer)
+        where T : struct, IRectConsumer
+    {
+        if (items.Count == 0 || rect.Width <= 0 || rect.Height <= 0)
+            return;
+
+        _rowScratch.Clear();
+        if (_rowScratch.Capacity < Math.Min(items.Count, 64))
+            _rowScratch.Capacity = Math.Min(items.Count, 64);
+
+        int index = 0;
+    
         while (index < items.Count && rect is { Width: > 0, Height: > 0 })
         {
-            var row = new List<TreeItem> { items[index] };
-            index++;
+            _rowScratch.Clear();
 
-            var horizontal = rect.Width >= rect.Height;
-            var w = horizontal ? rect.Width : rect.Height;
-            var bestWorst = WorstAspect(row, w);
+            bool horizontal = rect.Width >= rect.Height;
+            double w = horizontal ? rect.Width : rect.Height;
+    
+            // Start row with first item
+            var first = items[index++];
+            _rowScratch.Add(first);
 
+            double rowArea = first.Area;
+            double minA = first.Area;
+            double maxA = first.Area;
+    
+            double bestWorst = WorstAspectFromStats(rowArea, minA, maxA, w);
+
+            // Greedily grow row while aspect ratio improves
             while (index < items.Count)
             {
-                row.Add(items[index]);
-                var newWorst = WorstAspect(row, w);
+                var candidate = items[index];
 
+                double newRowArea = rowArea + candidate.Area;
+                double newMinA = candidate.Area < minA ? candidate.Area : minA;
+                double newMaxA = candidate.Area > maxA ? candidate.Area : maxA;
+
+                double newWorst = WorstAspectFromStats(newRowArea, newMinA, newMaxA, w);
+    
                 if (newWorst <= bestWorst)
                 {
+                    _rowScratch.Add(candidate);
+                    rowArea = newRowArea;
+                    minA = newMinA;
+                    maxA = newMaxA;
                     bestWorst = newWorst;
                     index++;
                 }
                 else
                 {
-                    row.RemoveAt(row.Count - 1);
                     break;
                 }
             }
-
-            var rowArea = row.Sum(i => i.Area);
+    
             if (rowArea <= 0)
-                yield break;
-
+                return;
+    
             if (horizontal)
             {
-                var rowHeight = rowArea / rect.Width;
-                var x = rect.X;
-
-                foreach (var item in row)
+                double rowHeight = rowArea / rect.Width;
+                double x = rect.X;
+    
+                foreach (var item in _rowScratch)
                 {
-                    var itemWidth = item.Area / rowHeight;
-                    var r = new Rect(x, rect.Y, itemWidth, rowHeight);
-                    yield return (item.Node, r);
+                    double itemWidth = item.Area / rowHeight;
+                    consumer.Consume(item.Node, new Rect(x, rect.Y, itemWidth, rowHeight));
                     x += itemWidth;
                 }
-
+    
                 rect = new Rect(rect.X, rect.Y + rowHeight, rect.Width, Math.Max(0, rect.Height - rowHeight));
             }
             else
             {
-                var rowWidth = rowArea / rect.Height;
-                var y = rect.Y;
-
-                foreach (var item in row)
+                double rowWidth = rowArea / rect.Height;
+                double y = rect.Y;
+    
+                foreach (var item in _rowScratch)
                 {
-                    var itemHeight = item.Area / rowWidth;
-                    var r = new Rect(rect.X, y, rowWidth, itemHeight);
-                    yield return (item.Node, r);
+                    double itemHeight = item.Area / rowWidth;
+                    consumer.Consume(item.Node, new Rect(rect.X, y, rowWidth, itemHeight));
                     y += itemHeight;
                 }
-
+    
                 rect = new Rect(rect.X + rowWidth, rect.Y, Math.Max(0, rect.Width - rowWidth), rect.Height);
             }
         }
     }
 
+    private static double WorstAspectFromStats(double sumArea, double minArea, double maxArea, double w)
+    {
+        if (sumArea <= 0 || minArea <= 0 || w <= 0)
+            return double.MaxValue;
 
+        double s2 = sumArea * sumArea;
+        double w2 = w * w;
+
+        // Same formula as WorstAspect(row,w), but computed from (sum, min, max) in O(1)
+        double a = (w2 * maxArea) / s2;
+        double b = s2 / (w2 * minArea);
+        return a > b ? a : b;
+    }
+    
     public override void Render(DrawingContext context)
     {
-        base.Render(context);
-
-        var primaryDepth = PrimaryBorderDepth;
-        var minSize = MinBorderSize;
-        var primaryBrush = PrimaryBorderBrush;
-        var secondaryBrush = SecondaryBorderBrush;
-        var primaryThickness = PrimaryBorderThickness;
-        var secondaryThickness = SecondaryBorderThickness;
-
-        foreach (var item in _layout)
+        using (TimingLog.Start("TreeMapControl.Render"))
         {
-            var rect = item.Rect;
-            if (rect.Width <= 0 || rect.Height <= 0)
-                continue;
+            base.Render(context);
 
-            context.FillRectangle(item.Fill, rect);
+            var primaryDepth = PrimaryBorderDepth;
+            var minSize = MinBorderSize;
+            var primaryBrush = PrimaryBorderBrush;
+            var secondaryBrush = SecondaryBorderBrush;
+            var primaryThickness = PrimaryBorderThickness;
+            var secondaryThickness = SecondaryBorderThickness;
 
-            if (rect.Width >= minSize && rect.Height >= minSize)
+            var primaryPen = (primaryBrush != null && primaryThickness > 0)
+                ? new Pen(primaryBrush, primaryThickness)
+                : null;
+            var secondaryPen = (secondaryBrush != null && secondaryThickness > 0)
+                ? new Pen(secondaryBrush, secondaryThickness)
+                : null;
+
+            foreach (var item in _layout)
             {
-                var usePrimary = item.Depth <= primaryDepth;
-                var brush = usePrimary ? primaryBrush : secondaryBrush;
-                var thickness = usePrimary ? primaryThickness : secondaryThickness;
+                var rect = item.Rect;
+                if (rect.Width <= 0 || rect.Height <= 0)
+                    continue;
 
-                if (brush != null && thickness > 0)
+                context.FillRectangle(item.Fill, rect);
+
+                if (rect.Width >= minSize && rect.Height >= minSize)
                 {
-                    var pen = new Pen(brush, thickness);
-                    context.DrawRectangle(pen, rect);
-                }
-            }
+                    var usePrimary = item.Depth <= primaryDepth;
 
-            if (ShowLabels) DrawLabel(context, item.Node.Label, rect);
+                    var pen = usePrimary ? primaryPen : secondaryPen;
+                    if (pen != null) context.DrawRectangle(pen, rect);
+                }
+
+                if (ShowLabels) DrawLabel(context, item.Node.Label, rect);
+            }
         }
     }
 
@@ -445,7 +511,7 @@ public sealed class TreeMapControl : Control
     // recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
     private double GetNodeValue(TreeMapNode<ITreeMapNodeElement> node)
     {
-        if (ValuesArePreSummed)
+        if (_valuesArePreSummedCached)
             return Math.Max(0, node.Element.Value);
 
         if (_valueCache.TryGetValue(node, out var cached))
@@ -475,31 +541,48 @@ public sealed class TreeMapControl : Control
         if (depthFromBase <= 0)
             return baseColor;
 
-        var levels = ShadeLevels <= 0 ? 1 : ShadeLevels;
-        var t = Math.Clamp(depthFromBase / (double)levels, 0.0, 1.0);
+        var levels = _shadeLevelsCached;
 
-        var r = (byte)(baseColor.R * (1.0 - t));
-        var g = (byte)(baseColor.G * (1.0 - t));
-        var b = (byte)(baseColor.B * (1.0 - t));
+        // If beyond levels, go to black.
+        if (depthFromBase >= levels)
+            return Color.FromArgb(baseColor.A, 0, 0, 0);
+
+        // Integer fade: factor = (levels - depth)/levels
+        var numer = levels - depthFromBase;
+
+        byte r = (byte)(baseColor.R * numer / levels);
+        byte g = (byte)(baseColor.G * numer / levels);
+        byte b = (byte)(baseColor.B * numer / levels);
 
         return Color.FromArgb(baseColor.A, r, g, b);
     }
 
+    private SolidColorBrush GetCachedBrush(Color c)
+    {
+        uint key = ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+        if (_brushCache.TryGetValue(key, out var b))
+            return b;
+    
+        b = new SolidColorBrush(c);
+        _brushCache[key] = b;
+        return b;
+    }
+    
     private IBrush GetEffectiveBrush(int depth, Color? baseColor, int baseDepth)
     {
         if (baseColor.HasValue)
         {
             var color = ShadeColor(baseColor.Value, depth - baseDepth);
-            return new SolidColorBrush(color);
+            return GetCachedBrush(color);
         }
 
         // Fallback palette if no base colour origin exists.
         return depth switch
         {
-            0 => new SolidColorBrush(Color.Parse("#FFE0E0E0")),
-            1 => new SolidColorBrush(Color.Parse("#FFC0C0C0")),
-            2 => new SolidColorBrush(Color.Parse("#FFA0A0A0")),
-            _ => new SolidColorBrush(Color.Parse("#FF808080"))
+            0 => GetCachedBrush(Color.Parse("#FFE0E0E0")),
+            1 => GetCachedBrush(Color.Parse("#FFC0C0C0")),
+            2 => GetCachedBrush(Color.Parse("#FFA0A0A0")),
+            _ => GetCachedBrush(Color.Parse("#FF808080"))
         };
     }
 
@@ -517,7 +600,7 @@ public sealed class TreeMapControl : Control
             return;
 
         // Hard cap on number of rectangles to avoid runaway layout on huge repos.
-        if (_rectCount >= MaxRectangles)
+        if (_rectCount >= _maxRectanglesCached)
             return;
 
         // Determine colour origin for this subtree.
@@ -648,26 +731,35 @@ public sealed class TreeMapControl : Control
         }
     }
 
-    private static double WorstAspect(IReadOnlyList<TreeItem> row, double w)
+    private static double WorstAspect(List<TreeItem> row, double w)
     {
         if (row.Count == 0 || w <= 0)
             return double.MaxValue;
-
-        var sum = row.Sum(i => i.Area);
-        if (sum <= 0)
+    
+        double sum = 0;
+        double minA = double.PositiveInfinity;
+        double maxA = 0;
+    
+        for (int i = 0; i < row.Count; i++)
+        {
+            var a = row[i].Area;
+            sum += a;
+            if (a < minA) minA = a;
+            if (a > maxA) maxA = a;
+        }
+    
+        if (sum <= 0 || minA <= 0)
             return double.MaxValue;
-
-        var maxA = row.Max(i => i.Area);
-        var minA = row.Min(i => i.Area);
-
-        var s2 = sum * sum;
-        var w2 = w * w;
-
-        return Math.Max(
-            w2 * maxA / s2,
-            s2 / (w2 * minA));
+    
+        double s2 = sum * sum;
+        double w2 = w * w;
+    
+        var r1 = (w2 * maxA) / s2;
+        var r2 = s2 / (w2 * minA);
+    
+        return r1 > r2 ? r1 : r2;
     }
-
+    
     private Rect LayoutRow(
         IReadOnlyList<TreeItem> row,
         double rowArea,
@@ -721,6 +813,8 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Tooltips -----------------
 
+    private ITreeMapNodeElement? _currentTooltipElement;
+
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
@@ -729,7 +823,7 @@ public sealed class TreeMapControl : Control
             return;
 
         var p = e.GetPosition(this);
-        Control? tip = null;
+        ITreeMapNodeElement? element = null;
 
         // Iterate from back so visually “topmost” items win.
         for (var i = _layout.Count - 1; i >= 0; i--)
@@ -737,14 +831,26 @@ public sealed class TreeMapControl : Control
             var item = _layout[i];
             if (item.Rect.Contains(p))
             {
-                tip = item.Node.Element.CreateToolTip();
+                element = item.Node.Element;
                 break;
             }
         }
         
-        if (!ReferenceEquals(_currentTooltip, tip))
+        if (element is null)
         {
-            _currentTooltip = tip;
+            if (_currentTooltipElement is not null)
+            {
+                _currentTooltipElement = null;
+                ToolTip.SetTip(this, null);
+            }
+            return;
+        }
+        
+        if (!ReferenceEquals(_currentTooltipElement, element))
+        {
+            _currentTooltipElement = element;
+            
+            var tip = element.ToolTipFactory(); 
             ToolTip.SetTip(this, tip);
         }
             
@@ -754,7 +860,11 @@ public sealed class TreeMapControl : Control
     {
         base.OnPointerExited(e);
 
-        ToolTip.SetTip(this, null);
+        if (_currentTooltipElement is not null)
+        {
+            _currentTooltipElement = null;
+            ToolTip.SetTip(this, null);
+        }
     }
 
     private sealed class ExpandFrame
@@ -783,5 +893,54 @@ public sealed class TreeMapControl : Control
         public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
         public required double Value { get; init; }
         public double Area { get; set; }
+    }
+    
+    private interface IRectConsumer
+    {
+        void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect);
+    }
+    
+    private readonly struct ChildRectConsumer : IRectConsumer
+    {
+        private readonly TreeMapControl _owner;
+        private readonly PriorityQueue<ExpandFrame, double> _pq;
+        private readonly int _childDepth;
+        private readonly Color? _inheritedBaseColor;
+        private readonly int _baseDepth;
+
+        public ChildRectConsumer(
+            TreeMapControl owner,
+            PriorityQueue<ExpandFrame, double> pq,
+            int childDepth,
+            Color? inheritedBaseColor,
+            int baseDepth)
+        {
+            _owner = owner;
+            _pq = pq;
+            _childDepth = childDepth;
+            _inheritedBaseColor = inheritedBaseColor;
+            _baseDepth = baseDepth;
+        }
+
+        public readonly void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect)
+        {
+            if (_owner._rectCount >= _owner._maxRectanglesCached)
+                return;
+
+            _owner.EmitRect(node, rect, _childDepth, _inheritedBaseColor, _baseDepth, out var childBaseColor, out var childBaseDepth);
+
+            if (node.HasChildren)
+            {
+                var area = rect.Width * rect.Height;
+                _pq.Enqueue(new ExpandFrame
+                {
+                    Node = node,
+                    Bounds = rect,
+                    Depth = _childDepth,
+                    BaseColor = childBaseColor,
+                    BaseDepth = childBaseDepth
+                }, -area);
+            }
+        }
     }
 }

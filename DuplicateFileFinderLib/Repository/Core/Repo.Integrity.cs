@@ -1,6 +1,6 @@
-// DuplicateFileFinderLib/Repository/Repo.Integrity.cs
+// DuplicateFileFinderLib/Repository/Core/Repo.Integrity.cs
 
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Core;
@@ -31,34 +31,34 @@ public sealed partial class Repo
     /// <summary>
     /// Validate the integrity of this repo.
     /// - Shallow operation checks in-memory referential integrity and on-disk presence.
-    /// - Deep operation rebuilds state from store (per-root snapshots + deltas) and compares with in-memory.
+    /// - Deep operation rebuilds state from store (per-root snapshots) and compares with in-memory.
     /// </summary>
     public IReadOnlyList<RepoIntegrityIssue> ValidateIntegrity(
         bool deepConsistencyCheck = false,
         CancellationToken ct = default)
     {
         // Snapshot state under lock, then do IO outside
-        string repoPath, logDirPath, rootsDirPath;
+        string repoPath, rootsDirPath;
         RepoMeta meta;
-        Dictionary<long, DirRecord> dirs;
-        Dictionary<long, FileRecord> files;
         Dictionary<long, ScanRoot> scanRoots;
         List<ScanRun> scanRuns;
+        Dictionary<long, ScanRootSnapshotV2> scanRootSnapshots;
 
         lock (_sync)
         {
             repoPath     = _repoPath;
-            logDirPath   = _logDirPath;
             rootsDirPath = Path.Combine(_repoPath, "roots");
 
-            meta      = Meta;
-            dirs      = new Dictionary<long, DirRecord>(_dirs);
-            files     = new Dictionary<long, FileRecord>(_files);
+            meta      = _meta;
             scanRoots = new Dictionary<long, ScanRoot>(_scanRoots);
             scanRuns  = new List<ScanRun>(_scanRuns);
+            scanRootSnapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
         }
 
-        var issues = new List<RepoIntegrityIssue>();
+        // Flatten in-memory V2 snapshots into dir/file maps for referential checks.
+        var (dirs, files, snapshotIssues) = BuildDirFileMapsFromSnapshots(scanRootSnapshots);
+        var issues = new List<RepoIntegrityIssue>(capacity: 128);
+        issues.AddRange(snapshotIssues);
 
         // ----------------------------------------------------
         // 1. repo.mp exists and deserializes
@@ -108,73 +108,155 @@ public sealed partial class Repo
         // 2. Basic in-memory referential integrity
         // ----------------------------------------------------
 
-        // 2a. ScanRoots -> Dirs
+        // 2a. ScanRoots -> snapshots and root dir id presence
         foreach (var root in scanRoots.Values.Where(r => !r.IsDeleted))
         {
+            if (!scanRootSnapshots.TryGetValue(root.RootId, out _))
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Warning,
+                    Code = "ROOT_SNAPSHOT_NOT_IN_MEMORY",
+                    Message = $"ScanRoot {root.RootId} (rootPath={root.RootPath}) has no snapshot loaded in memory."
+                });
+            }
+
             if (root.DirId == 0)
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "ROOT_DIRID_EMPTY",
-                    Message = $"ScanRoot {root.RootId} has no DirId bound (rootPath={root.RootPath})."
+                    Message = $"ScanRoot {root.RootId} has no dirId bound (rootPath={root.RootPath})."
+                });
+            }
+            else if (!dirs.TryGetValue(root.DirId, out var dirRec) || dirRec.ScanRootId != root.RootId)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_DIRID_MISSING_IN_SNAPSHOT",
+                    Message = $"ScanRoot {root.RootId} dirId {root.DirId} not present in its snapshot."
+                });
+            }
+        }
+
+        // 2b. Orphan in-memory snapshots that have no ScanRoot (usually fine but worth reporting)
+        foreach (var rootId in scanRootSnapshots.Keys)
+        {
+            if (!scanRoots.TryGetValue(rootId, out var r) || r.IsDeleted)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Info,
+                    Code = "SNAPSHOT_ORPHAN_IN_MEMORY",
+                    Message = $"In-memory snapshot exists for ScanRootId {rootId}, but ScanRoot is missing or deleted."
+                });
+            }
+        }
+
+        // 2c. Dirs: parent references (within same scan root) + cycles
+        foreach (var (_, entry) in dirs)
+        {
+            var dir = entry.Record;
+
+            if (dir.ParentDirId > 0)
+            {
+                if (!dirs.TryGetValue(dir.ParentDirId, out var parent))
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "DIR_PARENT_MISSING",
+                        Message = $"Dir {dir.DirId} (root={entry.ScanRootId}, nameIdx={dir.NameStrIdx}) has missing ParentDirId {dir.ParentDirId}."
+                    });
+                }
+                else if (parent.ScanRootId != entry.ScanRootId)
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "DIR_PARENT_WRONG_ROOT",
+                        Message = $"Dir {dir.DirId} (root={entry.ScanRootId}) parent {dir.ParentDirId} belongs to different root {parent.ScanRootId}."
+                    });
+                }
+            }
+        }
+
+        // cycle detection (by root)
+        var visited = new HashSet<long>();
+        var visiting = new HashSet<long>();
+        foreach (var (dirId, entry) in dirs)
+        {
+            if (!visited.Contains(dirId))
+                DetectDirCycleV2(dirId, entry.ScanRootId, dirs, visited, visiting, issues);
+        }
+
+        // 2d. Files -> Dirs, basic invariants
+        foreach (var (_, entry) in files)
+        {
+            var file = entry.Record;
+
+            if (file.DirId <= 0)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "FILE_DIRID_INVALID",
+                    Message = $"File {file.FileId} (root={entry.ScanRootId}, nameIdx={file.NameStrIdx}) has invalid DirId {file.DirId}."
                 });
                 continue;
             }
 
-            if (!dirs.ContainsKey(root.DirId))
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "ROOT_DIRID_MISSING",
-                    Message  = $"ScanRoot {root.RootId} DirId {root.DirId} not found in dirs (rootPath={root.RootPath})."
-                });
-            }
-        }
-
-        // 2b. Dirs: parent references, cycles
-        var visited = new HashSet<long>();
-        var visiting = new HashSet<long>();
-
-        foreach (var dir in dirs.Values)
-        {
-            if (dir.ParentDirId is { } parentId && !dirs.ContainsKey(parentId))
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "DIR_PARENT_MISSING",
-                    Message = $"Dir {dir.DirId} ('{dir.Name}') has missing ParentDirId {parentId}."
-                });
-            }
-        }
-
-        foreach (var dir in dirs.Values)
-        {
-            if (!visited.Contains(dir.DirId))
-                DetectDirCycle(dir.DirId, dirs, visited, visiting, issues);
-        }
-
-        // 2c. Files -> Dirs
-        foreach (var file in files.Values)
-        {
-            if (!dirs.ContainsKey(file.DirId))
+            if (!dirs.TryGetValue(file.DirId, out var dirEntry))
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "FILE_DIR_MISSING",
-                    Message = $"File {file.FileId} ('{file.Name}') references missing DirId {file.DirId}."
+                    Message = $"File {file.FileId} (root={entry.ScanRootId}, nameIdx={file.NameStrIdx}) references missing dirId {file.DirId}."
+                });
+            }
+            else if (dirEntry.ScanRootId != entry.ScanRootId)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "FILE_DIR_WRONG_ROOT",
+                    Message = $"File {file.FileId} (root={entry.ScanRootId}) references dirId {file.DirId} belonging to root {dirEntry.ScanRootId}."
+                });
+            }
+
+            if (file.Size < 0)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Warning,
+                    Code = "FILE_SIZE_NEGATIVE",
+                    Message = $"File {file.FileId} (root={entry.ScanRootId}) has negative size {file.Size}."
                 });
             }
         }
 
-        // 2d. ScanRuns -> ScanRoots + sequence range
-        var rootsById = scanRoots;
+        // 2e. ScanRuns -> ScanRoots + sequence sanity + duplicates
+        var seenRunIds = new HashSet<long>();
+        long maxRunId = -1;
+
         foreach (var run in scanRuns)
         {
-            if (!rootsById.ContainsKey(run.ScanRootId))
+            if (!seenRunIds.Add(run.ScanSequence))
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "RUN_DUPLICATE_ID",
+                    Message = $"Duplicate ScanRun id {run.ScanSequence} exists in metadata."
+                });
+            }
+
+            maxRunId = Math.Max(maxRunId, run.ScanSequence);
+
+            if (!scanRoots.ContainsKey(run.ScanRootId))
             {
                 issues.Add(new RepoIntegrityIssue
                 {
@@ -195,11 +277,18 @@ public sealed partial class Repo
             }
         }
 
+        if (maxRunId >= 0 && meta.NextScanSequence <= maxRunId)
+        {
+            issues.Add(new RepoIntegrityIssue
+            {
+                Severity = RepoIntegritySeverity.Warning,
+                Code = "META_NEXTSCANSEQ_NOT_ADVANCED",
+                Message = $"_meta.NextScanSequence ({meta.NextScanSequence}) is not greater than max ScanRun id ({maxRunId})."
+            });
+        }
+
         // ----------------------------------------------------
-        // 3. Higher-level consistency:
-        //    - duplicate roots for same RootPath
-        //    - roots with no runs
-        //    - orphan runs (no dir/file references)
+        // 3. Higher-level consistency
         // ----------------------------------------------------
 
         // 3a. duplicate ScanRoots for same RootPath
@@ -238,104 +327,9 @@ public sealed partial class Repo
                 });
             }
         }
-        
-        // ----------------------------------------------------
-        // 4. Log files: naming + basic deserialization
-        // ----------------------------------------------------
-        if (Directory.Exists(logDirPath))
-        {
-            var pattern = $"{meta.Generation}-*.delta";
-            var logFiles = Directory.GetFiles(logDirPath, pattern)
-                .OrderBy(f => f, StringComparer.Ordinal)
-                .ToList();
-
-            long lastLogId = -1;
-            foreach (var path in logFiles)
-            {
-                var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<logId>"
-                var dash = name.IndexOf('-');
-                if (dash <= 0)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Warning,
-                        Code = "LOG_BAD_NAME",
-                        Message = $"Delta file '{name}' does not contain '<gen>-<id>'.",
-                        FilePath = path
-                    });
-                    continue;
-                }
-
-                var idPart = name[(dash + 1)..];
-                if (!long.TryParse(idPart, out var logId))
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Warning,
-                        Code = "LOG_BAD_ID",
-                        Message = $"Delta file '{name}' has non-numeric id part '{idPart}'.",
-                        FilePath = path
-                    });
-                    continue;
-                }
-
-                if (logId <= lastLogId)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Warning,
-                        Code = "LOG_OUT_OF_ORDER",
-                        Message = $"Delta file '{name}' has non-increasing id (prev={lastLogId}, cur={logId}).",
-                        FilePath = path
-                    });
-                }
-                lastLogId = logId;
-
-                if (logId >= meta.NextLogSequence)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Warning,
-                        Code = "LOG_ID_GE_NEXT",
-                        Message = $"Delta file '{name}' has id {logId} >= NextLogSequence {meta.NextLogSequence}.",
-                        FilePath = path
-                    });
-                }
-
-                try
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var bytes = File.ReadAllBytes(path);
-                    var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
-                    if (delta is null)
-                    {
-                        issues.Add(new RepoIntegrityIssue
-                        {
-                            Severity = RepoIntegritySeverity.Error,
-                            Code = "LOG_DESERIALIZE_NULL",
-                            Message = $"Delta file '{name}' deserialized to null.",
-                            FilePath = path
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "LOG_DESERIALIZE_FAIL",
-                        Message = $"Exception while deserializing delta '{name}': {ex.Message}",
-                        FilePath = path,
-                        Exception = ex
-                    });
-                }
-            }
-        }
 
         // ----------------------------------------------------
-        // 5. Per-root snapshots:
-        //    - missing snapshots for existing roots
-        //    - orphan snapshot files (no matching root)
+        // 5. Per-root snapshots on disk (ScanRootSnapshotV2)
         // ----------------------------------------------------
         var snapshotFilesById = new Dictionary<long, string>();
 
@@ -354,14 +348,14 @@ public sealed partial class Repo
                     {
                         Severity = RepoIntegritySeverity.Warning,
                         Code     = "ROOT_SNAPSHOT_BAD_NAME",
-                        Message  = $"Snapshot file '{fileName}' …does not parse as a long root id.",
+                        Message  = $"Snapshot file '{fileName}' does not parse as a long root id.",
                         FilePath = path
                     });
                 }
             }
         }
 
-        // missing snapshots for known roots
+        // missing snapshots for known (non-deleted) roots
         foreach (var root in scanRoots.Values.Where(r => !r.IsDeleted))
         {
             if (!snapshotFilesById.TryGetValue(root.RootId, out var path))
@@ -379,47 +373,9 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotOnDisk>(bytes);
-                if (snap is null)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "ROOT_SNAPSHOT_NULL",
-                        Message  = $"Snapshot file {path} deserialized to null.",
-                        FilePath = path
-                    });
-                    continue;
-                }
+                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
 
-                var dirIds = new HashSet<long>();
-                foreach (var d in snap.Dirs)
-                {
-                    if (!dirIds.Add(d.DirId))
-                    {
-                        issues.Add(new RepoIntegrityIssue
-                        {
-                            Severity = RepoIntegritySeverity.Error,
-                            Code = "ROOT_SNAPSHOT_DUP_DIR",
-                            Message  = $"Snapshot {path} contains duplicate DirId {d.DirId}.",
-                            FilePath = path
-                        });
-                    }
-                }
-
-                foreach (var f in snap.Files)
-                {
-                    if (!dirIds.Contains(f.DirId))
-                    {
-                        issues.Add(new RepoIntegrityIssue
-                        {
-                            Severity = RepoIntegritySeverity.Error,
-                            Code = "ROOT_SNAPSHOT_FILE_DIR_MISSING",
-                            Message  = $"Snapshot {path} file {f.FileId} references missing DirId {f.DirId}.",
-                            FilePath = path
-                        });
-                    }
-                }
+                ValidateSnapshotV2(snap, path, issues);
             }
             catch (Exception ex)
             {
@@ -427,7 +383,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "ROOT_SNAPSHOT_DESERIALIZE_FAIL",
-                    Message   = $"Exception while deserializing snapshot {path}: {ex.Message}",
+                    Message   = $"Exception while deserializing snapshot {path} as ScanRootSnapshotV2: {ex.Message}",
                     FilePath  = path,
                     Exception = ex
                 });
@@ -437,13 +393,13 @@ public sealed partial class Repo
         // orphan snapshot files (no matching ScanRoot)
         foreach (var (id, path) in snapshotFilesById)
         {
-            if (!scanRoots.ContainsKey(id))
+            if (!scanRoots.TryGetValue(id, out var r) || r.IsDeleted)
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Info,
                     Code     = "ROOT_SNAPSHOT_ORPHAN",
-                    Message  = $"Snapshot file {path} has no matching ScanRoot (id={id}).",
+                    Message  = $"Snapshot file {path} has no matching ScanRoot (id={id}) or root is deleted.",
                     FilePath = path
                 });
             }
@@ -456,20 +412,20 @@ public sealed partial class Repo
         {
             try
             {
-                var rebuilt = RebuildStateFromStore(meta, logDirPath, rootsDirPath, ct);
+                var rebuilt = RebuildStateFromStoreV2(rootsDirPath, ct);
 
                 CompareState(
-                    "DIRS",
+                    "DIRS_V2",
                     dirs,
                     rebuilt.Dirs,
-                    d => d.Name,
+                    d => $"nameIdx={d.Record.NameStrIdx}",
                     issues);
 
                 CompareState(
-                    "FILES",
+                    "FILES_V2",
                     files,
                     rebuilt.Files,
-                    f => f.Name,
+                    f => $"nameIdx={f.Record.NameStrIdx}",
                     issues);
             }
             catch (Exception ex)
@@ -487,20 +443,217 @@ public sealed partial class Repo
         return issues;
     }
 
-    private sealed class RebuiltState
+    private readonly record struct DirEntry(long ScanRootId, DirRecordV2 Record);
+    private readonly record struct FileEntry(long ScanRootId, FileRecordV2 Record);
+
+    private static (Dictionary<long, DirEntry> Dirs, Dictionary<long, FileEntry> Files, List<RepoIntegrityIssue> Issues)
+        BuildDirFileMapsFromSnapshots(Dictionary<long, ScanRootSnapshotV2> snapshots)
     {
-        public Dictionary<long, DirRecord> Dirs { get; init; } = new();
-        public Dictionary<long, FileRecord> Files { get; init; } = new();
+        var dirs = new Dictionary<long, DirEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
+        var files = new Dictionary<long, FileEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
+        var issues = new List<RepoIntegrityIssue>();
+
+        foreach (var (rootId, snap) in snapshots)
+        {
+            if (snap.ScanRootId != rootId)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Warning,
+                    Code = "SNAPSHOT_ROOTID_MISMATCH",
+                    Message = $"In-memory snapshot dictionary key rootId={rootId} but snapshot.ScanRootId={snap.ScanRootId}."
+                });
+            }
+
+            var poolCount = snap.StringPool.Count;
+
+            var seenDirIds = new HashSet<long>();
+            foreach (var d in snap.Dirs)
+            {
+                if (!seenDirIds.Add(d.DirId))
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "SNAPSHOT_DUP_DIRID",
+                        Message = $"Snapshot for ScanRootId {rootId} contains duplicate dirId {d.DirId}."
+                    });
+                    continue;
+                }
+
+                if (snap.StringPool is not null && (uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "DIR_NAMEIDX_OOB",
+                        Message = $"Dir {d.DirId} (root={rootId}) has NameStrIdx {d.NameStrIdx} outside pool range 0..{poolCount - 1}."
+                    });
+                }
+
+                if (d.ErrorMessageStrIdx >= 0 && snap.StringPool is not null &&
+                    (uint)d.ErrorMessageStrIdx >= (uint)poolCount)
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "DIR_ERRIDX_OOB",
+                        Message = $"Dir {d.DirId} (root={rootId}) has ErrorMessageStrIdx {d.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}."
+                    });
+                }
+
+                dirs[d.DirId] = new DirEntry(rootId, d);
+            }
+
+            var seenFileIds = new HashSet<long>();
+            foreach (var f in snap.Files)
+            {
+                if (!seenFileIds.Add(f.FileId))
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "SNAPSHOT_DUP_FILEID",
+                        Message = $"Snapshot for ScanRootId {rootId} contains duplicate fileId {f.FileId}."
+                    });
+                    continue;
+                }
+
+                if (snap.StringPool is not null && (uint)f.NameStrIdx >= (uint)poolCount)
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "FILE_NAMEIDX_OOB",
+                        Message = $"File {f.FileId} (root={rootId}) has NameStrIdx {f.NameStrIdx} outside pool range 0..{poolCount - 1}."
+                    });
+                }
+
+                if (f.ErrorMessageStrIdx >= 0 && snap.StringPool is not null &&
+                    (uint)f.ErrorMessageStrIdx >= (uint)poolCount)
+                {
+                    issues.Add(new RepoIntegrityIssue
+                    {
+                        Severity = RepoIntegritySeverity.Error,
+                        Code = "FILE_ERRIDX_OOB",
+                        Message = $"File {f.FileId} (root={rootId}) has ErrorMessageStrIdx {f.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}."
+                    });
+                }
+
+                files[f.FileId] = new FileEntry(rootId, f);
+            }
+        }
+
+        return (dirs, files, issues);
     }
 
-    private static RebuiltState RebuildStateFromStore(
-        RepoMeta meta,
-        string logDirPath,
+    private static void ValidateSnapshotV2(
+        ScanRootSnapshotV2 snap,
+        string filePath,
+        IList<RepoIntegrityIssue> issues)
+    {
+        var poolCount = snap.StringPool.Count;
+        var dirIds = new HashSet<long>();
+
+        foreach (var d in snap.Dirs)
+        {
+            if (!dirIds.Add(d.DirId))
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_DUP_DIR",
+                    Message  = $"Snapshot {filePath} contains duplicate dirId {d.DirId}.",
+                    FilePath = filePath
+                });
+            }
+
+            if ((uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_DIR_NAMEIDX_OOB",
+                    Message = $"Snapshot {filePath} dirId {d.DirId} has NameStrIdx {d.NameStrIdx} outside pool range 0..{poolCount - 1}.",
+                    FilePath = filePath
+                });
+            }
+
+            if (d.ErrorMessageStrIdx >= 0 && (uint)d.ErrorMessageStrIdx >= (uint)poolCount)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_DIR_ERRIDX_OOB",
+                    Message = $"Snapshot {filePath} dirId {d.DirId} has ErrorMessageStrIdx {d.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}.",
+                    FilePath = filePath
+                });
+            }
+        }
+
+        foreach (var d in snap.Dirs)
+        {
+            if (d.ParentDirId > 0 && !dirIds.Contains(d.ParentDirId))
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_DIR_PARENT_MISSING",
+                    Message = $"Snapshot {filePath} dirId {d.DirId} references missing ParentDirId {d.ParentDirId}.",
+                    FilePath = filePath
+                });
+            }
+        }
+
+        foreach (var f in snap.Files)
+        {
+            if (!dirIds.Contains(f.DirId))
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_FILE_DIR_MISSING",
+                    Message  = $"Snapshot {filePath} fileId {f.FileId} references missing dirId {f.DirId}.",
+                    FilePath = filePath
+                });
+            }
+
+            if ((uint)f.NameStrIdx >= (uint)poolCount)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_FILE_NAMEIDX_OOB",
+                    Message = $"Snapshot {filePath} fileId {f.FileId} has NameStrIdx {f.NameStrIdx} outside pool range 0..{poolCount - 1}.",
+                    FilePath = filePath
+                });
+            }
+
+            if (f.ErrorMessageStrIdx >= 0 && (uint)f.ErrorMessageStrIdx >= (uint)poolCount)
+            {
+                issues.Add(new RepoIntegrityIssue
+                {
+                    Severity = RepoIntegritySeverity.Error,
+                    Code = "ROOT_SNAPSHOT_FILE_ERRIDX_OOB",
+                    Message = $"Snapshot {filePath} fileId {f.FileId} has ErrorMessageStrIdx {f.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}.",
+                    FilePath = filePath
+                });
+            }
+        }
+    }
+
+    private sealed class RebuiltStateV2
+    {
+        public Dictionary<long, DirEntry> Dirs { get; init; } = new();
+        public Dictionary<long, FileEntry> Files { get; init; } = new();
+    }
+
+    private static RebuiltStateV2 RebuildStateFromStoreV2(
         string rootsDirPath,
         CancellationToken ct)
     {
-        var dirs  = new Dictionary<long, DirRecord>();
-        var files = new Dictionary<long, FileRecord>();
+        var dirs  = new Dictionary<long, DirEntry>();
+        var files = new Dictionary<long, FileEntry>();
 
         // Per-root snapshots
         if (Directory.Exists(rootsDirPath))
@@ -509,75 +662,25 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotOnDisk>(bytes);
-                if (snap is null)
-                    continue;
+                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
 
                 foreach (var d in snap.Dirs)
-                    dirs[d.DirId] = d;
+                    dirs[d.DirId] = new DirEntry(snap.ScanRootId, d);
+
                 foreach (var f in snap.Files)
-                    files[f.FileId] = f;
+                    files[f.FileId] = new FileEntry(snap.ScanRootId, f);
             }
         }
 
-        // Deltas newer than baseline
-        if (Directory.Exists(logDirPath))
-        {
-            var pattern = $"{meta.Generation}-*.delta";
-            var filesOnDisk  = Directory.GetFiles(logDirPath, pattern)
-                .OrderBy(f => f, StringComparer.Ordinal);
-
-            foreach (var path in filesOnDisk)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var name = Path.GetFileNameWithoutExtension(path); // "<gen>-<logId>"
-                var dash = name.IndexOf('-');
-                if (dash <= 0)
-                    continue;
-
-                var idPart = name[(dash + 1)..];
-                if (!long.TryParse(idPart, out var logId))
-                    continue;
-
-                if (logId <= meta.LastSnapshottedLogSequence)
-                    continue;
-
-                var bytes = File.ReadAllBytes(path);
-                var delta = MemoryPackSerializer.Deserialize<RepoDelta>(bytes);
-                if (delta is null)
-                    continue;
-
-                ApplyDeltaToMaps(delta, dirs, files);
-            }
-        }
-
-        return new RebuiltState { Dirs = dirs, Files = files };
+        return new RebuiltStateV2 { Dirs = dirs, Files = files };
     }
 
-    private static void ApplyDeltaToMaps(
-        RepoDelta delta,
-        IDictionary<long, DirRecord> dirs,
-        IDictionary<long, FileRecord> files)
-    {
-        foreach (var d in delta.Dirs)
-            if (d.Status == ScanEntryStatus.Deleted)
-                dirs.Remove(d.DirId);
-            else
-                dirs[d.DirId] = d;
-
-        foreach (var f in delta.Files)
-            if (f.Status == ScanEntryStatus.Deleted)
-                files.Remove(f.FileId);
-            else
-                files[f.FileId] = f;
-    }
-
-    private static void CompareState<T>(
+   
+    private static void CompareState<TEntry>(
         string label,
-        IDictionary<long, T> inMemory,
-        IDictionary<long, T> rebuilt,
-        Func<T, string?> nameSelector,
+        IDictionary<long, TEntry> inMemory,
+        IDictionary<long, TEntry> rebuilt,
+        Func<TEntry, string?> nameSelector,
         IList<RepoIntegrityIssue> issues)
     {
         foreach (var (id, value) in inMemory)
@@ -588,7 +691,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = $"{label}_MISSING_IN_REBUILT",
-                    Message  = $"{label}: RootId {id} ('{nameSelector(value)}') exists in memory but not in rebuilt state."
+                    Message  = $"{label}: id {id} ({nameSelector(value)}) exists in memory but not in rebuilt state."
                 });
             }
         }
@@ -601,15 +704,16 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = $"{label}_ONLY_IN_REBUILT",
-                    Message  = $"{label}: RootId {id} ('{nameSelector(value)}') exists only in rebuilt state."
+                    Message  = $"{label}: id {id} ({nameSelector(value)}) exists only in rebuilt state."
                 });
             }
         }
     }
 
-    private static void DetectDirCycle(
+    private static void DetectDirCycleV2(
         long dirId,
-        IReadOnlyDictionary<long, DirRecord> dirs,
+        long expectedRootId,
+        IReadOnlyDictionary<long, DirEntry> dirs,
         HashSet<long> visited,
         HashSet<long> visiting,
         IList<RepoIntegrityIssue> issues)
@@ -620,21 +724,35 @@ public sealed partial class Repo
             {
                 Severity = RepoIntegritySeverity.Error,
                 Code = "DIR_CYCLE",
-                Message = $"Directory graph contains a cycle involving DirId {dirId}."
+                Message = $"Directory graph contains a cycle involving dirId {dirId} (expectedRoot={expectedRootId})."
             });
             return;
         }
 
-        if (!dirs.TryGetValue(dirId, out var dir))
+        if (!dirs.TryGetValue(dirId, out var entry))
         {
             visiting.Remove(dirId);
             return;
         }
 
-        if (dir.ParentDirId is { } parentId && dirs.ContainsKey(parentId))
+        if (entry.ScanRootId != expectedRootId)
+        {
+            issues.Add(new RepoIntegrityIssue
+            {
+                Severity = RepoIntegritySeverity.Error,
+                Code = "DIR_CYCLE_CROSS_ROOT_EDGE",
+                Message = $"Cycle traversal encountered cross-root edge at dirId {dirId}: expectedRoot={expectedRootId}, actualRoot={entry.ScanRootId}."
+            });
+            visiting.Remove(dirId);
+            visited.Add(dirId);
+            return;
+        }
+
+        var parentId = entry.Record.ParentDirId;
+        if (parentId > 0 && dirs.TryGetValue(parentId, out var parent) && parent.ScanRootId == expectedRootId)
         {
             if (!visited.Contains(parentId))
-                DetectDirCycle(parentId, dirs, visited, visiting, issues);
+                DetectDirCycleV2(parentId, expectedRootId, dirs, visited, visiting, issues);
         }
 
         visiting.Remove(dirId);

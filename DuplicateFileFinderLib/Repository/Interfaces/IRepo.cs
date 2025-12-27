@@ -1,30 +1,32 @@
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 
-internal interface IRepoInternal
+internal interface IRepoInternal : IRepo
 {
-    void DeleteScanRoot(long scanRootId);
-    
-    long AllocateRunId();
+    long AllocateDirId();
+    long AllocateFileId();
+
+    Task MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct = default);
+    Task MarkScanCompletedAsync(long sequence, CancellationToken token = default);
+    Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken = default);
+    Task CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct = default);
+    Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default);
+    Task<ScanContext> BeginScanAsync(
+        string rootPath,
+        ScanOptions options,
+        VolumeInfo? volumeInfo = null,
+        CancellationToken ct = default);
 }
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {
-    IRepoView GetRepoView();
+    public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct = default);
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
-
-    public IScanSession BeginScan(
-        string rootPath,
-        ScanOperation scanOperation = ScanOperation.FullScan,
-        VolumeInfo? volumeInfo = null,
-        int maxFilesBeforeFlush = 50_000,
-        int maxDirsBeforeFlush = 10_000);
-    void CommitDelta(RepoDelta delta);
-    public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default);
-    public void SaveScanSnapshots();
-    public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default);
-    string GetDirPath(long dirId, bool relativeToVolumePath = false);
+    ScanRootSnapshotView? TryGetScanRootView(long scanRootId);
+    public RepoSnapshotView GetRepoSnapshotView();
 }

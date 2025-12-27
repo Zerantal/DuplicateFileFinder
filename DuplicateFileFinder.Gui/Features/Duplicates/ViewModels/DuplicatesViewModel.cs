@@ -1,7 +1,6 @@
 // ViewModels/DuplicatesViewModel.cs
 
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
@@ -11,6 +10,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
 
@@ -31,15 +31,20 @@ public partial class DuplicatesViewModel : ObservableObject
         _repo = host.Repo;
         var hashIndexService = host.HashIndex;
 
-        _folderTreeBuilder = new FolderTreeBuilder(_repo, scanner);
-        _treeMap = new TreeMapController(_repo, host.TreeIndex);
+        _folderTreeBuilder = new FolderTreeBuilder(host, scanner);
+        _treeMap = new TreeMapController(host)
+        {
+            Options = new TreeMapBuildOptions {MaxDepth = 8}
+        };
+        
+        
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.Root))
                 OnPropertyChanged(nameof(DirectoryTreeMapRoot));
         };
 
-        _duplicates = new DuplicatesController(_repo, hashIndexService);
+        _duplicates = new DuplicatesController(host, hashIndexService);
         _duplicates.PropertyChanged += (_, e) =>
         {
             // bubble up for existing bindings (if your view binds directly to VM props)
@@ -82,7 +87,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public long WastedBytes => _duplicates.WastedBytes;
 
 
-    public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
+    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
     public ObservableCollection<FolderNodeViewModel> FolderRoots { get; } = [];
 
     // Expose treemap for binding
@@ -112,19 +117,21 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
 
+    public object MaxDepth => _treeMap.Options.MaxDepth + 2;
+
     public void LoadFromRepo()
     {
         using (TimingLog.StartPhase("LoadFromRepo()"))
         {
-            var snap = _repo.GetRepoView();
-            InitializeFromSnapshot(snap);
+            RepoSnapshotView repoSnapshot = _repo.GetRepoSnapshotView();
+            
+            InitializeFromSnapshot(repoSnapshot);
         }
     }
-
-    private void InitializeFromSnapshot(IRepoView snapshot)
+    
+    private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
         FolderRoots.Clear();
-        FilteredSets.Clear();
 
         using (TimingLog.StartPhase("BuildFolderTree()"))
         {
@@ -141,19 +148,7 @@ public partial class DuplicatesViewModel : ObservableObject
             _treeMap.Rebuild(snapshot);
         }
 
+        OnPropertyChanged(nameof(FilteredSets));
         OnPropertyChanged(nameof(DirectoryTreeMapRoot));
-    }
-
-    public async Task OptimizeRepoAsync()
-    {
-        // Run compaction off the UI thread
-        await Task.Run(() => _repo.CompactAsync());
-
-        // After compaction, reload from the repo to reflect any changes
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            var snap = _repo.GetRepoView();
-            InitializeFromSnapshot(snap);
-        });
     }
 }

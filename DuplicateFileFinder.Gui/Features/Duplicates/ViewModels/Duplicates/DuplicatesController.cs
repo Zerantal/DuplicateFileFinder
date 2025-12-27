@@ -1,9 +1,10 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
 
@@ -11,11 +12,15 @@ public partial class DuplicatesController : ObservableObject
 {
     private readonly IRepo _repo;
     private readonly IHashIndexReadModel _hashIndex;
+    private readonly IFileDirReadModel _mainIndex;
 
     private readonly Dictionary<HashKey, DuplicateSetRow> _allSets = new();
 
     private string? _selectedFolderPrefix;
     private DuplicateSetRow? _selectedSet;
+
+    // RootId -> full path (e.g. VolumePath + RootPath)
+    private Dictionary<long, string> _scanRootFullPathByRootId = new();
 
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;
@@ -23,9 +28,10 @@ public partial class DuplicatesController : ObservableObject
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
 
-    public DuplicatesController(IRepo repo, IHashIndexReadModel hashIndex)
+    public DuplicatesController(IRepoHost repoHost, IHashIndexReadModel hashIndex)
     {
-        _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+        _repo = repoHost.Repo ?? throw new ArgumentNullException(nameof(repoHost));
+        _mainIndex = repoHost.FileDirIndex;
         _hashIndex = hashIndex ?? throw new ArgumentNullException(nameof(hashIndex));
     }
 
@@ -65,25 +71,58 @@ public partial class DuplicatesController : ObservableObject
 
     public IReadOnlyList<FileItem> SelectedItems => _selectedSet?.Items ?? [];
 
-    public void Rebuild(IRepoView snapshot, int minDuplicates = 2, long minSizeBytes = 10 * 1024 * 1024)
+    public void Rebuild(RepoSnapshotView snapshot, int minDuplicates = 2, long minSizeBytes = 10 * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         _allSets.Clear();
         FilteredSets.Clear();
 
-        FilesScanned = snapshot.Files.Count;
+        // Cache scan-root full paths for this rebuild (RootId is the same id used in handles)
+        _scanRootFullPathByRootId = _repo.ScanRootsView
+            .Where(r => !r.IsDeleted)
+            .ToDictionary(
+                r => r.RootId,
+                r => r.VolumePath != null
+                    ? Path.Combine(r.VolumePath, r.RootPath)
+                    : r.RootPath);
+
+        FilesScanned = _mainIndex.FileCount;
 
         // HashIndex provides groups; we map ids -> FileRecord and build DuplicateSetRow
         var groups = _hashIndex.GetDuplicateGroups(minDuplicates, minSizeBytes);
 
         foreach (var group in groups)
         {
-            // group.list is assumed to be file ids
-            List<FileRecord> fileRecords;
+            // group.list is assumed to be file id
+            List<(FileRecordV2 FileRecord, string Name, Func<string> pathResolver)> fileRecords;
             try
             {
-                fileRecords = group.list.Select(id => snapshot.Files[id]).ToList();
+                fileRecords = group.list.Select(handle =>
+                {
+                    var rec = snapshot.GetFileRecord(handle);
+                    var name = snapshot.DecodeFileName(handle);
+                    var pathResolver = () =>
+                    {
+                        // FileDirIndexPlugin returns scan-root-relative path; convert to full path.
+                        if (!_mainIndex.TryGetFilePathByHandle(handle, out var relativePath) ||
+                            string.IsNullOrWhiteSpace(relativePath))
+                        {
+                            // Fall back to name (still usable in UI).
+                            return name;
+                        }
+
+                        if (!_scanRootFullPathByRootId.TryGetValue(handle.ScanRootId, out var rootFullPath) ||
+                            string.IsNullOrWhiteSpace(rootFullPath))
+                        {
+                            // No root info => keep relative.
+                        return relativePath;
+                        }
+
+                        return Path.Combine(rootFullPath, relativePath);
+                    };
+                    return (rec, name, pathResolver);
+                }).ToList();
             }
             catch
             {
@@ -94,10 +133,10 @@ public partial class DuplicatesController : ObservableObject
             if (fileRecords.Count == 0)
                 continue;
 
-            var hash = fileRecords[0].Hash;
+            var hash = fileRecords[0].FileRecord.Hash;
 
             // If duplicates come back in multiple groups for any reason, last wins.
-            _allSets[hash] = BuildRow(hash, fileRecords);
+            _allSets[hash] = new DuplicateSetRow(fileRecords);
         }
 
         DuplicatesFound = _hashIndex.TotalDuplicateFileCount;
@@ -106,7 +145,7 @@ public partial class DuplicatesController : ObservableObject
         ApplyFilters();
     }
 
-    public void ApplyFilters()
+    private void ApplyFilters()
     {
         var filtered = new List<DuplicateSetRow>(_allSets.Count);
 
@@ -128,16 +167,5 @@ public partial class DuplicatesController : ObservableObject
             .ToList();
 
         FilteredSets.AddRange(sorted, clearCollection: true);
-    }
-
-    private DuplicateSetRow BuildRow(HashKey hash, IReadOnlyList<FileRecord> files)
-    {
-        string PathResolver(FileRecord f)
-        {
-            var dirPath = _repo.GetDirPath(f.DirId);
-            return Path.Combine(dirPath, f.Name);
-        }
-
-        return new DuplicateSetRow(hash, files, PathResolver);
     }
 }

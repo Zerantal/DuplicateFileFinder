@@ -1,50 +1,32 @@
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Repository.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    public long AllocateRunId()
+    // ReSharper disable once UnusedMember.Local
+    private long AllocateRunId()
     {
         lock (_sync)
         {
             var id = AllocateRunId_NoLock();
-            SaveMeta_NoLock();
             return id;
         }
     }
 
     private long AllocateRunId_NoLock()
     {
-        var seq = Meta.NextScanSequence;
-        Meta = Meta with { NextScanSequence = seq + 1 };
-
-        SyncMetaFile_NoLock();
-        SaveMeta_NoLock();
-
+        var seq = _meta.NextScanSequence;
+        _meta = _meta with { NextScanSequence = seq + 1 };
+        MarkMetaDirty_NoLock();
         return seq;
     }
 
-    private long AllocateLogId_NoLock()
-    {
-        var id = Meta.NextLogSequence;
-        Meta = Meta with { NextLogSequence = id + 1 };
-        return id;
-    }
-    
-    internal long AllocateLogId()
-    {
-        lock (_sync)
-        {
-            var id = AllocateLogId_NoLock();
-            SaveMeta_NoLock();
-            return id;
-        }
-    }
-
-    internal long AllocateDirId()
+    public long AllocateDirId()
     {
         lock (_sync)
         {
@@ -54,12 +36,13 @@ public sealed partial class Repo
 
     private long AllocateDirId_NoLock()
     {
-        var id = Meta.NextDirId;
-        Meta = Meta with { NextDirId = id + 1 };
+        var id = _meta.NextDirId;
+        _meta = _meta with { NextDirId = id + 1 };
+        MarkMetaDirty_NoLock();
         return id;
     }
 
-    internal long AllocateFileId()
+    public long AllocateFileId()
     {
         lock (_sync)
         {
@@ -69,34 +52,21 @@ public sealed partial class Repo
 
     private long AllocateFileId_NoLock()
     {
-        var id = Meta.NextFileId;
-        Meta = Meta with { NextFileId = id + 1 };
+        var id = _meta.NextFileId;
+        _meta = _meta with { NextFileId = id + 1 };
+        MarkMetaDirty_NoLock();
         return id;
     }
 
     private long AllocateRootId_NoLock()
     {
-        var id = Meta.NextScanRootId;
-        Meta = Meta with { NextScanRootId = id + 1 };
+        var id = _meta.NextScanRootId;
+        _meta = _meta with { NextScanRootId = id + 1 };
+        MarkMetaDirty_NoLock();
         return id;
     }
     
-    // Caller holds _sync
-    private void SaveMeta_NoLock()
-    {
-        _metaFile = new RepoMetaFile
-        {
-            Meta      = Meta,
-            ScanRoots = _scanRoots.Values.ToList(),
-            ScanRuns  = _scanRuns.ToList()
-        };
-
-        RepoStore.SaveMetaAsync(_repoPath, _metaFile, CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-    }
-    
-    internal void MarkScanCompleted(long sequence)
+    async Task IRepoInternal.MarkScanCompletedAsync(long sequence, CancellationToken ct)
     {
         ScanRun updated;
         long generation;
@@ -114,31 +84,25 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
+
             var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
 
-            generation = Meta.Generation;
-            SaveMeta_NoLock();
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
+            MarkMetaDirty_NoLock();
         }
-
-        OnScanRunCompleted(generation, sequence, updated);
-    }
     
-    private void OnScanRunCompleted(long generation, long nextLogSequence, ScanRun run)
-    {
-        var evt = new ScanRunCompletedEvent
-        {
-            Generation      = generation,
-            NextLogSequence = nextLogSequence,
-            Run             = run
-        };
-
-        PublishEvent(evt);
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+        PublishEvent(new ScanRunFinalisedEvent { Generation = generation, Run = updated });
     }
 
-    internal void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
+    async Task IRepoInternal.MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct)
     {
+        long generation;
+        ScanRun updated;
+        
         lock (_sync)
         {
             if (!_scanRunIndex.TryGetValue(sequence, out var run))
@@ -146,7 +110,7 @@ public sealed partial class Repo
 
             var status = cancelled ? ScanRunStatus.Cancelled : ScanRunStatus.Failed;
 
-            var updated = run with
+            updated = run with
             {
                 Status = status,
                 FinishedAt = DateTimeOffset.UtcNow,
@@ -154,79 +118,63 @@ public sealed partial class Repo
             };
 
             _scanRunIndex[sequence] = updated;
+
             var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
             if (idx >= 0) _scanRuns[idx] = updated;
             else _scanRuns.Add(updated);
-            
-            SyncMetaFile_NoLock();
-            _ = PersistMetaAsync();
+
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
+            MarkMetaDirty_NoLock();
         }
+
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+        PublishEvent(new ScanRunFinalisedEvent { Generation = generation, Run = updated });
     }
     
     // Find existing ScanRoot by canonical path or create a new one.
     private ScanRoot FindOrCreateScanRoot_NoLock(string? volumePath, string relativeRootPath)
     {
-        foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
+        ScanRoot newRoot;
+        
+        lock (_sync)
         {
-            if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
-                string.Equals(root.RootPath,  relativeRootPath, StringComparison.Ordinal))
+            foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
             {
-                return root;
+                if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
+                    string.Equals(root.RootPath, relativeRootPath, StringComparison.Ordinal))
+                {
+                    return root;
+                }
             }
+
+            var now = DateTimeOffset.UtcNow;
+
+            newRoot = new ScanRoot
+            {
+                RootId = AllocateRootId_NoLock(),
+                VolumePath = volumePath,
+                RootPath = relativeRootPath,
+                DirId = 0,
+                CreatedAt = now,
+                LastScannedAt = now,
+                VolumeId = null,
+                VolumeLabel = null,
+                IsRotational = null,
+                FileSystemType = null,
+                DevicePath = null,
+                DeviceModel = null,
+                IsDeleted = false,
+                DeletedAtUtc = null
+            };
+
+            _scanRoots[newRoot.RootId] = newRoot;
+            MarkMetaDirty_NoLock();
         }
-
-        var now = DateTimeOffset.UtcNow;
-
-        var newRoot = new ScanRoot
-        {
-            RootId        = AllocateRootId_NoLock(),
-            VolumePath     = volumePath,
-            RootPath       = relativeRootPath,   // now relative to VolumePath
-            DirId         = 0,
-            CreatedAt     = now,
-            LastScannedAt = now,
-            VolumeId      = null,
-            VolumeLabel   = null,
-            IsRotational  = null,
-            FileSystemType = null,
-            DevicePath    = null,
-            DeviceModel   = null,
-            IsDeleted     = false,
-            DeletedAtUtc  = null
-        };
-
-        _scanRoots[newRoot.RootId] = newRoot;
-        SyncMetaFile_NoLock();
-        _ = PersistMetaAsync();
-
+        
         return newRoot;
     }
 
-    internal void BindScanRootDirId(long scanRootId, long dirId)
-    {
-        lock (_sync)
-        {
-            if (!_scanRoots.TryGetValue(scanRootId, out var root))
-                return;
-    
-            // Already bound to this dir: nothing to do
-            if (root.DirId == dirId)
-                return;
-    
-            // First-time bind, or rebind if it was Guid.Empty
-            if (root.DirId == 0 || root.DirId == dirId)
-            {
-                _scanRoots[scanRootId] = root with { DirId = dirId };
-                SyncMetaFile_NoLock();
-                SaveMeta_NoLock();
-            }
-            else
-            {
-                // TODO: Log warning about conflicting DirId?
-            }
-        }
-    }
-    
     // Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
     private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)
     {
@@ -242,4 +190,44 @@ public sealed partial class Repo
             LastScannedAt  = DateTimeOffset.UtcNow
         };
     }
+    
+    Task IRepoInternal.CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
+        => CommitScanRootSnapshotV2Async(snapshot, cancellationToken);
+
+    private async Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken ct)
+    {
+        long generation;
+        RepoSnapshotView snapshotView;
+
+        lock (_sync)
+        {
+            _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
+
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
+            MarkMetaDirty_NoLock();
+
+            // Capture a coherent view that corresponds to this in-memory state.
+            snapshotView = GetRepoSnapshotView();
+        }
+            
+        // Persist only the changed scanroot snapshot (RepoStore is gated + tmp unique)
+        await PersistScanRootSnapshotV2Async(snapshot, ct).ConfigureAwait(false);
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+
+        PublishEvent(new ScanRootSnapshotCommittedEvent
+        {
+            Generation = generation,
+            ScanRootId = snapshot.ScanRootId,
+            RepoSnapshotView = snapshotView
+        });
+    }
+
+    async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
+    {
+        await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
+    }
+    
+    public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
+        => RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct);
 }

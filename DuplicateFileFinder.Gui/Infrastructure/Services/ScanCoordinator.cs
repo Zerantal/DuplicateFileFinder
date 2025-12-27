@@ -2,27 +2,22 @@
 
 using Avalonia.Threading;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
-using DuplicateFileFinderLib.Repository.Models;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
 using ScanProgressViewModel = DuplicateFileFinder.Gui.Features.Scanning.ViewModels.ScanProgressViewModel;
 
 namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
-public sealed class ScanCoordinator : IScanCoordinator
+public sealed class ScanCoordinator(
+    Dff.DuplicateFileFinder finder,
+    IDialogService dialogService)
+    : IScanCoordinator
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    private readonly IDialogService _dialogService;
-    private readonly Dff.DuplicateFileFinder _finder;
+    private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+    private readonly Dff.DuplicateFileFinder _finder = finder ?? throw new ArgumentNullException(nameof(finder));
 
     private CancellationTokenSource? _cts;
-
-    public ScanCoordinator(Dff.DuplicateFileFinder finder,
-        IDialogService dialogService)
-    {
-        _finder = finder ?? throw new ArgumentNullException(nameof(finder));
-        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
-    }
 
     public event EventHandler<Dff.DuplicateFileFinderProgressReport>? ProgressChanged;
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
@@ -31,13 +26,12 @@ public sealed class ScanCoordinator : IScanCoordinator
 
     public async Task RunScanWithDialogAsync(
         string rootPath,
-        ScanOperation operation = ScanOperation.FullScan,
         CancellationToken cancellationToken = default)
     {
         // Ensure we start from UI thread; if not, hop there once.
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            await Dispatcher.UIThread.InvokeAsync(() => RunScanWithDialogAsync(rootPath, operation, cancellationToken));
+            await Dispatcher.UIThread.InvokeAsync(() => RunScanWithDialogAsync(rootPath, cancellationToken));
             return;
         }
 
@@ -45,7 +39,7 @@ public sealed class ScanCoordinator : IScanCoordinator
             return;
 
         IsScanning = true;
-        Log.Info("Starting {operation} scan of {root}", operation, rootPath);
+        Log.Info("Starting scan of {root}", rootPath);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -76,23 +70,12 @@ public sealed class ScanCoordinator : IScanCoordinator
         {
             try
             {
-                if (operation == ScanOperation.FullScan)
-                {
-                    await _finder.FullScanAsync(
-                            rootPath,
-                            progress,
-                            _cts.Token)
-                        .ConfigureAwait(false);
-                }
-                else if (operation == ScanOperation.QuickScan)
-                {
-                    await _finder.QuickScanAsync(
-                            rootPath,
-                            progress,
-                            skipUnchangedDirectories: false,
-                            ct: _cts.Token)
-                        .ConfigureAwait(false);
-                }
+                await _finder.FullScanAsync(
+                        rootPath,
+                        progress,
+                        _cts.Token)
+                    .ConfigureAwait(false);
+                    
             }
             catch (OperationCanceledException)
             {
@@ -144,11 +127,12 @@ public sealed class ScanCoordinator : IScanCoordinator
 
     public Task RemoveScanRoot(long scanRootId)
     {
-        _finder.RemoveScanRoot(scanRootId);
-        
-        ScanCompleted?.Invoke(
-            this,
-            new ScanCompletedEventArgs(scanRootId.ToString(), false, null));
+        // TODO:
+        // _finder.RemoveScanRoot(scanRootId);
+        //
+        // ScanCompleted?.Invoke(
+        //     this,
+        //     new ScanCompletedEventArgs(scanRootId.ToString(), false, null));
 
         return Task.CompletedTask;
     }
