@@ -30,7 +30,6 @@ public sealed class ScanRunTests
         Assert.Equal(original.FinishedAt, roundTripped.FinishedAt);
         Assert.Equal(original.Status, roundTripped.Status);
         Assert.Equal(original.ErrorMessage, roundTripped.ErrorMessage);
-        Assert.Equal(original.Operation, roundTripped.Operation);
         Assert.Equal(original.ScanRootId, roundTripped.ScanRootId);
     }
 

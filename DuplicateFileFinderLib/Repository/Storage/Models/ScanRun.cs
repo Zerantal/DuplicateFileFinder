@@ -12,11 +12,13 @@ public enum ScanRunStatus : byte
     Cancelled  = 3
 }
 
-public enum ScanOperation : byte
+/// <summary>
+/// Controls whether we reuse existing hashes for unchanged files, or force a rehash.
+/// </summary>
+public enum HashPolicyMode : byte
 {
-    FullScan  = 0,  // Enumerate & compute hashes of all files/dirs in scan root           
-    QuickScan = 1,  // Enumerate & compute hashes of files where a change has been detected
-    ScanRemoval = 2 // Remove scan root + all dirs/files under scan root
+    Default     = 0, // reuse hash if unchanged (size + mtime match and baseline hash exists)
+    ForceRehash = 1  // hash all non-empty files regardless of baseline
 }
 
 [MemoryPackable]
@@ -29,6 +31,6 @@ public sealed partial record ScanRun
     [MemoryPackOrder(4)] public DateTimeOffset? FinishedAt          { get; init; }
     [MemoryPackOrder(5)] public required ScanRunStatus Status       { get; init; }
     [MemoryPackOrder(6)] public string? ErrorMessage                { get; init; }
-    [MemoryPackOrder(7)] public ScanOperation Operation             { get; init; } = ScanOperation.FullScan;
+    [MemoryPackOrder(8)] public HashPolicyMode HashPolicy            { get; init; } = HashPolicyMode.Default;
 
 }

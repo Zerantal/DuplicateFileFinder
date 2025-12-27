@@ -1,15 +1,13 @@
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Models;
+namespace DuplicateFileFinderLib.Repository.Storage.Models;
 
 [MemoryPackable]
 public partial record RepoMeta
 {
     [MemoryPackOrder(0)] public required int SchemaVersion { get; init; } = 6;
+    // Generation is incremented for each externally visible state mutation
     [MemoryPackOrder(1)] public required long Generation { get; init; } = 1;
-    [MemoryPackOrder(2)] public required long NextLogSequence { get; init; } = 1;
-    [MemoryPackOrder(3)] public required long LastSnapshottedLogSequence { get; init; } = -1;
-    [MemoryPackOrder(4)] public DateTimeOffset LastCompaction { get; init; } = DateTimeOffset.MinValue;
     [MemoryPackOrder(5)] public required Guid RepoId { get; init; } = Guid.NewGuid();
     [MemoryPackOrder(6)] public required string RepoPath { get; init; }
     [MemoryPackOrder(7)] public required string RepoHostName { get; init; }

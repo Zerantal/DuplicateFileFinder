@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using DuplicateFileFinderLib.IO;
-using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
@@ -14,6 +13,7 @@ namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
 internal sealed class CapturingRepo : IRepoInternal
 {
     private readonly MethodCounter _methodCounter = new();
+    // ReSharper disable once CollectionNeverQueried.Global
     public readonly List<string> BeginScanRoots = new();
     public CapturingScanSession? LastSession { get; private set; }
     public ScanRootSnapshotView? BaselineView { get; set; }
@@ -21,30 +21,47 @@ internal sealed class CapturingRepo : IRepoInternal
     public bool LastFailedCancelled { get; private set; }
     public ScanRootSnapshotV2? LastCommittedSnapshot { get; private set; }
 
-    public long NextRunId { get; set; }
+    public long NextRunId { get; set; } = 1;
 
-    public long NextDirId { get; set; }
+    public long NextDirId { get; set; } = 1;
 
-    public long NextFileId { get; set; }
+    public long NextFileId { get; set; } = 1;
+    public long NextScanRootId { get; set; } = 1;
 
-    public IScanSession BeginScan(
-        string rootPath,
-        ScanOperation scanOperation = ScanOperation.FullScan,
-        VolumeInfo? volumeInfo = null,
-        int maxFilesBeforeFlush = 50_000,
-        int maxDirsBeforeFlush = 10_000)
+    public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return Task.CompletedTask;
+    }
+
+    Task<ScanContext> IRepoInternal.BeginScanAsync(string rootPath, ScanOptions options,
+        VolumeInfo? volumeInfo, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
         LastSession = new CapturingScanSession();
         BeginScanRoots.Add(rootPath);
 
-        return LastSession;
-    }
-
-    public Task CompactAsync(RepoCompactionPolicy? policy = null, CancellationToken ct = default)
-    {
-        _methodCounter.IncrementMethodCalCount();
-        return Task.CompletedTask;
+        var scanRootId = NextScanRootId++;
+        return Task.FromResult(new ScanContext
+        {
+            Session = LastSession,
+            ScanRoot = new ScanRoot
+            {
+                RootId = scanRootId,
+                RootPath = rootPath,
+                DirId = AllocateDirId(),
+                CreatedAt = default
+            },
+            Run = new ScanRun
+            {
+                ScanSequence = AllocateRunId(),
+                ScanRootId = scanRootId,
+                RootPath = rootPath,
+                StartedAt = default,
+                Status = ScanRunStatus.InProgress
+            },
+            Options = options
+        });
     }
 
     // ---- Unused IRepo members in these tests ----
@@ -55,12 +72,6 @@ internal sealed class CapturingRepo : IRepoInternal
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
-    }
-
-    [Obsolete]
-    public IRepoView GetRepoView()
-    {
-        throw new NotSupportedException();
     }
 
     public IReadOnlyList<ScanRun> ScanRunsView => [];
@@ -76,37 +87,7 @@ internal sealed class CapturingRepo : IRepoInternal
         throw new NotSupportedException();
     }
 
-    public void CommitDelta(RepoDelta delta)
-    {
-        throw new NotSupportedException();
-    }
-
-    public Task CommitDeltaAsync(RepoDelta delta, CancellationToken cancellationToken = default)
-    {
-        throw new NotSupportedException();
-    }
-
-    public void SaveScanSnapshots()
-    {
-        throw new NotSupportedException();
-    }
-
-    public string GetDirPath(long dirId, bool relativeToVolumePath = false)
-    {
-        throw new NotSupportedException();
-    }
-
-    public string GetDirPathV2ByHandle(DirHandle dirHandle, bool relativeToVolumePath = false)
-    {
-        throw new NotSupportedException();
-    }
-
-    public string GetDirPathV2(long dirId, bool relativeToVolumePath = false)
-    {
-        throw new NotSupportedException();
-    }
-
-    public void DeleteScanRoot(long scanRootId)
+    public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
         throw new NotImplementedException();
     }
@@ -126,22 +107,30 @@ internal sealed class CapturingRepo : IRepoInternal
         return NextFileId++;
     }
 
-    public void MarkScanFailed(long sequence, string? errorMessage, bool cancelled)
+    Task IRepoInternal.MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
         LastFailedMessage = errorMessage;
         LastFailedCancelled = cancelled;
+        return Task.CompletedTask;
     }
 
-    public void MarkScanCompleted(long sequence)
+    Task IRepoInternal.MarkScanCompletedAsync(long sequence, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
+        return Task.CompletedTask;
     }
 
     public Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
     {
         _methodCounter.IncrementMethodCalCount();
         LastCommittedSnapshot = snapshot;
+        return Task.CompletedTask;
+    }
+
+    public Task CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
+    {
+        _methodCounter.IncrementMethodCalCount();
         return Task.CompletedTask;
     }
 
