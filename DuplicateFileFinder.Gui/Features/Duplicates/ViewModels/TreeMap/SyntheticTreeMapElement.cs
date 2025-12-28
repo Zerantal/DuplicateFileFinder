@@ -5,20 +5,24 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 // Used to hold ScanRoots or as a summary node when total node count becomes excessive
 public sealed class SyntheticTreeMapElement : RepoTreeMapElement
 {
+    private readonly string _label;
+    private readonly string _relativePath;
+
     [SetsRequiredMembers]
     public SyntheticTreeMapElement(
+        ITreeMapDataResolver resolver,
         string label,
         double value,
         string typeLabel,
-        IReadOnlyList<(string Key, string Value)> lines) : base(() => label)
+        IReadOnlyList<(string Key, string Value)> lines) : base(resolver)
     {
+        _label = label;
+        _relativePath = string.Empty;
+
         ScanRoot = null;
-        
-        Label = label;
         Value = value;
 
         TypeLabel = typeLabel;
-        RelativePathFactory = () => string.Empty;
 
         // Convert tuples -> KeyValuePair for easy XAML binding
         var list = new List<KeyValuePair<string, string>>(lines.Count);
@@ -29,4 +33,7 @@ public sealed class SyntheticTreeMapElement : RepoTreeMapElement
 
     public string TypeLabel { get; }
     public IReadOnlyList<KeyValuePair<string, string>> ToolTipLines { get; }
+
+    protected override string ResolveName() => _label;
+    protected override string ResolveRelativePath() => _relativePath;
 }

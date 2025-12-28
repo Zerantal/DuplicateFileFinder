@@ -62,7 +62,8 @@ public static class TreeMapBuilder
         private readonly IFileDirReadModel _fileDirIndex;
         private readonly TreeMapMetric _metric;
         private readonly TreeMapBuildOptions _opts;
-        private readonly Func<long, string> _dirRelPath;
+        private int _remainingFileBudget;
+        private readonly ITreeMapDataResolver _resolver;
 
         public BuildContext(
             RepoSnapshotView snapshot,
@@ -77,7 +78,8 @@ public static class TreeMapBuilder
             _fileDirIndex = fileDirIndex;
             _metric = metric;
             _opts = opts;
-            _dirRelPath = dirRelativePathResolver;
+            _remainingFileBudget = _opts.MaxTotalFileNodes;
+            _resolver = new TreeMapDataResolver(snapshot, treeIndex, dirRelativePathResolver);
         }
     
         // ---------------------------------------------------------------------
@@ -129,6 +131,7 @@ public static class TreeMapBuilder
                 total += scanRootNodes[i].Element.Value;
 
             var dummy = new SyntheticTreeMapElement(
+                _resolver,
                 label: "All scan roots",
                 value: total,
                 typeLabel: "Directory",
@@ -155,27 +158,17 @@ public static class TreeMapBuilder
             if (!_snapshot.Snapshots.TryGetValue(dir.ScanRootId, out var rootSnapshot))
                 return BuildMissingDirNode(dir);
 
-            DirRecordV2 dirRec;
-            try
-            {
-                dirRec = rootSnapshot.Dirs[dir.Index];
-            }
-            catch
-            {
-                return BuildMissingDirNode(dir);
-            }
-
             var dirStats = _treeIndex.GetDirStats(dir);
             var dirValue = GetDirMetricValue(dirStats);
 
             // prune subtrees that contribute nothing for the selected metric.
             // DirAggregateStats are aggregate over subtree; value==0 implies no contributing descendants.
             if (dirValue <= 0)
-                return MakeDirLeafNode(dir, dirRec, scanRoot, dirStats, value: 0);
+                return MakeDirLeafNode(dir, scanRoot, value: 0);
 
             // Depth cap -> aggregated leaf dir node
             if (depth >= _opts.MaxDepth)
-                return MakeDirLeafNode(dir, dirRec, scanRoot, dirStats, dirValue);
+                return MakeDirLeafNode(dir, scanRoot, dirValue);
 
             // Build children (subdirs + files + collapsed "Other")
             var cap = _opts.MaxSubdirsPerDir + (_opts.DirectoriesOnly ? 0 : _opts.MaxFilesPerDir) + 2;
@@ -184,19 +177,17 @@ public static class TreeMapBuilder
             // Build children (subdirs + files + collapsed "Other")
             var children = new List<TreeMapNode<ITreeMapNodeElement>>(cap);
 
-            AddSubdirectoryNodes(scanRoot, rootSnapshot, dir, depth, children);
+            AddSubdirectoryNodes(scanRoot, dir, depth, children);
 
             // Only add file nodes when showing bytes, and not for directory file counts
             if (!_opts.DirectoriesOnly && _metric == TreeMapMetric.TotalBytes)
                 AddFileNodes(scanRoot, rootSnapshot, dir, children);
 
             var element = new DirTreeMapElement(
-                dirRec,
+                _resolver,
+                dir,
                 scanRoot,
-                dirStats,
-                () => SafeResolveRelativePath(dirRec.DirId),
-                dirValue,
-                () => _snapshot.DecodeDirName(dir));
+                dirValue);
 
             return new TreeMapNode<ITreeMapNodeElement>
             {
@@ -208,7 +199,6 @@ public static class TreeMapBuilder
 
         private void AddSubdirectoryNodes(
             ScanRoot scanRoot,
-            ScanRootSnapshotView rootSnapshot,
             DirHandle parentDir,
             int parentDepth,
             List<TreeMapNode<ITreeMapNodeElement>> childrenOut)
@@ -298,13 +288,15 @@ public static class TreeMapBuilder
             long otherValue = 0;
             int otherCount = 0;
 
+            var files = rootSnapshot.Files;
             var childFiles = _treeIndex.GetChildFiles(dir);
+
             for (int i = 0; i < childFiles.Length; i++)
             {
                 var fh = childFiles[i];
 
                 FileRecordV2 f;
-                try { f = rootSnapshot.Files[fh.Index]; }
+                try { f = files[fh.Index]; }
                 catch { continue; }
 
                 var size = f.Size;
@@ -341,18 +333,30 @@ public static class TreeMapBuilder
 
                 kept.Sort((a, b) => b.Size.CompareTo(a.Size));
 
-                foreach (var (fh, _) in kept)
+                foreach (var (fh, size) in kept)
+                {
+                    if (Interlocked.Decrement(ref _remainingFileBudget) < 0)
+                    {
+                        otherCount++;
+                        otherValue += size;
+                        break;
+                    }
+
                     childrenOut.Add(BuildFileNode(scanRoot, rootSnapshot, fh));
+                }
             }
 
             if (otherCount > 0 && otherValue > 0)
+            {
                 childrenOut.Add(new TreeMapNode<ITreeMapNodeElement>
                 {
                     Element = BuildSyntheticOtherFiles(otherCount, otherValue),
                     Children = [],
                     Fill = null
                 });
+            }
         }
+
 
         private TreeMapNode<ITreeMapNodeElement> BuildFileNode(
             ScanRoot scanRoot,
@@ -362,10 +366,10 @@ public static class TreeMapBuilder
             var f = rootSnapshot.Files[fh.Index];
 
             var element = new FileTreeMapElement(
-                f,
+                _resolver,
+                fh,
                 scanRoot,
-                () => SafeResolveRelativePath(f.DirId),
-                () => _snapshot.DecodeFileName(fh));
+                value: f.Size);
 
             return new TreeMapNode<ITreeMapNodeElement>
             {
@@ -377,18 +381,14 @@ public static class TreeMapBuilder
     
         private TreeMapNode<ITreeMapNodeElement> MakeDirLeafNode(
             DirHandle dir,
-            DirRecordV2 dirRec,
             ScanRoot scanRoot,
-            DirAggregateStats stats,
             double value)
         {
             var element = new DirTreeMapElement(
-                dirRec,
+                _resolver,
+                dir,
                 scanRoot,
-                stats,
-                () => SafeResolveRelativePath(dirRec.DirId),
-                value,
-                () => _snapshot.DecodeDirName(dir));
+                value);
 
             return new TreeMapNode<ITreeMapNodeElement>
             {
@@ -401,6 +401,7 @@ public static class TreeMapBuilder
         private TreeMapNode<ITreeMapNodeElement> BuildMissingDirNode(DirHandle dir)
         {
             var element = new SyntheticTreeMapElement(
+                _resolver,
                 label: $"[missing:{dir.ScanRootId}:{dir.Index}]",
                 value: 0,
                 typeLabel: "Directory",
@@ -418,12 +419,6 @@ public static class TreeMapBuilder
             };
         }
 
-        private string SafeResolveRelativePath(long dirId)
-        {
-            try { return _dirRelPath(dirId); }
-            catch { return string.Empty; }
-        }
-        
         // ---------------------------------------------------------------------
         // Metric helpers / synthetic nodes
         // ---------------------------------------------------------------------
@@ -434,6 +429,7 @@ public static class TreeMapBuilder
         private ITreeMapNodeElement BuildSyntheticOtherDirs(int count, double value)
         {
             return new SyntheticTreeMapElement(
+                _resolver,
                 label: $"Other dirs ({count})",
                 value: value,
                 typeLabel: "Directory",
@@ -446,6 +442,7 @@ public static class TreeMapBuilder
         private ITreeMapNodeElement BuildSyntheticOtherFiles(int count, double value)
         {
             return new SyntheticTreeMapElement(
+                _resolver,
                 label: $"Other files ({count})",
                 value: value,
                 typeLabel: "File",

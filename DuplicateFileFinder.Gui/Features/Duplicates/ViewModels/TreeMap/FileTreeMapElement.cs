@@ -1,24 +1,40 @@
 using System.Diagnostics.CodeAnalysis;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 public sealed class FileTreeMapElement : RepoTreeMapElement
 {
+    private readonly FileHandle _file;
+
     [SetsRequiredMembers]
     public FileTreeMapElement(
-        FileRecordV2 file,
+        ITreeMapDataResolver resolver,
+        FileHandle fileHandle,
         ScanRoot scanRoot,
-        Func<string> relPathFactory,
-        Func<string> nameResolver) : base(nameResolver)
+        double value) : base(resolver)
     {
+        _file = fileHandle;
         ScanRoot = scanRoot;
-        
-        Label = file.FileId.ToString();
-        Value = file.Size;
-        
-        RelativePathFactory = relPathFactory;
+        Value = value;
     }
     
     public long SizeBytes => (long)Value;
+
+    // If I ever decide to show labels for big items.
+    // public override string Label => Resolver.GetFileRecord(_file).FileId.ToString();
+
+    protected override string ResolveName()
+        => Resolver.DecodeFileName(_file);
+
+    protected override string ResolveRelativePath()
+    {
+        // Derived lazily: handle -> record -> dirId -> relpath.
+        FileRecordV2 rec;
+        try { rec = Resolver.GetFileRecord(_file); }
+        catch { return string.Empty; }
+
+        return Resolver.GetRelativePath(rec.DirId);
+    }
 }
