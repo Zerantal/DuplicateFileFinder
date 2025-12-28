@@ -1,6 +1,5 @@
 // Repository/Storage/RepoStore.cs
 
-using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
 using NLog;
@@ -81,20 +80,16 @@ internal static partial class RepoStore
         long scanRootId,
         CancellationToken ct = default)
     {
-        ScanRootSnapshotV2 snapshotV2;
+        repoPath = Path.GetFullPath(repoPath);
 
-        using (TimingLog.Start("New Deserialize"))
-        {
-            repoPath = Path.GetFullPath(repoPath);
+        var path = GetRootSnapshotPath(repoPath, scanRootId);
+        if (!File.Exists(path))
+            return null;
 
-            var path = GetRootSnapshotPath(repoPath, scanRootId);
-            if (!File.Exists(path))
-                return null;
-
-            await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            snapshotV2 = await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotV2>(fs, cancellationToken: ct)
-                .ConfigureAwait(false);
-        }
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var snapshotV2 = await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotV2>(fs, cancellationToken: ct)
+            .ConfigureAwait(false);
+        
         
         return snapshotV2;
     }

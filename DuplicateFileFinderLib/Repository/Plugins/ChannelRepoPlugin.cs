@@ -60,7 +60,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
         switch (evt)
         {
             case BootstrapEvent bootstrap:
-                using (TimingLog.Start($"Processing bootstrap event ({GetType().Name})"))
+                using (TimingLog.Start($"Processing BootstrapEvent ({GetType().Name})"))
                 {
                     OnBootstrapEvent(bootstrap);
                 }
@@ -72,7 +72,10 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
                 break;
 
             case ScanRootSnapshotCommittedEvent snapCommitted:
-                OnScanRootSnapshotCommittedEvent(snapCommitted);
+                using (TimingLog.Start($"Processing OnScanRootSnapshotCommittedEvent ({GetType().Name})"))
+                {
+                    OnScanRootSnapshotCommittedEvent(snapCommitted);
+                }
                 break;
         }
 
