@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -7,21 +8,22 @@ using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
-public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
+public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
     private const string StateFileName = "tree-index.bin";
     
-    private volatile ImmutableDictionary<DirHandle, ImmutableArray<DirHandle>> _childrenDirsByParentId
-        = ImmutableDictionary<DirHandle, ImmutableArray<DirHandle>>.Empty;
+    // Published, read-only snapshots (never mutate after publishing).
+    // Rebuilt on plugin worker thread; swapped atomically for readers.
+    private volatile Dictionary<DirHandle, ImmutableArray<DirHandle>> _childrenDirsByParentId
+        = new();
 
-    private volatile ImmutableDictionary<DirHandle, ImmutableArray<FileHandle>> _childrenFilesByDirId
-        = ImmutableDictionary<DirHandle, ImmutableArray<FileHandle>>.Empty;
+    private volatile Dictionary<DirHandle, ImmutableArray<FileHandle>> _childrenFilesByDirId
+        = new();
 
-    private volatile ImmutableDictionary<DirHandle, DirAggregateStats> _dirStatsById
-        = ImmutableDictionary<DirHandle, DirAggregateStats>.Empty;
+    private volatile Dictionary<DirHandle, DirAggregateStats> _dirStatsById
+        = new();
 
     private readonly string _dataDirectory;
-
     private long _lastIndexedGeneration;
 
     public TreeIndexPlugin(string dataDirectory)
@@ -35,7 +37,7 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     }
 
     // ---------------------------------------------------------------------
-    // Public query surface
+    // Public query surface (lock-free)
     // ---------------------------------------------------------------------
     
     public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir)
@@ -54,9 +56,9 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         var map = _dirStatsById;
         return map.TryGetValue(dir, out var s)
-            ? s : new DirAggregateStats {DirCount = 0, FileCount = 0, TotalBytes = 0};
+            ? s
+            : new DirAggregateStats { DirCount = 0, FileCount = 0, TotalBytes = 0 };
     }
-
 
     // ---------------------------------------------------------------------
     // Event handlers
@@ -68,9 +70,7 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         {
             // Fallback: rebuild from snapshot and persist.
             RebuildFromSnapshot(evt.RepoSnapshotView);
-            
             _lastIndexedGeneration = evt.Generation;
-            
             SaveState();
         }
         else
@@ -94,113 +94,111 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
 
     // ---------------------------------------------------------------------
-    // Core index maintenance
+    // Core index maintenance (build -> publish)
     // ---------------------------------------------------------------------
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        var snapshotDict = repoSnapshot.Snapshots;
-        var childrenDirsTmp  = new Dictionary<DirHandle, List<DirHandle>>();
-        var childrenFilesTmp = new Dictionary<DirHandle, List<FileHandle>>();
-        
-        // Used for DFS start points (forest roots).
-        var rootDirs = new List<DirHandle>();
-
-        foreach (var snapshot in snapshotDict.Values)
+        using (TimingLog.StartPhase("Rebuilding TreeIndex"))
         {
-            var rootId = snapshot.ScanRootId;
+            var snapshotDict = repoSnapshot.Snapshots;
 
-            // Build id->handle maps for this root so we can resolve parent relationships quickly.
-            // (No global dictionary; handles are only valid within their root snapshot anyway.)
-            var dirIdToHandle = new Dictionary<long, DirHandle>(capacity: snapshot.Dirs.Count);
-            
-            for (int i = 0; i < snapshot.Dirs.Count; i++)
+            // Temp accumulators (lists) to avoid repeated ImmutableArray allocations.
+            var childrenDirsTmp = new Dictionary<DirHandle, List<DirHandle>>();
+            var childrenFilesTmp = new Dictionary<DirHandle, List<FileHandle>>();
+
+            // Forest roots for stats DFS.
+            var rootDirs = new List<DirHandle>();
+
+            foreach (var snapshot in snapshotDict.Values)
             {
-                var dir = snapshot.Dirs[i];
-                var h = new DirHandle(rootId, i);
-                dirIdToHandle[dir.DirId] = h;
+                var rootId = snapshot.ScanRootId;
 
-                if (dir.ParentDirId < 0)
-                    rootDirs.Add(h);
-            }
+                // Map: DirId -> DirHandle for this root.
+                var dirIdToHandle = new Dictionary<long, DirHandle>(capacity: snapshot.Dirs.Count);
 
-            // Child dirs
-            for (int i = 0; i < snapshot.Dirs.Count; i++)
-            {
-                var dir = snapshot.Dirs[i];
-                if (dir.ParentDirId < 0)    // root dir / orphaned dir
-                    continue;
-                
-                if (!dirIdToHandle.TryGetValue(dir.ParentDirId, out var parentHandle))
+                for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
-                    throw new InvalidOperationException(
-                        $"Dir {dir.DirId} references missing parent {dir.ParentDirId} in scan root {rootId}.");
+                    var dir = snapshot.Dirs[i];
+                    var h = new DirHandle(rootId, i);
+                    dirIdToHandle[dir.DirId] = h;
+
+                    if (dir.ParentDirId < 0)
+                        rootDirs.Add(h);
                 }
 
-                var childHandle = new DirHandle(rootId, i);
-
-                if (!childrenDirsTmp.TryGetValue(parentHandle, out var list))
+                // Child dirs
+                for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
-                    list = [];
-                    childrenDirsTmp[parentHandle] = list;
+                    var dir = snapshot.Dirs[i];
+                    if (dir.ParentDirId < 0) // root dir / orphaned dir
+                        continue;
+
+                    if (!dirIdToHandle.TryGetValue(dir.ParentDirId, out var parentHandle))
+                    {
+                        throw new InvalidOperationException(
+                            $"Dir {dir.DirId} references missing parent {dir.ParentDirId} in scan root {rootId}.");
+                    }
+
+                    var childHandle = new DirHandle(rootId, i);
+
+                    if (!childrenDirsTmp.TryGetValue(parentHandle, out var list))
+                    {
+                        list = new List<DirHandle>(capacity: 4);
+                        childrenDirsTmp[parentHandle] = list;
+                    }
+
+                    list.Add(childHandle);
                 }
 
-                list.Add(childHandle);
-            }
-
-            // Child files
-            for (int i = 0; i < snapshot.Files.Count; i++)
-            {
-                var file = snapshot.Files[i];
-
-                if (!dirIdToHandle.TryGetValue(file.DirId, out var parentDirHandle))
-                    continue;
-
-                var fileHandle = new FileHandle(rootId, i);
-
-                if (!childrenFilesTmp.TryGetValue(parentDirHandle, out var list))
+                // Child files
+                for (int i = 0; i < snapshot.Files.Count; i++)
                 {
-                    list = [];
-                    childrenFilesTmp[parentDirHandle] = list;
-                }
+                    var file = snapshot.Files[i];
 
-                list.Add(fileHandle);
+                    if (!dirIdToHandle.TryGetValue(file.DirId, out var parentDirHandle))
+                        continue;
+
+                    var fileHandle = new FileHandle(rootId, i);
+
+                    if (!childrenFilesTmp.TryGetValue(parentDirHandle, out var list))
+                    {
+                        list = new List<FileHandle>(capacity: 8);
+                        childrenFilesTmp[parentDirHandle] = list;
+                    }
+
+                    list.Add(fileHandle);
+                }
             }
+
+            // Freeze into published dictionaries (values are ImmutableArray for cheap reads).
+            // Capacity hints prevent rehashing.
+            var newChildDirs = new Dictionary<DirHandle, ImmutableArray<DirHandle>>(childrenDirsTmp.Count);
+            foreach (var (parent, list) in childrenDirsTmp)
+                newChildDirs[parent] = list.Count == 0 ? ImmutableArray<DirHandle>.Empty : [..list];
+
+            var newChildFiles = new Dictionary<DirHandle, ImmutableArray<FileHandle>>(childrenFilesTmp.Count);
+            foreach (var (parent, list) in childrenFilesTmp)
+                newChildFiles[parent] = list.Count == 0 ? ImmutableArray<FileHandle>.Empty : [..list];
+
+            var newStats = ComputeDirStats(snapshotDict, newChildDirs, newChildFiles, rootDirs);
+
+            // Publish in a coherent order (single-writer pattern):
+            // 1) children maps
+            // 2) stats
+            _childrenDirsByParentId = newChildDirs;
+            _childrenFilesByDirId = newChildFiles;
+            _dirStatsById = newStats;
         }
-
-        // Freeze children maps
-        var childDirsBuilder = ImmutableDictionary.CreateBuilder<DirHandle, ImmutableArray<DirHandle>>();
-        foreach (var (parent, list) in childrenDirsTmp)
-            childDirsBuilder[parent] = [..list];
-
-        var childFilesBuilder = ImmutableDictionary.CreateBuilder<DirHandle, ImmutableArray<FileHandle>>();
-        foreach (var (parent, list) in childrenFilesTmp)
-            childFilesBuilder[parent] = [..list];
-
-        var frozenChildDirs  = childDirsBuilder.ToImmutable();
-        var frozenChildFiles = childFilesBuilder.ToImmutable();
-
-        _childrenDirsByParentId = frozenChildDirs;
-        _childrenFilesByDirId   = frozenChildFiles;
-        _dirStatsById           = ComputeDirStats(snapshotDict, frozenChildDirs, frozenChildFiles, rootDirs);
     }
-        
-    
-    private static ImmutableDictionary<DirHandle, DirAggregateStats> ComputeDirStats(
+
+    private static Dictionary<DirHandle, DirAggregateStats> ComputeDirStats(
         IReadOnlyDictionary<long, ScanRootSnapshotView> snapshotDict,
-        ImmutableDictionary<DirHandle, ImmutableArray<DirHandle>> childrenDirsByParent,
-        ImmutableDictionary<DirHandle, ImmutableArray<FileHandle>> childrenFilesByDir,
+        Dictionary<DirHandle, ImmutableArray<DirHandle>> childrenDirsByParent,
+        Dictionary<DirHandle, ImmutableArray<FileHandle>> childrenFilesByDir,
         IReadOnlyList<DirHandle> rootDirs)
     {
-        // We want, for each dir:
-        //  - TotalBytes = sum of sizes of all descendant files
-        //  - FileCount  = number of descendant files
-        //  - DirCount   = number of descendant dirs (excluding self)
-        //
-        // Approach: memoized DFS over the directory graph (forest).
-        // Snapshot may be large; keep allocations modest.
-    
-    
+        // Memoized DFS over the directory forest.
         var memo = new Dictionary<DirHandle, DirAggregateStats>(capacity: Math.Max(1024, rootDirs.Count));
 
         DirAggregateStats Dfs(DirHandle dir)
@@ -218,7 +216,6 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 for (int i = 0; i < files.Length; i++)
                 {
                     var fh = files[i];
-
                     if (!snapshotDict.TryGetValue(fh.ScanRootId, out var snap))
                         continue;
 
@@ -260,12 +257,11 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
     
         // Compute stats for each forest root; DFS will memoize descendants.
-        for (int i = 0; i < rootDirs.Count; i++)
-            _ = Dfs(rootDirs[i]);
+        foreach (var t in rootDirs)
+            _ = Dfs(t);
 
-        return memo.ToImmutableDictionary();
+        return memo;
     }
-
 
     // ---------------------------------------------------------------------
     // Persistence
@@ -275,22 +271,25 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     private void SaveState()
     {
+        // Snapshot the references so the serialized view is consistent.
+        var childDirs = _childrenDirsByParentId;
+        var childFiles = _childrenFilesByDirId;
+        var stats = _dirStatsById;
+
         var state = new TreeIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            ChildrenDirsByParentId = _childrenDirsByParentId,
-            ChildrenFilesByDirId = _childrenFilesByDirId,
-            DirStatsById = _dirStatsById
+            ChildrenDirsByParentId = childDirs,
+            ChildrenFilesByDirId = childFiles,
+            DirStatsById = stats
         };
         
-
         var path = GetStateFilePath();
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        var bytes = MemoryPackSerializer.Serialize(state);
-        File.WriteAllBytes(path, bytes);
+        File.WriteAllBytes(path, MemoryPackSerializer.Serialize(state));
     }
 
     private bool TryLoadState(long expectedGeneration)
@@ -301,21 +300,28 @@ public class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
         try
         {
-            var bytes = File.ReadAllBytes(path);
-            var state = MemoryPackSerializer.Deserialize<TreeIndexState>(bytes);
-            if (state is null)
-                return false;
+            TreeIndexState? state;
+            using (TimingLog.StartPhase("Deserialising TreeIndex state"))
+            {
+                var bytes = File.ReadAllBytes(path);
+                state = MemoryPackSerializer.Deserialize<TreeIndexState>(bytes);
+                if (state is null)
+                    return false;
+            }
 
-            // Only use the state if it matches the current repo position.
-            if (state.LastIndexedGeneration != expectedGeneration)
-                return false;
-            
-            _lastIndexedGeneration = state.LastIndexedGeneration;
+            using (TimingLog.StartPhase("Rehydrating TreeIndex state"))
+            {
+                // Only use the state if it matches the current repo position.
+                if (state.LastIndexedGeneration != expectedGeneration)
+                    return false;
 
-            _childrenDirsByParentId  = state.ChildrenDirsByParentId;
-            _childrenFilesByDirId    = state.ChildrenFilesByDirId;
-            _dirStatsById            = state.DirStatsById;
+                _lastIndexedGeneration = state.LastIndexedGeneration;
 
+                // Publish snapshots (treat deserialized dictionaries as immutable snapshots).
+                _childrenDirsByParentId = state.ChildrenDirsByParentId;
+                _childrenFilesByDirId = state.ChildrenFilesByDirId;
+                _dirStatsById = state.DirStatsById;
+            }
 
             return true;
         }

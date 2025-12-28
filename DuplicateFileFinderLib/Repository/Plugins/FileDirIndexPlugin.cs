@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -10,10 +9,12 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
-    private volatile ImmutableDictionary<long, FileHandle> _filesById = ImmutableDictionary<long, FileHandle>.Empty;
-    private volatile ImmutableDictionary<long, DirHandle> _dirsById = ImmutableDictionary<long, DirHandle>.Empty;
+    // Published, read-only snapshots (we never mutate these dictionaries after publishing).
+    // We swap the reference atomically when rebuilding.
+    private volatile Dictionary<long, FileHandle> _filesById = new();
+    private volatile Dictionary<long, DirHandle> _dirsById = new();
     
-    // cached snapshot of all file/dir records
+    // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
     
     // Persisted position (only mutated on bootstrap/worker thread)
@@ -75,40 +76,53 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        var snapshotDict = repoSnapshot.Snapshots;
-        // Build mutable dictionaries first
-        var dirIndexbuilder = ImmutableDictionary.CreateBuilder<long, DirHandle>();
-        var fileIndexbuilder = ImmutableDictionary.CreateBuilder<long, FileHandle>();
-
-        foreach (var (rootId, snapshot) in snapshotDict)
+        using (TimingLog.StartPhase("Rebuilding FileDirIndex"))
         {
-            for (int i = 0; i < snapshot.Dirs.Count; i++)
+            var snapshotDict = repoSnapshot.Snapshots;
+
+            // Build fresh dictionaries (no shared state with readers).
+            // Capacity hints reduce rehashing.
+            var totalDirs = 0;
+            var totalFiles = 0;
+            foreach (var (_, s) in snapshotDict)
             {
-                var dir = snapshot.Dirs[i];
-                if (!dirIndexbuilder.TryAdd(dir.DirId, new DirHandle(rootId, i)))
+                totalDirs += s.Dirs.Count;
+                totalFiles += s.Files.Count;
+            }
+
+            var newDirs = new Dictionary<long, DirHandle>(capacity: totalDirs);
+            var newFiles = new Dictionary<long, FileHandle>(capacity: totalFiles);
+
+            foreach (var (rootId, snapshot) in snapshotDict)
+            {
+                for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
-                    throw new InvalidOperationException(
-                        $"Duplicate dirId {dir.DirId} encountered while rebuilding FileDirIndexPlugin.");
+                    var dir = snapshot.Dirs[i];
+                    if (!newDirs.TryAdd(dir.DirId, new DirHandle(rootId, i)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Duplicate dirId {dir.DirId} encountered while rebuilding FileDirIndexPlugin.");
+                    }
+                }
+
+                for (int i = 0; i < snapshot.Files.Count; i++)
+                {
+                    var file = snapshot.Files[i];
+                    if (!newFiles.TryAdd(file.FileId, new FileHandle(rootId, i)))
+                    {
+                        throw new InvalidOperationException(
+                            $"Duplicate FileId {file.FileId} encountered while rebuilding FileDirIndexPlugin.");
+                    }
                 }
             }
 
-            for (int i = 0; i < snapshot.Files.Count; i++)
-            {
-                var file = snapshot.Files[i];
-                if (!fileIndexbuilder.TryAdd(file.FileId, new FileHandle(rootId, i)))
-                {
-                    throw new InvalidOperationException(
-                        $"Duplicate FileId {file.FileId} encountered while rebuilding FileDirIndexPlugin.");
-                }
-            }
+            // Publish in a coherent order:
+            // 1) publish dictionaries
+            // 2) publish snapshot view last so readers see coherent state for Decode* usage
+            _dirsById = newDirs;
+            _filesById = newFiles;
+            _snapshotView = repoSnapshot;
         }
-        
-        // public index
-        _dirsById = dirIndexbuilder.ToImmutable();
-        _filesById = fileIndexbuilder.ToImmutable();
-
-        // Publish snapshot view last so readers see coherent state.
-        _snapshotView = repoSnapshot;
     }
 
 // ---------------------------------------------------------------------
@@ -119,11 +133,15 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
     private void SaveState()
     {
+        // Snapshot local references to ensure consistency during enumeration.
+        var dirs = _dirsById;
+        var files = _filesById;
+
         var state = new FileDirIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            DirsById = _dirsById.ToDictionary(x => x.Key, x => x.Value),
-            FilesById = _filesById.ToDictionary(x => x.Key, x => x.Value)
+            DirsById = dirs.ToDictionary(x => x.Key, x => x.Value),
+            FilesById = files.ToDictionary(x => x.Key, x => x.Value)
         };
         
         var path = GetStateFilePath();
@@ -142,21 +160,21 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         try
         {
-            var state = MemoryPackSerializer.Deserialize<FileDirIndexState>(File.ReadAllBytes(path));
-            if (state is null)
-                return false;
+            FileDirIndexState? state;
+            using (TimingLog.StartPhase("Deserialising FileDirIndexState"))
+            {
+                state = MemoryPackSerializer.Deserialize<FileDirIndexState>(File.ReadAllBytes(path));
+                if (state is null)
+                    return false;
+            }
 
             // Only use the state if it matches the current repo position.
             if (state.LastIndexedGeneration != expectedGeneration)
                 return false;
-
-            // Rehydrate into immutable indexes + publish
-            using (TimingLog.StartPhase("Rehydrating into immutable indexes"))
-            {
-                _dirsById = state.DirsById.ToImmutableDictionary();
-                _filesById = state.FilesById.ToImmutableDictionary();
-            }
-
+            
+            _dirsById = state.DirsById;
+            _filesById = state.FilesById;
+            
             _lastIndexedGeneration = state.LastIndexedGeneration;
             return true;
         }
@@ -170,8 +188,11 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     // ---------------------------------------------------------------------
     // Public query surface (lock-free)
     // ---------------------------------------------------------------------
+
     public bool TryGetDir(long dirId, out DirHandle handle) => _dirsById.TryGetValue(dirId, out handle);
+
     public bool TryGetFile(long fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
+
     public int FileCount => _filesById.Count;
     public int DirCount => _dirsById.Count;
 
@@ -200,12 +221,14 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         // Collect segments bottom-up: [fileName, dirName, dirName, ...]
         var segments = new List<string>(capacity: 8) { view.DecodeFileName(fileHandle) };
 
-        // Walk parent dirs until "root"
+        // Snapshot dirs dictionary for stable lookups during traversal
+        var dirsById = _dirsById;
+
         long dirId = file.DirId;
         while (dirId > 0)
         {
-            if (!_dirsById.TryGetValue(dirId, out var dh))
-                return false; // inconsistent index/snapshot
+            if (!dirsById.TryGetValue(dirId, out var dh))
+                return false;
 
             if (dh.ScanRootId != fileHandle.ScanRootId)
                 return false; // should not happen
@@ -221,14 +244,12 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         // Build relative path in correct order
         segments.Reverse();
 
-        // Avoid Path.Combine in a loop; but fine as a sketch:
         relativePath = segments.Count == 0 ? string.Empty : segments[0];
         for (int i = 1; i < segments.Count; i++)
             relativePath = Path.Combine(relativePath, segments[i]);
 
         return true;
     }
-
 
     public bool TryGetDirPathById(long dirId, out string relativePath)
     {
@@ -252,13 +273,16 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         var segments = new List<string>(capacity: 8);
         
+        // Snapshot dirs dictionary for stable lookups during traversal
+        var dirsById = _dirsById;
+
         var dir = snapshot.Dirs[dirHandle.Index];
         segments.Add(view.DecodeDirName(dirHandle));
 
         long parentId = dir.ParentDirId;
         while (parentId > 0)
         {
-            if (!_dirsById.TryGetValue(parentId, out var parentHandle))
+            if (!dirsById.TryGetValue(parentId, out var parentHandle))
                 return false;
 
             if (parentHandle.ScanRootId != dirHandle.ScanRootId)

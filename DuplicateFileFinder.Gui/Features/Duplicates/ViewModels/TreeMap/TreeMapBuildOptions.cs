@@ -14,5 +14,7 @@ public sealed record TreeMapBuildOptions
     /// <summary>Skip file rectangles entirely (directory-only treemap).</summary>
     public bool DirectoriesOnly { get; init; } = false;
 
+    public int MaxTotalFileNodes { get; init; } = int.MaxValue;
+    
     public static TreeMapBuildOptions Default => new();
 }
