@@ -4,43 +4,26 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
-public abstract class RepoTreeMapElement(Func<string> nameResolver) : ITreeMapNodeElement
+public abstract class RepoTreeMapElement(ITreeMapDataResolver resolver) : ITreeMapNodeElement
 {
-    private Func<string> NameResolver { get; } = nameResolver;
+    protected ITreeMapDataResolver Resolver { get; } = resolver;
 
-    // Common data for dir/file
-    public required Func<string> RelativePathFactory { get; init; }
-
-    public string Name
-    {
-        get
-        {
-            field ??= SafeInvoke(NameResolver);
-
-            return field;
-        }
-        
-    } = null;
-
-    public required string Label { get; init; }
-
-    public Func<Control> ToolTipFactory => () => new ContentControl
-    {
-        Content = this
-    };
-    
+    // Treemap layout needs this eagerly.
     public required double Value { get; init; }
 
+    // Not used visually; keep non-null for interface compatibility.
+    public virtual string Label => string.Empty;
+
     protected ScanRoot? ScanRoot { get; init; }
-
-    // Bindable convenience
     public string VolumeLabel => ScanRoot?.VolumeLabel ?? "(unknown)";
-    public string RelativePath => SafeInvoke(RelativePathFactory);
 
-    private static string SafeInvoke(Func<string> f)
-    {
-        try { return f(); }
-        catch { return string.Empty; }
-    }
+    public string Name => field ??= ResolveName();
+
+    public string RelativePath => field ??= ResolveRelativePath();
+
+    // Keep as-is (can later be cached if it shows up in profiling)
+    public Func<Control> ToolTipFactory => () => new ContentControl { Content = this };
+
+    protected abstract string ResolveName();
+    protected abstract string ResolveRelativePath();
 }
-    

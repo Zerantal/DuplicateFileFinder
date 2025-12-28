@@ -6,25 +6,34 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 public sealed class DirTreeMapElement : RepoTreeMapElement
 {
+    private readonly DirHandle _dir;
+
     [SetsRequiredMembers]
     public DirTreeMapElement(
-        DirRecordV2 dir,
+        ITreeMapDataResolver resolver,
+        DirHandle dirHandle,
         ScanRoot scanRoot,
-        DirAggregateStats dirAggregateStats,
-        Func<string> relPathFactory, 
-        double value,
-        Func<string> nameResolver) : base(nameResolver)
+        double value) : base(resolver)
     {
+        _dir = dirHandle;
         ScanRoot = scanRoot;
-        
-        Label = dir.DirId.ToString();
         Value = value;
-
-        RelativePathFactory = relPathFactory;
-
-        Stats = dirAggregateStats;
     }
 
-    public DirAggregateStats Stats { get; }
+    public DirAggregateStats Stats => field ??= Resolver.GetDirStats(_dir);
+
+    // If I ever decide to show labels for big items.
+    // public override string Label => Resolver.GetDirRecord(_dir).DirId.ToString();
     
+    protected override string ResolveName()
+        => Resolver.DecodeDirName(_dir);
+
+    protected override string ResolveRelativePath()
+    {
+        DirRecordV2 rec;
+        try { rec = Resolver.GetDirRecord(_dir); }
+        catch { return string.Empty; }
+
+        return Resolver.GetRelativePath(rec.DirId);
+    }
 }

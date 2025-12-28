@@ -34,7 +34,10 @@ public partial class DuplicatesViewModel : ObservableObject
         _folderTreeBuilder = new FolderTreeBuilder(host, scanner);
         _treeMap = new TreeMapController(host)
         {
-            Options = new TreeMapBuildOptions {MaxDepth = 8}
+            Options = new TreeMapBuildOptions
+            {
+                MaxDepth = 8
+            }
         };
         
         
