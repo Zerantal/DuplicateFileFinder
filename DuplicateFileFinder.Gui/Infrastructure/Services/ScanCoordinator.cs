@@ -127,6 +127,7 @@ public sealed class ScanCoordinator(
 
     public Task RemoveScanRoot(long scanRootId)
     {
+        
         // TODO:
         // _finder.RemoveScanRoot(scanRootId);
         //

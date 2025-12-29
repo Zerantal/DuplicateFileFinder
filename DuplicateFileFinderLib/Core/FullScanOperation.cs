@@ -170,6 +170,9 @@ internal sealed class FullScanOperation(
         {
             ct.ThrowIfCancellationRequested();
 
+            // Construct child path from normalized parent + name (no per-entry NormalizePath)
+            var childPath = PathUtils.JoinNormalized(normDir, e.Name);
+
             if (e.IsDirectory)
             {
                 var observed = new ObservedDir
@@ -181,7 +184,8 @@ internal sealed class FullScanOperation(
                 };
 
                 var childCursor = session.OnDirectoryFound(in observed, ref ctx);
-                frontier.Push(new PendingDir(childCursor.DirId, PathUtils.NormalizePath(e.FullPath)));
+                
+                frontier.Push(new PendingDir(childCursor.DirId, childPath));
                 continue;
             }
 
@@ -197,9 +201,9 @@ internal sealed class FullScanOperation(
             var decision = session.OnFileFound(in observedFile, ref ctx);
 
             if (decision.ShouldHash && observedFile.Size > 0)
-                filesToHash.Add(new FileToHash<FileHashToken>(
-                    PathUtils.NormalizePath(e.FullPath),
-                    decision.Token));
+            {
+                filesToHash.Add(new FileToHash<FileHashToken>(childPath, decision.Token));
+            }
 
             TimingLog.Counter("files");
         }
