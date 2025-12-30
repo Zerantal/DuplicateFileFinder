@@ -25,6 +25,8 @@ jobs:
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       CONFIGURATION: Release
+      DOTNET_EnablePackageManagerResourceMonitoring: 0
+      UseSharedCompilation: false
 
     steps:
       - name: Checkout
@@ -46,16 +48,17 @@ jobs:
         run: dotnet restore DuplicateFileFinder.sln
 
       - name: Build solution (Release)
-        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore
-
+        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false
+      
       - name: Test (DuplicateFileFinderLibTests)
         run: >
           dotnet test DuplicateFileFinderLibTests/DuplicateFileFinderLibTests.csproj
           -c ${{ env.CONFIGURATION }}
+          -f net8.0
           --no-build
           --logger "trx;LogFileName=test_results.trx"
           --results-directory "./artifacts/test-results"
-          --collect "XPlat Code Coverage"
+
 
       - name: Upload test results + coverage
         if: always()
