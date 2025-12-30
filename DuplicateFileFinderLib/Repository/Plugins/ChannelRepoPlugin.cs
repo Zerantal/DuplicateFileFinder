@@ -16,7 +16,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
     private readonly TaskCompletionSource _readyTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private readonly Lock _processedSync = new();
+    private readonly object _processedSync = new();
     private long _lastProcessedGeneration;
     private readonly List<GenerationWaiter> _generationWaiters = new();
 

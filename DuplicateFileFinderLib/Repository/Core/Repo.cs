@@ -23,7 +23,7 @@ public sealed partial class Repo : IRepoInternal
 
     private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run 
 
-    private readonly Lock _sync = new();
+    private readonly object _sync = new();
 
     private RepoMetaFile _metaFile = null!;
     private bool _disposed;
