@@ -9,7 +9,7 @@ namespace DuplicateFileFinderLib.Repository.Storage;
 internal static partial class RepoStore
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    
+
     private static readonly SemaphoreSlim WriteGate = new(1, 1);
 
     private static string NewUniqueTmpPath(string finalPath)
@@ -21,7 +21,7 @@ internal static partial class RepoStore
     {
         repoPath = Path.GetFullPath(repoPath);
         Directory.CreateDirectory(repoPath);
-        
+
         await WriteGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -33,7 +33,7 @@ internal static partial class RepoStore
                 await using (var fs = new FileStream(
                                  tmpPath,
                                  FileMode.CreateNew,
-                                 FileAccess.Write, 
+                                 FileAccess.Write,
                                  FileShare.None,
                                  bufferSize: 4096,
                                  useAsync: true))
@@ -89,11 +89,11 @@ internal static partial class RepoStore
         await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         var snapshotV2 = await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotV2>(fs, cancellationToken: ct)
             .ConfigureAwait(false);
-        
-        
+
+
         return snapshotV2;
     }
-    
+
     internal static async Task SaveScanRootSnapshotV2Async(
         string repoPath,
         ScanRootSnapshotV2 snapshot,
@@ -103,7 +103,7 @@ internal static partial class RepoStore
 
         var rootsFolder = GetRootsFolder(repoPath);
         Directory.CreateDirectory(rootsFolder);
-        
+
         await WriteGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -123,7 +123,7 @@ internal static partial class RepoStore
                     await MemoryPackSerializer.SerializeAsync(fs, snapshot, cancellationToken: ct).ConfigureAwait(false);
                     await fs.FlushAsync(ct).ConfigureAwait(false);
                 }
-        
+
                 File.Move(tmpPath, path, overwrite: true);
             }
             finally
@@ -145,7 +145,7 @@ internal static partial class RepoStore
     public static async Task DeleteScanRootSnapshotAsync(string repoPath, long scanRootId, CancellationToken ct)
     {
         repoPath = Path.GetFullPath(repoPath);
-        
+
         // Delete is also gated to avoid racing a writer.
         await WriteGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -168,9 +168,9 @@ internal static partial class RepoStore
         {
             WriteGate.Release();
         }
-        
+
     }
-    
+
     // ---------------- helpers ----------------
 
     private const string MetaFileName = "repo.mp";

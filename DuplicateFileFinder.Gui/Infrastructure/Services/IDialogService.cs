@@ -10,7 +10,7 @@ public interface IDialogService
     Task ShowErrorAsync(string title, string message);
 
     public Window GetOwnerWindow();
-    
+
     /// <summary>
     ///     Show a confirmation dialog. Returns true if the user clicked OK (or equivalent).
     /// </summary>

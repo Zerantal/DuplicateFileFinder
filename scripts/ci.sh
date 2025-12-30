@@ -8,18 +8,18 @@ TEST_RESULTS_DIR="${ARTIFACTS_DIR}/test-results"
 
 mkdir -p "${TEST_RESULTS_DIR}"
 
-echo "==> dotnet --info"
 dotnet --info
 
 echo "==> Restore"
-dotnet restore "${ROOT_DIR}"
+dotnet restore "${ROOT_DIR}/DuplicateFileFinder.sln"
 
 echo "==> Build (${CONFIGURATION})"
-dotnet build "${ROOT_DIR}" -c "${CONFIGURATION}" --no-restore
+dotnet build "${ROOT_DIR}/DuplicateFileFinder.sln" -c "${CONFIGURATION}" --no-restore
 
-echo "==> Test (${CONFIGURATION})"
-dotnet test "${ROOT_DIR}" -c "${CONFIGURATION}" --no-build \
+echo "==> Test (DuplicateFileFinderLibTests)"
+dotnet test "${ROOT_DIR}/DuplicateFileFinderLibTests/DuplicateFileFinderLibTests.csproj" \
+  -c "${CONFIGURATION}" \
+  --no-build \
   --logger "trx;LogFileName=test_results.trx" \
   --results-directory "${TEST_RESULTS_DIR}" \
   --collect "XPlat Code Coverage"
-

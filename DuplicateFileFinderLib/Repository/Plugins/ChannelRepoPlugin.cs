@@ -60,7 +60,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
             // shutdown
         }
     }
-    
+
     protected virtual ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
     {
         switch (evt)

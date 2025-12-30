@@ -15,7 +15,7 @@ public readonly partial record struct DirRecordV2() : IEquatable<DirRecordV2>
     public int ErrorMessageStrIdx { get; init; } = -1;
     public long ModifiedTicks { get; init; } = 0;
     public long CreatedTicks { get; init; } = 0;
-    
+
     public bool Equals(DirRecordV2 other) => DirId == other.DirId;
     public override int GetHashCode() => DirId.GetHashCode();
 }

@@ -9,7 +9,7 @@ namespace DuplicateFileFinderLib.Util;
 internal static partial class UnixTypes
 {
     private const string LibC = "libc";
-    
+
     // Big enough that native lstat cannot write past it (avoids clobbering managed stack args).
     // 256 should be plenty for current Linux libcs;
     [StructLayout(LayoutKind.Sequential)]
@@ -51,7 +51,7 @@ internal static partial class UnixTypes
         if (!OperatingSystem.IsLinux()) return false;
         if (string.IsNullOrEmpty(path)) return false;
         if (path.IndexOf('\0') >= 0) return false;
-        
+
         if (lstat_legacy(path, out var st) != 0)
             return false;
 
@@ -62,7 +62,7 @@ internal static partial class UnixTypes
             byte* p = (byte*)Unsafe.AsPointer(ref st);
             mode = Unsafe.ReadUnaligned<uint>(p + 24);
         }
-        
+
         switch (mode & S_IFMT)
         {
             case S_IFREG: kind = UnixKind.Regular; return true;
@@ -74,6 +74,6 @@ internal static partial class UnixTypes
             case S_IFBLK: kind = UnixKind.BlockDev; return true;
             default: return false;
         }
-        
+
     }
 }

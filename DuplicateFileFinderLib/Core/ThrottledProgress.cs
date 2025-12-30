@@ -12,7 +12,7 @@ public sealed class ThrottledProgress(
 
     private DateTime _lastSent = DateTime.MinValue;
     private bool _sentAny;
-    
+
     public void Report(DuplicateFileFinderProgressReport value)
     {
         lock (_gate)

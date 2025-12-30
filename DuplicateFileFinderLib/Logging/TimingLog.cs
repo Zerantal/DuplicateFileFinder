@@ -13,10 +13,10 @@ public sealed class TimingLog : IDisposable
 
     // One stack per async flow. Top = current scope.
     private static readonly AsyncLocal<Stack<PhaseContext>?> ScopeStack = new();
-    
+
     // global dictionary of counter formatters
     private static ConcurrentDictionary<string, Func<long, string>> CounterFormatter { get; } = new();
-    
+
     private TimingLog(string operation, string? detail)
     {
         var stack = ScopeStack.Value ??= new Stack<PhaseContext>(4);
@@ -51,7 +51,7 @@ public sealed class TimingLog : IDisposable
         // If the stack is empty, clear it so downstream awaits don’t hold onto objects.
         if (stack.Count == 0) ScopeStack.Value = null;
     }
-        
+
 
     /// <summary>Starts timing for an arbitrary operation. Use in a using-block.</summary>
     public static TimingLog Start(string operation, string? detail = null)
@@ -60,7 +60,7 @@ public sealed class TimingLog : IDisposable
     /// <summary>Starts a "phase" timing scope that can collect counters via TimingLog.Counter(...).</summary>
     public static TimingLog StartPhase(string phaseName, string? detail = null)
         => new(phaseName, Normalize(detail));
-    
+
 
     /// <summary>Convenience for enum phases.</summary>
     public static TimingLog StartPhase(Enum phase, string? detail = null)
@@ -79,7 +79,7 @@ public sealed class TimingLog : IDisposable
     {
         CounterFormatter[name] = formatter;
     }
-    
+
     // ---- helpers ----
 
     private static string? Normalize(string? d) => string.IsNullOrWhiteSpace(d) ? null : d;
@@ -92,12 +92,12 @@ public sealed class TimingLog : IDisposable
         {
             string value;
             if (CounterFormatter.TryGetValue(kv.Key, out var formatter))
-                value =  formatter(kv.Value);
+                value = formatter(kv.Value);
             else
                 value = kv.Value.ToString();
             sb.Append(' ').Append(kv.Key).Append('=').Append(value);
         }
-            
+
         return sb.ToString();
     }
 

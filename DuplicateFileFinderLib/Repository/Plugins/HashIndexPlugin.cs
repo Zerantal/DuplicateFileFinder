@@ -39,9 +39,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     public int TotalDuplicateFileCount => _stats.DuplicateFileCount;
     public long TotalSpaceTakenByDuplicates => _stats.SpaceTakenByDuplicates;
 
-// ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
     // Public query surface (lock-free)
-// ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
 
     public IReadOnlyList<(long size, IReadOnlyList<FileHandle> list)> GetDuplicateGroups(
         int minDuplicates = 2,
@@ -104,14 +104,14 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var tmp = new Dictionary<HashKey, (long size, List<FileHandle> list)>(1024);
 
         foreach (var snapshot in snapshotDict.Values)
-    {
+        {
             for (var i = 0; i < snapshot.Files.Count; i++)
             {
                 var file = snapshot.Files[i];
 
-            // Filter deleted/absent
-            if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                continue;
+                // Filter deleted/absent
+                if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    continue;
 
                 if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
                     continue;
@@ -121,17 +121,17 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                     group = (file.Size, new List<FileHandle>());
                     tmp[file.Hash] = group;
                 }
-            else
-            {
-                // Robust: size should be identical for equal-content hashes, but keep stable if data is imperfect.
-                if (file.Size > group.size)
-                    group = (file.Size, group.list);
-                tmp[file.Hash] = group;
-            }
+                else
+                {
+                    // Robust: size should be identical for equal-content hashes, but keep stable if data is imperfect.
+                    if (file.Size > group.size)
+                        group = (file.Size, group.list);
+                    tmp[file.Hash] = group;
+                }
 
                 group.list.Add(new FileHandle(snapshot.ScanRootId, i));
             }
-    }
+        }
 
         FlattenAndPublish(tmp);
     }
@@ -181,9 +181,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         _stats = new StatsSnapshot(totalDupCount, totalSpaceDup);
     }
 
-// ---------------------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
+    // Persistence
+    // ---------------------------------------------------------------------
 
     private string GetStateFilePath()
     {

@@ -10,18 +10,18 @@ $TestResultsDir = Join-Path $ArtifactsDir "test-results"
 
 New-Item -ItemType Directory -Force -Path $TestResultsDir | Out-Null
 
-Write-Host "==> dotnet --info"
 dotnet --info
 
 Write-Host "==> Restore"
-dotnet restore $RootDir
+dotnet restore (Join-Path $RootDir "DuplicateFileFinder.sln")
 
 Write-Host "==> Build ($Configuration)"
-dotnet build $RootDir -c $Configuration --no-restore
+dotnet build (Join-Path $RootDir "DuplicateFileFinder.sln") -c $Configuration --no-restore
 
-Write-Host "==> Test ($Configuration)"
-dotnet test $RootDir -c $Configuration --no-build `
+Write-Host "==> Test (DuplicateFileFinderLibTests)"
+dotnet test (Join-Path $RootDir "DuplicateFileFinderLibTests\DuplicateFileFinderLibTests.csproj") `
+  -c $Configuration `
+  --no-build `
   --logger "trx;LogFileName=test_results.trx" `
   --results-directory $TestResultsDir `
   --collect "XPlat Code Coverage"
-

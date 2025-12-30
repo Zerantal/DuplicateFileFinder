@@ -43,7 +43,7 @@ public static class TreeMapBuilder
                 var node = ctx.BuildDirNode(scanRoot, rootHandle, depth: 0);
                 results[i] = node.Element.Value > 0 ? node : null;
             });
-        
+
         // Preserve original ordering of scan roots
         var scanRootNodes = new List<TreeMapNode<ITreeMapNodeElement>>(liveRoots.Count);
         foreach (var t in results)
@@ -81,7 +81,7 @@ public static class TreeMapBuilder
             _remainingFileBudget = _opts.MaxTotalFileNodes;
             _resolver = new TreeMapDataResolver(snapshot, treeIndex, dirRelativePathResolver);
         }
-    
+
         // ---------------------------------------------------------------------
         // Scan root handling
         // ---------------------------------------------------------------------
@@ -97,11 +97,11 @@ public static class TreeMapBuilder
                 // Resolve r.DirId -> DirHandle; if missing, treat as stale and skip
                 if (!_fileDirIndex.TryGetDir(r.DirId, out var rootHandle))
                     continue;
-                
+
                 // Also ensure the snapshot for that scan root exists
                 if (!_snapshot.Snapshots.ContainsKey(rootHandle.ScanRootId))
                     continue;
-                
+
                 list.Add((r, rootHandle));
             }
             return list;
@@ -139,7 +139,7 @@ public static class TreeMapBuilder
                 [
                     ("Total", FormatMetric(total))
                 ]);
-        
+
             return new TreeMapNode<ITreeMapNodeElement>
             {
                 Element = dummy,
@@ -147,7 +147,7 @@ public static class TreeMapBuilder
                 Fill = null
             };
         }
-    
+
         // ---------------------------------------------------------------------
         // Directory nodes
         // ---------------------------------------------------------------------
@@ -272,7 +272,7 @@ public static class TreeMapBuilder
                     kept.Add(item);
 
                 kept.Sort((a, b) => b.Value.CompareTo(a.Value));
-            
+
                 for (int i = 0; i < kept.Count; i++)
                     childrenOut.Add(BuildDirNode(scanRoot, kept[i].Dir, parentDepth + 1));
             }
@@ -286,7 +286,7 @@ public static class TreeMapBuilder
                     Fill = null
                 });
         }
- 
+
         // ---------------------------------------------------------------------
         // File nodes
         // ---------------------------------------------------------------------
@@ -397,7 +397,7 @@ public static class TreeMapBuilder
                 Fill = null
             };
         }
-    
+
         private TreeMapNode<ITreeMapNodeElement> MakeDirLeafNode(
             DirHandle dir,
             ScanRoot scanRoot,
@@ -416,7 +416,7 @@ public static class TreeMapBuilder
                 Fill = null
             };
         }
-        
+
         private TreeMapNode<ITreeMapNodeElement> BuildMissingDirNode(DirHandle dir)
         {
             var element = new SyntheticTreeMapElement(

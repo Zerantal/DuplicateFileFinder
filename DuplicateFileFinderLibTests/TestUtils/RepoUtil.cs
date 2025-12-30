@@ -21,7 +21,7 @@ public static class RepoUtil
                 f.size,
                 hash: HashKey.NotComputed)).ToArray());
     }
-    
+
     internal static RepoSnapshotView MakeSnapshotV2(
         long scanRootId,
         (string name, long parentDirId, long dirId)[] dirs,

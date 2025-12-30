@@ -23,11 +23,11 @@ internal sealed class ScanSession : IScanSession
     private long ScanRootId => Run.ScanRootId;
 
     public DirCursor RootDirCursor { get; }
-    
+
     private long _lastCheckpointUtcTicks;
     private readonly TimeSpan _minCheckpointInterval;
     private int _hasUncheckpointedChanges;
-    
+
     private Func<PendingDir[]>? _getPendingDirs;
 
     // Deterministic time source for tests (defaults to DateTime.UtcNow.Ticks)
@@ -42,7 +42,7 @@ internal sealed class ScanSession : IScanSession
     {
         _repo = repo;
         Run = run;
-        
+
         _minCheckpointInterval = minCheckpointInterval ?? TimeSpan.FromSeconds(300);
         _utcNowTicks = utcNowTicks ?? (static () => DateTime.UtcNow.Ticks);
         _lastCheckpointUtcTicks = _utcNowTicks();
@@ -71,7 +71,7 @@ internal sealed class ScanSession : IScanSession
     {
         // If disposed without completion/failure, mark failed.
         if (!_finished)
-            await _repo.MarkScanFailedAsync(ScanSequence, 
+            await _repo.MarkScanFailedAsync(ScanSequence,
                 "ScanSession disposed before completion.", true);
 
         await Task.CompletedTask;
@@ -164,13 +164,13 @@ internal sealed class ScanSession : IScanSession
         };
 
         var childId = _mut.UpsertDir(input);
-        
+
         Volatile.Write(ref _hasUncheckpointedChanges, 1);
         TryScheduleCheckpointFlush();
 
         return new DirCursor(childId);
     }
-    
+
     public FileHashDecision OnFileFound(in ObservedFile file, ref DirEnumerationContext ctx)
     {
         var existingId = _cmp.TryConsumeExpectedFileId(ref ctx, file.Name);
@@ -211,7 +211,7 @@ internal sealed class ScanSession : IScanSession
 
         return decision;
     }
-    
+
     public void OnFileHashCompleted(in FileHashToken token, ReadOnlyMemory<byte> hashBytes, string? errorMessage)
     {
         // Exactly one should be non-null.
@@ -230,7 +230,7 @@ internal sealed class ScanSession : IScanSession
         Volatile.Write(ref _hasUncheckpointedChanges, 1);
         TryScheduleCheckpointFlush();
     }
-    
+
     public void EndDirectory(ref DirEnumerationContext ctx)
     {
         // Anything expected but not seen => deleted
@@ -269,7 +269,7 @@ internal sealed class ScanSession : IScanSession
         }
 
         _cmp.Clear(ref ctx);
-        
+
         Volatile.Write(ref _hasUncheckpointedChanges, 1);
         TryScheduleCheckpointFlush();
     }
@@ -358,14 +358,14 @@ internal sealed class ScanSession : IScanSession
                 CheckpointVersion = ScanCheckpoint.CurrentCheckpointVersion,
                 ScanRootId = ScanRootId,
                 ScanSequence = Run.ScanSequence,
-                RootPath = Run.RootPath,            
+                RootPath = Run.RootPath,
                 PendingDirs = GetPendingDirsForCheckpoint(),
                 PartialSnapshot = partial,
                 CreatedAtUtcTicks = now
             };
 
             await _repo.CommitCheckpoint(checkpoint, ct).ConfigureAwait(false);
-        
+
             // Mark success
             Volatile.Write(ref _hasUncheckpointedChanges, 0);
             Interlocked.Exchange(ref _lastCheckpointUtcTicks, now);
@@ -375,7 +375,7 @@ internal sealed class ScanSession : IScanSession
             _flushGate.Release();
         }
     }
-        
+
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
@@ -405,6 +405,6 @@ internal sealed class ScanSession : IScanSession
         await _repo.MarkScanFailedAsync(ScanSequence, errorMessage, cancelled, cancellationToken).ConfigureAwait(false);
         _finished = true;
 
-    // Intentionally keep checkpoint(s) on failure/cancel for resume.
+        // Intentionally keep checkpoint(s) on failure/cancel for resume.
     }
 }

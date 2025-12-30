@@ -91,7 +91,7 @@ internal sealed class FullScanOperation(
             await session.CompleteAsync(ct).ConfigureAwait(false);
 
             DuplicateFileFinderHelpers.Report(
-                progress, 
+                progress,
                 ScanPhase.Completed,
                 "Finished scanning",
                 1.0,
@@ -184,7 +184,7 @@ internal sealed class FullScanOperation(
                 };
 
                 var childCursor = session.OnDirectoryFound(in observed, ref ctx);
-                
+
                 frontier.Push(new PendingDir(childCursor.DirId, childPath));
                 continue;
             }

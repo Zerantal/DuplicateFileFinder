@@ -39,8 +39,8 @@ public partial class DuplicatesViewModel : ObservableObject
                 MaxDepth = 8
             }
         };
-        
-        
+
+
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.Root))
@@ -127,11 +127,11 @@ public partial class DuplicatesViewModel : ObservableObject
         using (TimingLog.StartPhase("LoadFromRepo()"))
         {
             RepoSnapshotView repoSnapshot = _repo.GetRepoSnapshotView();
-            
+
             InitializeFromSnapshot(repoSnapshot);
         }
     }
-    
+
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
         using (TimingLog.StartPhase("BuildFolderTree()"))

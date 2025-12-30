@@ -65,7 +65,7 @@ public sealed partial class Repo
         // single place to write V2 snapshots (RepoStore is gated + tmp unique)
         return RepoStore.SaveScanRootSnapshotV2Async(_repoPath, snapshot, ct);
     }
-    
+
     private void LoadFromMetaFile(RepoMetaFile metaFile)
     {
         _metaFile = metaFile;
@@ -86,7 +86,7 @@ public sealed partial class Repo
         _scanRunIndex.Clear();
         foreach (var run in _scanRuns)
             _scanRunIndex[run.ScanSequence] = run;
-        
+
         _metaVersion = 1;
         _persistedMetaVersion = 1;
     }

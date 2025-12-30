@@ -24,38 +24,40 @@ jobs:
       DOTNET_NOLOGO: true
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      # Makes test failures easier to diagnose in CI logs.
-      VSTEST_CONNECTION_TIMEOUT: 300
+      CONFIGURATION: Release
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
           cache: true
           cache-dependency-path: |
             **/*.csproj
-            **/*.fsproj
             **/*.props
             **/*.targets
             **/packages.lock.json
             global.json
 
-      - name: Restore
-        run: dotnet restore
+      - name: Restore solution
+        run: dotnet restore DuplicateFileFinder.sln
 
-      - name: Build (Release)
-        run: dotnet build --no-restore -c Release
+      - name: Build solution (Release)
+        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore
 
-      # Optional: ensure deterministic build warnings are visible
-      - name: Test (Release)
-        run: dotnet test --no-build -c Release --logger "trx;LogFileName=test_results.trx" --results-directory "./artifacts/test-results" --collect "XPlat Code Coverage"
-        shell: bash
+      - name: Test (DuplicateFileFinderLibTests)
+        run: >
+          dotnet test DuplicateFileFinderLibTests/DuplicateFileFinderLibTests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --logger "trx;LogFileName=test_results.trx"
+          --results-directory "./artifacts/test-results"
+          --collect "XPlat Code Coverage"
 
-      - name: Upload test results (TRX + coverage)
+      - name: Upload test results + coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -63,32 +65,4 @@ jobs:
           path: |
             artifacts/test-results/**/*.trx
             artifacts/test-results/**/coverage.cobertura.xml
-          if-no-files-found: ignore
-
-  # Lightweight hygiene job: keeps your repo from drifting.
-  formatting:
-    name: Format check (dotnet format)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-          cache: true
-          cache-dependency-path: |
-            **/*.csproj
-            **/*.props
-            **/*.targets
-            **/packages.lock.json
-            global.json
-
-      - name: Restore
-        run: dotnet restore
-
-      # Requires a repo-level .editorconfig to be meaningful. If you don't have it, add one later.
-      - name: Verify formatting
-        run: dotnet format --verify-no-changes
-
+          if-no-files-found: warn

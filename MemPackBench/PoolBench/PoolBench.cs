@@ -83,7 +83,7 @@ public class PoolBench
 
     [Benchmark]
     public PackedStringPool Deserialize_PackedPool_MemoryPack() => MemoryPackSerializer.Deserialize<PackedStringPool>(_serMemPackPool)!;
-    
+
     [Benchmark]
     public string[] Deserialize_StringArray_CustomBinary() => Ser.BytesToStringArray(_serStringArray);
 

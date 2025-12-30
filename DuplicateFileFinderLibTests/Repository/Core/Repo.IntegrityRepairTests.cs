@@ -176,9 +176,9 @@ public sealed class RepoIntegrityRepairTests
 
         await WriteMpAsync(Path.Combine(rootsDir, "1.mp"),
             new ScanRootSnapshotV2
-        {
-            ScanRootId = 1,
-            StringPool = pool,
+            {
+                ScanRootId = 1,
+                StringPool = pool,
                 Dirs =
                 [
                     new DirRecordV2 { DirId = 111, ParentDirId = -1, NameStrIdx = 0, LastSeenScanSequence = 101 }
@@ -188,9 +188,9 @@ public sealed class RepoIntegrityRepairTests
 
         await WriteMpAsync(Path.Combine(rootsDir, "2.mp"),
             new ScanRootSnapshotV2
-        {
-            ScanRootId = 2,
-            StringPool = pool,
+            {
+                ScanRootId = 2,
+                StringPool = pool,
                 Dirs =
                 [
                     new DirRecordV2 { DirId = 222, ParentDirId = -1, NameStrIdx = 0, LastSeenScanSequence = 102 }
@@ -284,7 +284,7 @@ public sealed class RepoIntegrityRepairTests
             await repo.DisposeAsync();
         }
     }
-    
+
     [Fact]
     public async Task RepairMigratedRepoAsync_FillsMissingScanRootDirId_FromSnapshotRootDir()
     {
@@ -308,8 +308,8 @@ public sealed class RepoIntegrityRepairTests
         var metaFile = new RepoMetaFile
         {
             Meta = meta,
-            ScanRoots = [ root ],
-            ScanRuns = [ run ]
+            ScanRoots = [root],
+            ScanRuns = [run]
         };
 
         await WriteMpAsync(Path.Combine(repoDir, "repo.mp"), metaFile);
@@ -354,7 +354,7 @@ public sealed class RepoIntegrityRepairTests
             await repo.DisposeAsync();
         }
     }
-    
+
     // ---------------- helpers ----------------
 
     private static RepoMeta NewMeta(string repoDir) => new RepoMeta
@@ -394,7 +394,7 @@ public sealed class RepoIntegrityRepairTests
 
         return new PackedStringPool(data, offsets);
     }
-    
+
     private static ScanRun NewRun(long scanRootId, long seq, string rootPath, ScanRunStatus status)
         => new ScanRun
         {

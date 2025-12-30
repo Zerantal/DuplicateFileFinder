@@ -4,4 +4,4 @@ namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
 public readonly record struct ScanOptions(
     bool StartFresh = false,
-    HashPolicyMode HashPolicy = HashPolicyMode.Default );
+    HashPolicyMode HashPolicy = HashPolicyMode.Default);

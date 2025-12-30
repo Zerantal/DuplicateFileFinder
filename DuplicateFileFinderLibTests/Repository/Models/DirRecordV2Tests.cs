@@ -51,7 +51,7 @@ public sealed class DirRecordV2Tests
         for (int i = 0; i < originals.Length; i++)
             AssertDirEqual(originals[i], clones[i]);
     }
-    
+
     // NOTE: DirRecordV2 implements IEquatable based on Id only.
     // These assertions verify full field roundtrip (stronger than Equals()).
     private static void AssertDirEqual(in DirRecordV2 a, in DirRecordV2 b)
@@ -65,6 +65,6 @@ public sealed class DirRecordV2Tests
         Assert.Equal(a.ModifiedTicks, b.ModifiedTicks);
         Assert.Equal(a.CreatedTicks, b.CreatedTicks);
     }
-    
-    
+
+
 }

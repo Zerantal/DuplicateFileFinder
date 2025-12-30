@@ -47,7 +47,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void UpsertDir_WhenDirIdAlreadyExists_UpdatesExistingRecord()
     {
-        var repo = new CapturingRepo {NextDirId = 1000, NextFileId = 2000, NextRunId = 3000};
+        var repo = new CapturingRepo { NextDirId = 1000, NextFileId = 2000, NextRunId = 3000 };
         var buf = new MutationBuffer(repo, scanSequence: 5);
 
         var id = buf.UpsertDir(new DirScanInput
@@ -88,7 +88,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void UpsertFile_WhenFileIdNotProvided_AllocatesId_AndAddsKey()
     {
-        var repo = new CapturingRepo {NextDirId = 1000, NextFileId = 2000, NextRunId = 3000};
+        var repo = new CapturingRepo { NextDirId = 1000, NextFileId = 2000, NextRunId = 3000 };
         var scanSeq = 88L;
         var buf = new MutationBuffer(repo, scanSeq);
 
@@ -121,7 +121,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void UpsertFile_WhenFileIdAlreadyExists_UpdatesRecord_AndKeyMapIsUpdated()
     {
-        var repo = new CapturingRepo{NextDirId = 1, NextFileId = 1, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 1, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         // Insert with known ID and name "a.txt"
@@ -167,7 +167,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void ApplyFileHash_WhenFileExists_UpdatesHashAndStatus()
     {
-        var repo = new CapturingRepo {NextDirId = 1, NextFileId = 1, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 1, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 9);
 
         buf.UpsertFile(new FileScanInput
@@ -196,7 +196,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void ApplyFileHash_WhenFileMissing_CreatesErrorEntry_WithGivenHash()
     {
-        var repo = new CapturingRepo{NextDirId= 1, NextFileId= 100, NextRunId= 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 100, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         var h = new HashKey(Enumerable.Repeat((byte)7, 16).ToArray());
@@ -215,7 +215,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void ApplyFileError_WhenFileExists_SetsStatusError_AndErrorMessage()
     {
-        var repo = new CapturingRepo{NextDirId = 1, NextFileId = 1, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 1, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         buf.UpsertFile(new FileScanInput
@@ -243,7 +243,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void ApplyFileError_WhenFileMissing_CreatesErrorEntry_WithNotComputedHash()
     {
-        var repo = new CapturingRepo{NextDirId = 1, NextFileId = 500, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 500, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         buf.ApplyFileError(dirId: 9, name: "missing.bin", errorMessage: "no access");
@@ -261,7 +261,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void BuildSnapshotV2_FiltersOutStatusNone_ForDirsAndFiles()
     {
-        var repo = new CapturingRepo{NextDirId = 1, NextFileId = 1, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 1, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         buf.UpsertDir(new DirScanInput
@@ -324,7 +324,7 @@ public sealed class MutationBufferTests
     [Fact]
     public void FileKeyComparer_UsesPathComparer_ForNameEquality()
     {
-        var repo = new CapturingRepo{NextDirId = 1, NextFileId = 1, NextRunId = 1};
+        var repo = new CapturingRepo { NextDirId = 1, NextFileId = 1, NextRunId = 1 };
         var buf = new MutationBuffer(repo, scanSequence: 1);
 
         buf.UpsertFile(new FileScanInput
@@ -363,7 +363,7 @@ public sealed class MutationBufferTests
         // At least one file should have the updated hash
         Assert.Contains(snap.Files, f => f.Hash.Equals(h));
     }
-    
+
     [Fact]
     public void DrainCheckpointSnapshot_MutateDrainMutateDrain_NoDuplication()
     {

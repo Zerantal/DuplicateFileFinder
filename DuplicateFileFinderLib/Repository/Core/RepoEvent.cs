@@ -6,7 +6,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public abstract record RepoEvent
 {
-    public long Generation      { get; init; }
+    public long Generation { get; init; }
 }
 
 // Initial bootstrap / “opened at current state”
@@ -26,6 +26,6 @@ public sealed record ScanRunFinalisedEvent : RepoEvent
 public sealed record ScanRootSnapshotCommittedEvent : RepoEvent
 {
     public required long ScanRootId { get; init; }
-    
+
     public required RepoSnapshotView RepoSnapshotView { get; init; }
 }

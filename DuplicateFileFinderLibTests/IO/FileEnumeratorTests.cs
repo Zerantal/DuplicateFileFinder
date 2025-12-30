@@ -13,7 +13,7 @@ namespace DuplicateFileFinderLibTests.IO;
 public sealed class FileEnumeratorTests : IDisposable
 {
     private readonly TempFsFixture _fs = new();
-    
+
     public void Dispose()
     {
         _fs.Dispose();
@@ -54,22 +54,22 @@ public sealed class FileEnumeratorTests : IDisposable
         // No exception and usually empty due to fast short-circuit
         Assert.NotNull(list);
     }
-    
+
     [Fact]
     public void ZeroLengthRegularFile_IsIncluded_OnLinux()
     {
         if (!OperatingSystem.IsLinux())
             return;
-        
+
         var emptyFileName = _fs.File("empty.bin", []);
-    
+
         var sut = new FileEnumerator();
-        var list =  new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
-        
+        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
+
         // zero-length regular file should be present
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == emptyFileName);
     }
-    
+
     [Fact]
     public void ScanLocation_SkipsSymlinkedDirectories_WhenPossible()
     {
@@ -139,7 +139,7 @@ public sealed class FileEnumeratorTests : IDisposable
         if (made)
             Assert.DoesNotContain(list, e => !e.IsDirectory && e.FullPath == fifo);
     }
-    
+
     private static bool TryMkFifo(string path)
     {
         try

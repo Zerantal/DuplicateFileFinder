@@ -17,7 +17,7 @@ public sealed partial class DuplicateSetRow : ObservableObject
         RepresentativeName = _files.Count > 0 ? _files[0].Name : string.Empty;
         RebuildItems();
     }
-    
+
     public int Count => _files.Count;
     public long TotalBytes => _files.Sum(f => f.FileRecord.Size);
 
@@ -25,14 +25,14 @@ public sealed partial class DuplicateSetRow : ObservableObject
     public string RepresentativeName { get; }
 
     public IReadOnlyList<FileItem> Items => _items;
-    
+
     private void RebuildItems()
     {
         _items.AddRange(_files.Select(r =>
             new FileItem(
                 r.FileRecord.FileId,
                 r.Name,
-                r.pathResolver(), 
+                r.pathResolver(),
                 r.FileRecord.Size,
                 new DateTimeOffset(r.FileRecord.ModifiedTicks, TimeSpan.Zero))));
     }

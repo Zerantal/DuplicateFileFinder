@@ -28,7 +28,7 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var splashVm  = new SplashViewModel();
+            var splashVm = new SplashViewModel();
             var splashWin = new SplashWindow { DataContext = splashVm };
 
             desktop.MainWindow = splashWin;
@@ -40,7 +40,7 @@ public partial class App : Application
 
         base.OnFrameworkInitializationCompleted();
     }
-    
+
     private async Task LoadRepoAndShowMainWindowAsync(
         IClassicDesktopStyleApplicationLifetime desktop,
         Window splashWindow,
@@ -53,14 +53,14 @@ public partial class App : Application
             // Let the splash actually render first
             await Task.Yield();
 
-            splashVm.Message    = "Opening repository…";
+            splashVm.Message = "Opening repository…";
             splashVm.SubMessage = "Please wait while we load data and run integrity checks.";
 
             var appName = "DuplicateFileFinder";
-            var appDir  = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            var appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 appName);
             var repoDir = Path.Combine(appDir, "repo");
-            
+
             mainVm = await MainWindowViewModel.CreateMainWindowAsync(repoDir);
             if (mainVm == null)
                 throw new InvalidOperationException("Failed to create MainWindowViewModel.");
@@ -70,7 +70,7 @@ public partial class App : Application
             // Show a friendly error on the splash window; you can add Retry/Exit buttons if you like
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                splashVm.Message    = "Failed to open repository";
+                splashVm.Message = "Failed to open repository";
                 splashVm.SubMessage = ex.Message;
             });
 

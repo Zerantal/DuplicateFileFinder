@@ -114,19 +114,19 @@ public sealed partial class Repo
 
                 var root = new ScanRoot
                 {
-                    RootId        = run.ScanRootId,
+                    RootId = run.ScanRootId,
                     RootPath = canonicalRootPath,
-                    DirId         = dirId,
-                    CreatedAt     = run.StartedAt,
+                    DirId = dirId,
+                    CreatedAt = run.StartedAt,
                     LastScannedAt = run.FinishedAt ?? run.StartedAt,
 
-                    VolumeId      = null,
-                    VolumeLabel   = null,
+                    VolumeId = null,
+                    VolumeLabel = null,
                     DisplayName = null,
-                    IsRotational  = null,
+                    IsRotational = null,
                     FileSystemType = null,
-                    DevicePath    = null,
-                    DeviceModel   = null,
+                    DevicePath = null,
+                    DeviceModel = null,
                     VolumePath = null,
                     IsDeleted = false,
                     DeletedAtUtc = null
@@ -184,7 +184,7 @@ public sealed partial class Repo
 
                 if (keptRuns.Count != _scanRuns.Count)
                 {
-                    _scanRuns    = keptRuns;
+                    _scanRuns = keptRuns;
                     _scanRunIndex.Clear();
                     foreach (var run in keptRuns)
                         _scanRunIndex[run.ScanSequence] = run;
@@ -210,7 +210,7 @@ public sealed partial class Repo
             }
 
             // 2e) Deduplicate non-deleted roots by (VolumePath, RootPath)
-            var liveRoots    = _scanRoots.Values.Where(r => !r.IsDeleted).ToList();
+            var liveRoots = _scanRoots.Values.Where(r => !r.IsDeleted).ToList();
             var deletedRoots = _scanRoots.Values.Where(r => r.IsDeleted).ToList();
 
             var grouped = liveRoots
@@ -256,7 +256,7 @@ public sealed partial class Repo
             // Remap ScanRuns to canonical root ids
             if (remap.Count > 0)
             {
-                var newRuns     = new List<ScanRun>(_scanRuns.Count);
+                var newRuns = new List<ScanRun>(_scanRuns.Count);
                 foreach (var run in _scanRuns)
                 {
                     if (remap.TryGetValue(run.ScanRootId, out var newId))
@@ -265,12 +265,12 @@ public sealed partial class Repo
                         newRuns.Add(run);
                 }
 
-                _scanRuns     = newRuns;
+                _scanRuns = newRuns;
                 _scanRunIndex.Clear();
                 foreach (var run in newRuns)
                     _scanRunIndex[run.ScanSequence] = run;
             }
-            
+
             // Add back deleted roots unchanged.
             foreach (var r in deletedRoots)
                 canonical[r.RootId] = r;
@@ -309,11 +309,11 @@ public sealed partial class Repo
             foreach (var file in Directory.GetFiles(rootsDirPath, "*.mp"))
             {
                 ct.ThrowIfCancellationRequested();
-                
+
                 var name = Path.GetFileNameWithoutExtension(file);
                 if (!long.TryParse(name, out var id))
                     continue;
-                
+
                 if (!validRootIds.Contains(id))
                 {
                     try { File.Delete(file); } catch { /* tolerate */ }
@@ -367,7 +367,7 @@ public sealed partial class Repo
 
         return firstRoot;
     }
-    
+
     private sealed class VolumeRootKeyComparer : IEqualityComparer<(string VolumePath, string RootPath)>
     {
         public static readonly VolumeRootKeyComparer Ordinal = new(StringComparer.Ordinal);

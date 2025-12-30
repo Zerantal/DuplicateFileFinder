@@ -92,7 +92,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     // A callback that the owning viewmodel can set to remove this node
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
-    
+
     public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; set; }
 
     public bool IsExpanded
@@ -125,7 +125,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     }
 
     internal void ClearChildren() => Children.Clear();
-    
+
 
     [RelayCommand]
     private async Task FullRescanAsync()
@@ -139,12 +139,12 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     [RelayCommand]
     private async Task RemoveRootAsync()
     {
-        if (_isDummy ||  ScanRootId < 0 || _scanCoordinator is null)
+        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null)
             return;
 
         if (!IsScanRoot)
             return;
-        
+
         await _scanCoordinator.RemoveScanRoot(ScanRootId);
         OnRootRemoved?.Invoke(this);
     }

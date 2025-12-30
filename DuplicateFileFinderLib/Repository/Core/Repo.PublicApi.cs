@@ -36,9 +36,9 @@ public sealed partial class Repo
             {
                 return _scanRuns.ToArray();
             }
-        }    
+        }
     }
-    
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
@@ -119,13 +119,13 @@ public sealed partial class Repo
             // 3) Bump generation and capture a coherent view so index plugins can rebuild
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };
-                MarkMetaDirty_NoLock();
+            MarkMetaDirty_NoLock();
 
             snapshotView = GetRepoSnapshotView();
         }
 
         // Persist outside lock; RepoStore is gated.
-            await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
 
         // Removing a scan root should also remove any resumable scan checkpoints for it.
         await RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct).ConfigureAwait(false);

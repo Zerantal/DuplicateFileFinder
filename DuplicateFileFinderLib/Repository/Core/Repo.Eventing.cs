@@ -14,7 +14,7 @@ public sealed partial class Repo
             _eventSinks.Add(sink);
         }
     }
-    
+
     public void RegisterEventSinkWithBootstrap(IRepoEventSink sink)
     {
         BootstrapEvent bootstrap;

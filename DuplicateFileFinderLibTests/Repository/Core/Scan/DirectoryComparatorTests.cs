@@ -18,10 +18,10 @@ public sealed class DirectoryComparatorTests
         // Baseline: 2 dirs + 2 files under parent dirId=50
         var view = new TestSnapshotViewBuilder()
             .Dir(dirId: 50, parentDirId: -1, status: ScanEntryStatus.Enumerated, name: "ROOT", lastSeenScanSequence: 1) // ignored by BaselineIndex (parent < 0)
-            .Dir(dirId: 101, parentDirId: 50, status: ScanEntryStatus.Enumerated, name: "D1",   lastSeenScanSequence: 1)
-            .Dir(dirId: 102, parentDirId: 50, status: ScanEntryStatus.Enumerated, name: "D2",   lastSeenScanSequence: 2)
-            .File(fileId: 201, dirId: 50, status: ScanEntryStatus.Enumerated, name: "F1",       lastSeenScanSequence: 3)
-            .File(fileId: 202, dirId: 50, status: ScanEntryStatus.Deleted,    name: "F2",       lastSeenScanSequence: 4)
+            .Dir(dirId: 101, parentDirId: 50, status: ScanEntryStatus.Enumerated, name: "D1", lastSeenScanSequence: 1)
+            .Dir(dirId: 102, parentDirId: 50, status: ScanEntryStatus.Enumerated, name: "D2", lastSeenScanSequence: 2)
+            .File(fileId: 201, dirId: 50, status: ScanEntryStatus.Enumerated, name: "F1", lastSeenScanSequence: 3)
+            .File(fileId: 202, dirId: 50, status: ScanEntryStatus.Deleted, name: "F2", lastSeenScanSequence: 4)
             .Build();
 
         var baseline = new BaselineIndex(view);

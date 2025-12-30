@@ -155,7 +155,7 @@ internal sealed class BaselineIndex
         // Only trace first N collisions to avoid log spam.
         if (collisions <= BaselineCollisionTraceLimit)
         {
-            
+
             Log.Trace(
                 $"Baseline collision ({kind}): container={parentOrDirId} name='{name}' " +
                 $"keptId={kept.id} keptStatus={kept.status} keptLastSeen={kept.lastSeen} " +

@@ -19,7 +19,7 @@ public sealed class FileTreeMapElement : RepoTreeMapElement
         ScanRoot = scanRoot;
         Value = value;
     }
-    
+
     public long SizeBytes => (long)Value;
 
     // If I ever decide to show labels for big items.

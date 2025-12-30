@@ -59,7 +59,7 @@ public sealed partial class Repo
         MarkMetaDirty_NoLock();
         return id;
     }
-    
+
     [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
     private long AllocateRootId_NoLock()
     {
@@ -68,12 +68,12 @@ public sealed partial class Repo
         MarkMetaDirty_NoLock();
         return id;
     }
-    
+
     async Task IRepoInternal.MarkScanCompletedAsync(long sequence, CancellationToken ct)
     {
         ScanRun updated;
         long generation;
-        
+
         lock (_sync)
         {
             if (!_scanRunIndex.TryGetValue(sequence, out var run))
@@ -96,7 +96,7 @@ public sealed partial class Repo
             _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
         }
-    
+
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
         PublishEvent(new ScanRunFinalisedEvent { Generation = generation, Run = updated });
     }
@@ -105,7 +105,7 @@ public sealed partial class Repo
     {
         long generation;
         ScanRun updated;
-        
+
         lock (_sync)
         {
             if (!_scanRunIndex.TryGetValue(sequence, out var run))
@@ -134,15 +134,15 @@ public sealed partial class Repo
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
         PublishEvent(new ScanRunFinalisedEvent { Generation = generation, Run = updated });
     }
-    
+
     // Find existing ScanRoot by canonical path or create a new one.
     private ScanRoot FindOrCreateScanRoot_NoLock(VolumeInfo? volume, string relativeRootPath)
-    {   
+    {
         relativeRootPath = PathUtils.NormalizePath(relativeRootPath);
 
         string? volumeId = volume?.VolumeId;
         string? volumePath = volume?.VolumePath; // or however you store it
-        
+
         ScanRoot? existing = null;
 
         if (!string.IsNullOrEmpty(volumeId))
@@ -223,7 +223,7 @@ public sealed partial class Repo
             // Capture a coherent view that corresponds to this in-memory state.
             snapshotView = GetRepoSnapshotView();
         }
-            
+
         // Persist only the changed scanroot snapshot (RepoStore is gated + tmp unique)
         await PersistScanRootSnapshotV2Async(snapshot, ct).ConfigureAwait(false);
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
@@ -240,7 +240,7 @@ public sealed partial class Repo
     {
         await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
     }
-    
+
     public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
         => RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct);
 }

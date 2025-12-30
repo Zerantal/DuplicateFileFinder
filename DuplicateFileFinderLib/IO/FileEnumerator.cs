@@ -22,7 +22,7 @@ public interface IFileEnumerator
 public sealed class FileEnumerator : IFileEnumerator
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    
+
     private static readonly EnumerationOptions EnumOpts = new()
     {
         IgnoreInaccessible = true,
@@ -132,9 +132,9 @@ public sealed class FileEnumerator : IFileEnumerator
     private void TryFillBufferFallback(string dir, List<FsEntry> buffer, CancellationToken token)
     {
         buffer.Clear();
-        
+
         Log.Info("Attempting fallback directory enumeration of {path}", dir);
-        
+
         // Step 1: directories
         string[] dirs;
         try
@@ -144,7 +144,7 @@ public sealed class FileEnumerator : IFileEnumerator
         catch (Exception ex)
         {
             Log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
-            return; 
+            return;
         }
 
         foreach (var d in dirs)
@@ -158,7 +158,7 @@ public sealed class FileEnumerator : IFileEnumerator
                 topLevelDirectoryName ?? d,
                 0,
                 di.CreationTimeUtc,
-                di.LastWriteTimeUtc ));
+                di.LastWriteTimeUtc));
         }
 
         // Step 2: files
@@ -192,14 +192,14 @@ public sealed class FileEnumerator : IFileEnumerator
             catch (Exception ex)
             {
                 Log.Warn(ex, "Skipping file {path}", f);
-                
+
                 // Some NTFS special files throw or report -1; skip them
                 continue;
             }
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, filename,  len, creationTimeUtc, modifiedTimeUtc));
+                buffer.Add(new FsEntry(false, f, filename, len, creationTimeUtc, modifiedTimeUtc));
         }
     }
 

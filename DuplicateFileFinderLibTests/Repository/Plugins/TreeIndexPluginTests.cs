@@ -114,7 +114,7 @@ public sealed class TreeIndexPluginTests
                 });
 
                 await plugin1.WhenReadyAsync(TestContext.Current.CancellationToken);
-                
+
                 var root = new DirHandle(1, 0);
                 var subA = new DirHandle(1, 1);
                 var fileSubA = new FileHandle(1, 0);

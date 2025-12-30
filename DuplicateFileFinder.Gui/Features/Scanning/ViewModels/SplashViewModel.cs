@@ -6,7 +6,7 @@ namespace DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
 
 public sealed class SplashViewModel : ReactiveObject
 {
-    private string _message    = "Loading repository…";
+    private string _message = "Loading repository…";
     private string _subMessage = "Scanning existing data and applying migrations";
 
     public string Message

@@ -26,7 +26,7 @@ public class FileDirIndexStateSerializationBench
         _ = typeof(FileDirIndexStateV1);
         _ = typeof(FileDirIndexStateV2);
     }
-    
+
     private const int FileCount = 3_000_000;
     private const int DirCount = 600_000;
 

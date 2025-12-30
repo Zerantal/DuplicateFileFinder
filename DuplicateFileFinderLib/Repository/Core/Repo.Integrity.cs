@@ -46,12 +46,12 @@ public sealed partial class Repo
 
         lock (_sync)
         {
-            repoPath     = _repoPath;
+            repoPath = _repoPath;
             rootsDirPath = Path.Combine(_repoPath, "roots");
 
-            meta      = _meta;
+            meta = _meta;
             scanRoots = new Dictionary<long, ScanRoot>(_scanRoots);
-            scanRuns  = new List<ScanRun>(_scanRuns);
+            scanRuns = new List<ScanRun>(_scanRuns);
             scanRootSnapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
         }
 
@@ -79,7 +79,7 @@ public sealed partial class Repo
             try
             {
                 var metaBytes = File.ReadAllBytes(metaPath);
-                var metaFile  = MemoryPackSerializer.Deserialize<RepoMetaFile>(metaBytes);
+                var metaFile = MemoryPackSerializer.Deserialize<RepoMetaFile>(metaBytes);
                 if (metaFile is null)
                 {
                     issues.Add(new RepoIntegrityIssue
@@ -305,8 +305,8 @@ public sealed partial class Repo
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
-                    Code     = "ROOT_DUP_ROOTPATH",
-                    Message  = $"RootPath '{grp.Key}' has {grp.Count()} ScanRoots: {ids}."
+                    Code = "ROOT_DUP_ROOTPATH",
+                    Message = $"RootPath '{grp.Key}' has {grp.Count()} ScanRoots: {ids}."
                 });
             }
         }
@@ -322,8 +322,8 @@ public sealed partial class Repo
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
-                    Code     = "ROOT_UNUSED_NO_RUNS",
-                    Message  = $"ScanRoot {root.RootId} (rootPath={root.RootPath}) has no associated ScanRuns."
+                    Code = "ROOT_UNUSED_NO_RUNS",
+                    Message = $"ScanRoot {root.RootId} (rootPath={root.RootPath}) has no associated ScanRuns."
                 });
             }
         }
@@ -347,8 +347,8 @@ public sealed partial class Repo
                     issues.Add(new RepoIntegrityIssue
                     {
                         Severity = RepoIntegritySeverity.Warning,
-                        Code     = "ROOT_SNAPSHOT_BAD_NAME",
-                        Message  = $"Snapshot file '{fileName}' does not parse as a long root id.",
+                        Code = "ROOT_SNAPSHOT_BAD_NAME",
+                        Message = $"Snapshot file '{fileName}' does not parse as a long root id.",
                         FilePath = path
                     });
                 }
@@ -364,7 +364,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "ROOT_SNAPSHOT_MISSING",
-                    Message  = $"No per-root snapshot for ScanRoot {root.RootId} (rootPath={root.RootPath}).",
+                    Message = $"No per-root snapshot for ScanRoot {root.RootId} (rootPath={root.RootPath}).",
                 });
                 continue;
             }
@@ -373,7 +373,7 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
+                var snap = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
 
                 ValidateSnapshotV2(snap, path, issues);
             }
@@ -383,8 +383,8 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "ROOT_SNAPSHOT_DESERIALIZE_FAIL",
-                    Message   = $"Exception while deserializing snapshot {path} as ScanRootSnapshotV2: {ex.Message}",
-                    FilePath  = path,
+                    Message = $"Exception while deserializing snapshot {path} as ScanRootSnapshotV2: {ex.Message}",
+                    FilePath = path,
                     Exception = ex
                 });
             }
@@ -398,8 +398,8 @@ public sealed partial class Repo
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Info,
-                    Code     = "ROOT_SNAPSHOT_ORPHAN",
-                    Message  = $"Snapshot file {path} has no matching ScanRoot (id={id}) or root is deleted.",
+                    Code = "ROOT_SNAPSHOT_ORPHAN",
+                    Message = $"Snapshot file {path} has no matching ScanRoot (id={id}) or root is deleted.",
                     FilePath = path
                 });
             }
@@ -563,7 +563,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "ROOT_SNAPSHOT_DUP_DIR",
-                    Message  = $"Snapshot {filePath} contains duplicate dirId {d.DirId}.",
+                    Message = $"Snapshot {filePath} contains duplicate dirId {d.DirId}.",
                     FilePath = filePath
                 });
             }
@@ -613,7 +613,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = "ROOT_SNAPSHOT_FILE_DIR_MISSING",
-                    Message  = $"Snapshot {filePath} fileId {f.FileId} references missing dirId {f.DirId}.",
+                    Message = $"Snapshot {filePath} fileId {f.FileId} references missing dirId {f.DirId}.",
                     FilePath = filePath
                 });
             }
@@ -652,7 +652,7 @@ public sealed partial class Repo
         string rootsDirPath,
         CancellationToken ct)
     {
-        var dirs  = new Dictionary<long, DirEntry>();
+        var dirs = new Dictionary<long, DirEntry>();
         var files = new Dictionary<long, FileEntry>();
 
         // Per-root snapshots
@@ -662,7 +662,7 @@ public sealed partial class Repo
             {
                 ct.ThrowIfCancellationRequested();
                 var bytes = File.ReadAllBytes(path);
-                var snap  = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
+                var snap = MemoryPackSerializer.Deserialize<ScanRootSnapshotV2>(bytes);
 
                 foreach (var d in snap.Dirs)
                     dirs[d.DirId] = new DirEntry(snap.ScanRootId, d);
@@ -675,7 +675,7 @@ public sealed partial class Repo
         return new RebuiltStateV2 { Dirs = dirs, Files = files };
     }
 
-   
+
     private static void CompareState<TEntry>(
         string label,
         IDictionary<long, TEntry> inMemory,
@@ -691,7 +691,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Error,
                     Code = $"{label}_MISSING_IN_REBUILT",
-                    Message  = $"{label}: id {id} ({nameSelector(value)}) exists in memory but not in rebuilt state."
+                    Message = $"{label}: id {id} ({nameSelector(value)}) exists in memory but not in rebuilt state."
                 });
             }
         }
@@ -704,7 +704,7 @@ public sealed partial class Repo
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = $"{label}_ONLY_IN_REBUILT",
-                    Message  = $"{label}: id {id} ({nameSelector(value)}) exists only in rebuilt state."
+                    Message = $"{label}: id {id} ({nameSelector(value)}) exists only in rebuilt state."
                 });
             }
         }
