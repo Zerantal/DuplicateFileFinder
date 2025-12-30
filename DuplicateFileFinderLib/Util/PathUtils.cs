@@ -173,6 +173,7 @@ public static class PathUtils
             if (st.NeedTrailingSlash)
             {
                 if (pos == 0 || dst[pos - 1] != '/')
+                    // ReSharper disable once RedundantAssignment
                     dst[pos++] = '/';
             }
         });
@@ -207,6 +208,7 @@ public static class PathUtils
         public int[] SegLens { get; }
         public int SegCount { get; }
         public bool NeedTrailingSlash { get; }
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public bool IsWindows { get; } // kept for possible future tweaks; not used in the builder
     }
 

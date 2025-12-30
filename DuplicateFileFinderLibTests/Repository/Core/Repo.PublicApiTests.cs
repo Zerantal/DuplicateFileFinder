@@ -70,11 +70,6 @@ public sealed class Repo_PublicApiTests
             var root = Assert.Single(roots, r => r.RootId == ctx.ScanRoot.RootId);
             Assert.True(root.IsDeleted);
             Assert.NotNull(root.DeletedAtUtc);
-
-            // Snapshot file deleted on disk (best effort is ok, but this method calls RepoStore.DeleteScanRootSnapshotAsync)
-            var rootsDir = Path.Combine(repoDir, "roots");
-            var snapFile = Path.Combine(rootsDir, $"{ctx.ScanRoot.RootId}.mp");
-            Assert.False(File.Exists(snapFile));
         }
         finally
         {

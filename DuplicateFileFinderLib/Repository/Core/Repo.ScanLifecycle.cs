@@ -1,8 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+using DuplicateFileFinderLib.Util;
 
 namespace DuplicateFileFinderLib.Repository.Core;
 
@@ -57,7 +59,8 @@ public sealed partial class Repo
         MarkMetaDirty_NoLock();
         return id;
     }
-
+    
+    [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
     private long AllocateRootId_NoLock()
     {
         var id = _meta.NextScanRootId;
@@ -133,64 +136,74 @@ public sealed partial class Repo
     }
     
     // Find existing ScanRoot by canonical path or create a new one.
-    private ScanRoot FindOrCreateScanRoot_NoLock(string? volumePath, string relativeRootPath)
-    {
-        ScanRoot newRoot;
+    private ScanRoot FindOrCreateScanRoot_NoLock(VolumeInfo? volume, string relativeRootPath)
+    {   
+        relativeRootPath = PathUtils.NormalizePath(relativeRootPath);
+
+        string? volumeId = volume?.VolumeId;
+        string? volumePath = volume?.VolumePath; // or however you store it
         
-        lock (_sync)
+        ScanRoot? existing = null;
+
+        if (!string.IsNullOrEmpty(volumeId))
         {
-            foreach (var root in _scanRoots.Values.Where(r => !r.IsDeleted))
-            {
-                if (string.Equals(root.VolumePath, volumePath, StringComparison.Ordinal) &&
-                    string.Equals(root.RootPath, relativeRootPath, StringComparison.Ordinal))
-                {
-                    return root;
-                }
-            }
+            existing = _scanRoots.Values.FirstOrDefault(r =>
+                string.Equals(r.VolumeId, volumeId, StringComparison.Ordinal) &&
+                string.Equals(r.RootPath, relativeRootPath, StringComparison.Ordinal));
+        }
 
-            var now = DateTimeOffset.UtcNow;
+        // fallback to mathcing by volumePath instead of volumeId
+        existing ??= _scanRoots.Values.FirstOrDefault(r =>
+            string.Equals(r.VolumePath, volumePath, StringComparison.Ordinal) &&
+            string.Equals(r.RootPath, relativeRootPath, StringComparison.Ordinal));
 
-            newRoot = new ScanRoot
+        var now = DateTimeOffset.UtcNow;
+
+        if (existing is not null)
+        {
+            var updated = existing with
             {
-                RootId = AllocateRootId_NoLock(),
-                VolumePath = volumePath,
-                RootPath = relativeRootPath,
-                DirId = 0,
-                CreatedAt = now,
-                LastScannedAt = now,
-                VolumeId = null,
-                VolumeLabel = null,
-                IsRotational = null,
-                FileSystemType = null,
-                DevicePath = null,
-                DeviceModel = null,
                 IsDeleted = false,
-                DeletedAtUtc = null
+                DeletedAtUtc = null,
+                LastScannedAt = now,
+
+                VolumeId = volumeId ?? existing.VolumeId,
+                VolumePath = volumePath ?? existing.VolumePath,
+                VolumeLabel = volume?.Label ?? existing.VolumeLabel,
+                IsRotational = volume?.IsRotational ?? existing.IsRotational,
+                FileSystemType = volume?.FileSystemType ?? existing.FileSystemType,
+                DevicePath = volume?.DevicePath ?? existing.DevicePath,
+                DeviceModel = volume?.DeviceModel ?? existing.DeviceModel
             };
 
-            _scanRoots[newRoot.RootId] = newRoot;
+            _scanRoots[updated.RootId] = updated;
             MarkMetaDirty_NoLock();
+            return updated;
         }
-        
-        return newRoot;
+
+        var created = new ScanRoot
+        {
+            RootId = AllocateRootId_NoLock(),
+            VolumeId = volumeId,
+            VolumePath = volumePath,
+            RootPath = relativeRootPath,
+            DirId = 0,
+            CreatedAt = now,
+            LastScannedAt = now,
+            VolumeLabel = volume?.Label,
+            IsRotational = volume?.IsRotational,
+            FileSystemType = volume?.FileSystemType,
+            DevicePath = volume?.DevicePath,
+            DeviceModel = volume?.DeviceModel,
+            IsDeleted = false,
+            DeletedAtUtc = null
+        };
+
+        _scanRoots[created.RootId] = created;
+        MarkMetaDirty_NoLock();
+        return created;
     }
 
-    // Merge VolumeInfo into an existing ScanRoot. Caller must hold _sync.
-    private static ScanRoot UpdateScanRootFromVolume_NoLock(ScanRoot root, VolumeInfo volume)
-    {
-        // Use new values when provided; otherwise preserve existing ones.
-        return root with
-        {
-            VolumeId       = volume.VolumeId    ?? root.VolumeId,
-            VolumeLabel    = volume.Label       ?? root.VolumeLabel,
-            IsRotational   = volume.IsRotational ?? root.IsRotational,
-            FileSystemType = volume.FileSystemType ?? root.FileSystemType,
-            DevicePath     = volume.DevicePath,
-            DeviceModel    = volume.DeviceModel ?? root.DeviceModel,
-            LastScannedAt  = DateTimeOffset.UtcNow
-        };
-    }
-    
     Task IRepoInternal.CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
         => CommitScanRootSnapshotV2Async(snapshot, cancellationToken);
 

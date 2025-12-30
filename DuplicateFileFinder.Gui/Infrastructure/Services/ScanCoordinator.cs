@@ -1,6 +1,7 @@
-// Gui/Services/ScanCoordinator.cs
+// DuplicateFileFinder.Gui/Infrastructure/Services/ScanCoordinator.cs
 
 using Avalonia.Threading;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
 using NLog;
 using Dff = DuplicateFileFinderLib.Core;
@@ -9,12 +10,14 @@ using ScanProgressViewModel = DuplicateFileFinder.Gui.Features.Scanning.ViewMode
 namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
 public sealed class ScanCoordinator(
+    IRepoHost host,
     Dff.DuplicateFileFinder finder,
     IDialogService dialogService)
     : IScanCoordinator
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
     private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+    private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
     private readonly Dff.DuplicateFileFinder _finder = finder ?? throw new ArgumentNullException(nameof(finder));
 
     private CancellationTokenSource? _cts;
@@ -75,7 +78,6 @@ public sealed class ScanCoordinator(
                         progress,
                         _cts.Token)
                     .ConfigureAwait(false);
-                    
             }
             catch (OperationCanceledException)
             {
@@ -127,15 +129,8 @@ public sealed class ScanCoordinator(
 
     public Task RemoveScanRoot(long scanRootId)
     {
-        
-        // TODO:
-        // _finder.RemoveScanRoot(scanRootId);
-        //
-        // ScanCompleted?.Invoke(
-        //     this,
-        //     new ScanCompletedEventArgs(scanRootId.ToString(), false, null));
-
-        return Task.CompletedTask;
+        // Repo raises a generation change event; RepoHost will notify UI once plugins rebuild.
+        return _host.Repo.DeleteScanRootAsync(scanRootId);
     }
 
     public void CancelScan()

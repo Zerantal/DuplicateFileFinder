@@ -158,6 +158,11 @@ public static class TreeMapBuilder
             if (!_snapshot.Snapshots.TryGetValue(dir.ScanRootId, out var rootSnapshot))
                 return BuildMissingDirNode(dir);
 
+            var dirRec = rootSnapshot.Dirs[dir.Index];
+
+            if (dirRec.Status == ScanEntryStatus.Deleted)
+                return MakeDirLeafNode(dir, scanRoot, value: 0);
+
             var dirStats = _treeIndex.GetDirStats(dir);
             var dirValue = GetDirMetricValue(dirStats);
 
@@ -218,6 +223,18 @@ public static class TreeMapBuilder
             {
                 var child = children[i];
 
+                // Never include deleted directories in the treemap.
+                try
+                {
+                    var childRec = _snapshot.GetDirRecord(child);
+                    if (childRec.Status == ScanEntryStatus.Deleted)
+                        continue;
+                }
+                catch
+                {
+                    continue;
+                }
+
                 DirAggregateStats stats;
                 try { stats = _treeIndex.GetDirStats(child); }
                 catch { continue; }
@@ -247,17 +264,18 @@ public static class TreeMapBuilder
                 }
             }
 
-            if (pq.Count == 0) return;
+            // Extract kept, sort by value desc.
+            if (pq.Count > 0)
+            {
+                var kept = new List<(DirHandle Dir, double Value)>(pq.Count);
+                while (pq.TryDequeue(out var item, out _))
+                    kept.Add(item);
 
-            // Extract top K; heap gives smallest first so we collect then sort descending (size K only).
-            var kept = new List<(DirHandle Dir, double Value)>(pq.Count);
-            while (pq.TryDequeue(out var item, out _))
-                kept.Add(item);
-
-            kept.Sort((a, b) => b.Value.CompareTo(a.Value));
+                kept.Sort((a, b) => b.Value.CompareTo(a.Value));
             
-            for (var i = 0; i < kept.Count; i++)
-                childrenOut.Add(BuildDirNode(scanRoot, kept[i].Dir, parentDepth + 1));
+                for (int i = 0; i < kept.Count; i++)
+                    childrenOut.Add(BuildDirNode(scanRoot, kept[i].Dir, parentDepth + 1));
+            }
 
             // "Other" collapsed node
             if (otherCount > 0 && otherValue > 0)
@@ -298,6 +316,8 @@ public static class TreeMapBuilder
                 FileRecordV2 f;
                 try { f = files[fh.Index]; }
                 catch { continue; }
+
+                if (f.Status == ScanEntryStatus.Deleted) continue;
 
                 var size = f.Size;
                 if (size <= 0) continue;
@@ -356,7 +376,6 @@ public static class TreeMapBuilder
                 });
             }
         }
-
 
         private TreeMapNode<ITreeMapNodeElement> BuildFileNode(
             ScanRoot scanRoot,

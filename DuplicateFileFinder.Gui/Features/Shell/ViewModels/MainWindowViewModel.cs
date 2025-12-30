@@ -1,5 +1,6 @@
-// ViewModels/MainWindowViewModel.cs
+// DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
@@ -36,8 +37,19 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         _scanCoordinator.ScanCompleted += (_, _) =>
         {
+            // The scan body has finished; indexes may still be rebuilding asynchronously.
             IsScanning = false;
-            Duplicates.LoadFromRepo();
+        };
+
+        host.IndexesRebuilt += (_, _) =>
+        {
+            // Only reload once the index plugins have processed the corresponding generation.
+            if (Dispatcher.UIThread.CheckAccess())
+                Duplicates.LoadFromRepo();
+            else
+            {
+                Dispatcher.UIThread.InvokeAsync(() => Duplicates.LoadFromRepo());
+            }
         };
     }
 
@@ -77,17 +89,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             var host = await RepoHost.OpenAsync(repoDir);
 
-            // // Integrity check still works the same
-            // var issues = repo.ValidateIntegrity();
-            // foreach (var issue in issues)
-            //     Console.WriteLine(issue.ToString());
-
             var dialogService = new DialogService();
             var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(host);
-            var scanCoordinator = new ScanCoordinator(scanEngine, dialogService);
+            var scanCoordinator = new ScanCoordinator(host, scanEngine, dialogService);
         
             mainWindowVm = new MainWindowViewModel(host, scanCoordinator, dialogService);
-
         }
         catch (Exception e)
         {
