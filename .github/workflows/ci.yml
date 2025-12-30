@@ -58,7 +58,7 @@ jobs:
           --no-build
           --logger "trx;LogFileName=test_results.trx"
           --results-directory "./artifacts/test-results"
-          --RunConfiguration.FailIfNoTests=true
+          -- RunConfiguration.FailIfNoTests=true
 
 
 
