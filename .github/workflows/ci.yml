@@ -58,6 +58,8 @@ jobs:
           --no-build
           --logger "trx;LogFileName=test_results.trx"
           --results-directory "./artifacts/test-results"
+          --RunConfiguration.FailIfNoTests=true
+
 
 
       - name: Upload test results + coverage
