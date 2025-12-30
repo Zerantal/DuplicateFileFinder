@@ -1,3 +1,5 @@
+// DuplicateFileFinderLib/Repository/Plugins/ChannelRepoPlugin.cs
+
 using System.Threading.Channels;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
@@ -13,6 +15,10 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
 
     private readonly TaskCompletionSource _readyTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private readonly Lock _processedSync = new();
+    private long _lastProcessedGeneration;
+    private readonly List<GenerationWaiter> _generationWaiters = new();
 
     protected ChannelRepoPlugin(int capacity = 1024)
     {
@@ -51,7 +57,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
         }
         catch (OperationCanceledException)
         {
-            // TODO: graceful shutdown
+            // shutdown
         }
     }
     
@@ -78,6 +84,10 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
                 }
                 break;
         }
+
+        // Record that we have fully processed this event's generation.
+        // This enables callers (e.g., RepoHost) to wait until indexes have rebuilt.
+        UpdateLastProcessedGeneration(evt.Generation);
 
         return ValueTask.CompletedTask;
     }
@@ -109,10 +119,84 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
         await _readyTcs.Task.ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Wait until this plugin has processed at least the specified repo generation.
+    /// Intended for coordination (e.g., UI refresh only after indexes are rebuilt).
+    /// </summary>
+    public Task WhenProcessedGenerationAsync(long generation, CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _lastProcessedGeneration) >= generation)
+            return Task.CompletedTask;
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        GenerationWaiter waiter = new(generation, tcs);
+
+        lock (_processedSync)
+        {
+            if (_lastProcessedGeneration >= generation)
+                return Task.CompletedTask;
+
+            _generationWaiters.Add(waiter);
+        }
+
+        if (!ct.CanBeCanceled)
+            return tcs.Task;
+
+        return WaitWithCancellationAsync(waiter, ct);
+    }
+
+    private async Task WaitWithCancellationAsync(GenerationWaiter waiter, CancellationToken ct)
+    {
+        await using var reg = ct.Register(() => waiter.Tcs.TrySetCanceled(ct));
+        await waiter.Tcs.Task.ConfigureAwait(false);
+    }
+
+    private void UpdateLastProcessedGeneration(long generation)
+    {
+        List<GenerationWaiter>? toRelease = null;
+
+        lock (_processedSync)
+        {
+            if (generation <= _lastProcessedGeneration)
+                return;
+
+            _lastProcessedGeneration = generation;
+
+            if (_generationWaiters.Count == 0)
+                return;
+
+            for (var i = _generationWaiters.Count - 1; i >= 0; i--)
+            {
+                var waiter = _generationWaiters[i];
+                if (waiter.TargetGeneration <= generation)
+                {
+                    toRelease ??= new List<GenerationWaiter>();
+                    toRelease.Add(waiter);
+                    _generationWaiters.RemoveAt(i);
+                }
+            }
+        }
+
+        if (toRelease is null)
+            return;
+
+        foreach (var waiter in toRelease)
+            waiter.Tcs.TrySetResult();
+    }
+
+    private readonly record struct GenerationWaiter(long TargetGeneration, TaskCompletionSource Tcs);
+
     public async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();
         _channel.Writer.TryComplete();
         await _workerTask.ConfigureAwait(false);
+
+        lock (_processedSync)
+        {
+            foreach (var waiter in _generationWaiters)
+                waiter.Tcs.TrySetCanceled();
+            _generationWaiters.Clear();
+        }
     }
 }

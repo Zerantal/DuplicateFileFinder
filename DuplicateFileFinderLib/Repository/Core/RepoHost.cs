@@ -1,3 +1,6 @@
+// DuplicateFileFinderLib/Repository/Core/RepoHost.cs
+
+using System.Threading.Channels;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -13,6 +16,8 @@ public sealed class RepoHost : IRepoHost
     
     public IFileDirReadModel FileDirIndex { get; }
 
+    public event EventHandler<RepoIndexesRebuiltEventArgs>? IndexesRebuilt;
+
     // Track disposables in deterministic order
     private readonly List<IAsyncDisposable> _disposables = new();
 
@@ -22,7 +27,6 @@ public sealed class RepoHost : IRepoHost
         FileDirIndex = fileDirIndex;
         HashIndex = hashIndex;
         TreeIndex = treeIndex;
-        
     }
 
     public static async Task<RepoHost> OpenAsync(string repoDir, CancellationToken ct = default)
@@ -50,7 +54,21 @@ public sealed class RepoHost : IRepoHost
 
         // 4. Build host
         var host = new RepoHost(repo, fileDirIndex, hashIndex, treeIndex);
+
+        // 5. Index rebuild coordination (raise IndexesRebuilt only after all plugins processed generation)
+        var coordinator = new IndexRebuildCoordinator(
+            fileDirIndex,
+            hashIndex,
+            treeIndex,
+            (gen, scanRootId) => host.IndexesRebuilt?.Invoke(host, new RepoIndexesRebuiltEventArgs(gen, scanRootId)));
+
+        repo.RegisterEventSink(coordinator);
+        host._disposables.Add(coordinator);
+
+        // Dispose plugins + repo
+        host._disposables.Add(fileDirIndex);
         host._disposables.Add(hashIndex);
+        host._disposables.Add(treeIndex);
         if (repo is IAsyncDisposable asyncDisp)
             host._disposables.Add(asyncDisp);
 
@@ -70,6 +88,79 @@ public sealed class RepoHost : IRepoHost
             {
                 // swallow/log
             }
+        }
+    }
+
+    private sealed class IndexRebuildCoordinator : IRepoEventSink, IAsyncDisposable
+    {
+        private readonly FileDirIndexPlugin _fileDir;
+        private readonly HashIndexPlugin _hash;
+        private readonly TreeIndexPlugin _tree;
+        private readonly Action<long, long?> _onIndexesRebuilt;
+
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Channel<RepoEvent> _channel;
+        private readonly Task _worker;
+
+        public IndexRebuildCoordinator(
+            FileDirIndexPlugin fileDir,
+            HashIndexPlugin hash,
+            TreeIndexPlugin tree,
+            Action<long, long?> onIndexesRebuilt,
+            int capacity = 256)
+        {
+            _fileDir = fileDir;
+            _hash = hash;
+            _tree = tree;
+            _onIndexesRebuilt = onIndexesRebuilt;
+
+            var options = new BoundedChannelOptions(capacity)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleWriter = false,
+                SingleReader = true
+            };
+            _channel = Channel.CreateBounded<RepoEvent>(options);
+            _worker = Task.Run(ProcessLoopAsync);
+        }
+
+        public void Post(RepoEvent evt)
+        {
+            // Must be non-blocking
+            _channel.Writer.TryWrite(evt);
+        }
+
+        private async Task ProcessLoopAsync()
+        {
+            try
+            {
+                await foreach (var evt in _channel.Reader.ReadAllAsync(_cts.Token).ConfigureAwait(false))
+                {
+                    if (evt is not ScanRootSnapshotCommittedEvent committed)
+                        continue;
+
+                    var gen = committed.Generation;
+                    var scanRootId = committed.ScanRootId;
+
+                    // Wait for all plugins to reach this generation
+                    await _fileDir.WhenProcessedGenerationAsync(gen, _cts.Token).ConfigureAwait(false);
+                    await _hash.WhenProcessedGenerationAsync(gen, _cts.Token).ConfigureAwait(false);
+                    await _tree.WhenProcessedGenerationAsync(gen, _cts.Token).ConfigureAwait(false);
+
+                    _onIndexesRebuilt(gen, scanRootId);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // shutdown
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _cts.CancelAsync().ConfigureAwait(false);
+            _channel.Writer.TryComplete();
+            await _worker.ConfigureAwait(false);
         }
     }
 }

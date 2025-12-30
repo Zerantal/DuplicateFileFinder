@@ -1,3 +1,5 @@
+// DuplicateFileFinderLib/Repository/Core/Repo.PublicApi.cs
+
 using System.Collections.ObjectModel;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
@@ -37,7 +39,6 @@ public sealed partial class Repo
         }    
     }
     
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
@@ -96,7 +97,9 @@ public sealed partial class Repo
 
     public async Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
-        bool metaDirty;
+        long generation;
+        RepoSnapshotView snapshotView;
+
         lock (_sync)
         {
             // 1) Remove the snapshot from live state (source of truth)
@@ -111,18 +114,31 @@ public sealed partial class Repo
                     DeletedAtUtc = DateTimeOffset.UtcNow
                 };
                 _scanRoots[scanRootId] = scanRoot;
-                MarkMetaDirty_NoLock();
             }
 
-            metaDirty = true;
+            // 3) Bump generation and capture a coherent view so index plugins can rebuild
+            generation = _meta.Generation + 1;
+            _meta = _meta with { Generation = generation };
+                MarkMetaDirty_NoLock();
+
+            snapshotView = GetRepoSnapshotView();
         }
 
         // Persist outside lock; RepoStore is gated.
-        if (metaDirty)
             await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
 
-        // Also delete on-disk snapshot file (best effort)
-        await RepoStore.DeleteScanRootSnapshotAsync(_repoPath, scanRootId, ct).ConfigureAwait(false);
+        // Removing a scan root should also remove any resumable scan checkpoints for it.
+        await RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct).ConfigureAwait(false);
+
+        // NOTE: We intentionally do NOT delete the on-disk scanroot snapshot file here.
+        // A later prune/compaction operation can reclaim these files.
+
+        PublishEvent(new ScanRootSnapshotCommittedEvent
+        {
+            Generation = generation,
+            ScanRootId = scanRootId,
+            RepoSnapshotView = snapshotView
+        });
     }
 
     // -------- BeginScan (creates ScanRun + ScanSession) --------
@@ -159,7 +175,7 @@ public sealed partial class Repo
         // ------------------------------
         lock (_sync)
         {
-            scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo?.VolumePath, relativeRootPath);
+            scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo, relativeRootPath);
 
             // Ensure stable RootDirId
             if (scanRoot.DirId <= 0)
@@ -167,11 +183,6 @@ public sealed partial class Repo
                 scanRoot = scanRoot with { DirId = AllocateDirId_NoLock() };
                 _scanRoots[scanRoot.RootId] = scanRoot;
             }
-
-            if (volumeInfo is not null)
-                scanRoot = UpdateScanRootFromVolume_NoLock(scanRoot, volumeInfo);
-
-            _scanRoots[scanRoot.RootId] = scanRoot;
 
             var runId = AllocateRunId_NoLock();
 

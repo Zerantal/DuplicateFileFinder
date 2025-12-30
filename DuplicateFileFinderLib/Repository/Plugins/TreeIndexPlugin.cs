@@ -114,12 +114,17 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             {
                 var rootId = snapshot.ScanRootId;
 
-                // Map: DirId -> DirHandle for this root.
+                // Map: DirId -> DirHandle (ONLY for live dirs)
                 var dirIdToHandle = new Dictionary<long, DirHandle>(capacity: snapshot.Dirs.Count);
 
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
                     var dir = snapshot.Dirs[i];
+
+                    // Skip deleted/absent dirs entirely.
+                    if (dir.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                        continue;
+
                     var h = new DirHandle(rootId, i);
                     dirIdToHandle[dir.DirId] = h;
 
@@ -127,18 +132,20 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                         rootDirs.Add(h);
                 }
 
-                // Child dirs
+                // Child dirs (only live parent+child)
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
                     var dir = snapshot.Dirs[i];
-                    if (dir.ParentDirId < 0) // root dir / orphaned dir
+
+                    if (dir.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
                         continue;
 
+                    if (dir.ParentDirId < 0)
+                        continue;
+
+                    // Parent must be live too (otherwise ignore this edge)
                     if (!dirIdToHandle.TryGetValue(dir.ParentDirId, out var parentHandle))
-                    {
-                        throw new InvalidOperationException(
-                            $"Dir {dir.DirId} references missing parent {dir.ParentDirId} in scan root {rootId}.");
-                    }
+                        continue;
 
                     var childHandle = new DirHandle(rootId, i);
 
@@ -151,10 +158,13 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     list.Add(childHandle);
                 }
 
-                // Child files
+                // Child files (only live files, and only under live dirs)
                 for (int i = 0; i < snapshot.Files.Count; i++)
                 {
                     var file = snapshot.Files[i];
+
+                    if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                        continue;
 
                     if (!dirIdToHandle.TryGetValue(file.DirId, out var parentDirHandle))
                         continue;
@@ -191,7 +201,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             _dirStatsById = newStats;
         }
     }
-
+    
     private static Dictionary<DirHandle, DirAggregateStats> ComputeDirStats(
         IReadOnlyDictionary<long, ScanRootSnapshotView> snapshotDict,
         Dictionary<DirHandle, ImmutableArray<DirHandle>> childrenDirsByParent,

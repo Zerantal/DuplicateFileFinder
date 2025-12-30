@@ -134,8 +134,6 @@ public partial class DuplicatesViewModel : ObservableObject
     
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
-        FolderRoots.Clear();
-
         using (TimingLog.StartPhase("BuildFolderTree()"))
         {
             _folderTreeBuilder.Rebuild(snapshot, FolderRoots);

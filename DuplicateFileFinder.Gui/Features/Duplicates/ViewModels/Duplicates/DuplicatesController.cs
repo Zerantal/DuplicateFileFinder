@@ -98,7 +98,10 @@ public partial class DuplicatesController : ObservableObject
             List<(FileRecordV2 FileRecord, string Name, Func<string> pathResolver)> fileRecords;
             try
             {
-                fileRecords = group.list.Select(handle =>
+                // Defensive: only include handles from non-deleted scan roots (in case an index lags).
+                fileRecords = group.list
+                    .Where(handle => _scanRootFullPathByRootId.ContainsKey(handle.ScanRootId))
+                    .Select(handle =>
                 {
                     var rec = snapshot.GetFileRecord(handle);
                     var name = snapshot.DecodeFileName(handle);
@@ -129,6 +132,11 @@ public partial class DuplicatesController : ObservableObject
                 // Snapshot may not contain file id (stale group); skip.
                 continue;
             }
+
+            // Never show deleted files in the duplicates view.
+            fileRecords = fileRecords
+                .Where(fr => fr.FileRecord.Status != ScanEntryStatus.Deleted)
+                .ToList();
 
             if (fileRecords.Count == 0)
                 continue;

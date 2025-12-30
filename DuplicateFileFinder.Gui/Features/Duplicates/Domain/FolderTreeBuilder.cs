@@ -46,7 +46,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
                 continue;
 
             var rootRec = snapshot.GetDirRecord(rootHandle);
-            if (rootRec.Status == ScanEntryStatus.None)
+            if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
                 continue;
             
             var scanRootFullPath = GetScanRootFullPath(scanRoot.DirId);
@@ -111,6 +111,11 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
         var childHandles = _treeIndex.GetChildDirs(parentHandle);
         foreach (var childHandle in childHandles)
         {
+            // Filter out deleted/dummy child dirs so they never appear in the tree.
+            var childRec = _snapshot.GetDirRecord(childHandle);
+            if (childRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
+                continue;
+
             var childNode = GetOrCreateNode(childHandle, node.FullPath);
             childNode.Parent = node;
             InsertChildSorted(node, childNode);
