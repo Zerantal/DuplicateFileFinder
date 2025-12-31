@@ -44,6 +44,9 @@ jobs:
             **/packages.lock.json
             global.json
 
+      - name: SDK info
+        run: dotnet --info
+
       - name: Restore
         run: dotnet restore DuplicateFileFinder.ci.slnf /p:RestoreLockedMode=true
 
