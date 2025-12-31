@@ -155,11 +155,11 @@ public sealed class FileEnumerator : IFileEnumerator
         {
             token.ThrowIfCancellationRequested();
             DirectoryInfo di = new DirectoryInfo(d);
-            var topLevelDirectoryName = Path.GetDirectoryName(Path.GetPathRoot(d));
+            var topLevelDirectoryName = Path.GetFileName(d);
             buffer.Add(new FsEntry(
                 true,
                 d,
-                topLevelDirectoryName ?? d,
+                topLevelDirectoryName,
                 0,
                 di.CreationTimeUtc,
                 di.LastWriteTimeUtc));
