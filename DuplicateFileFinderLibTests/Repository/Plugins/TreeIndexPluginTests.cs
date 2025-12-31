@@ -3,10 +3,13 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins;

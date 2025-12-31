@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
@@ -32,7 +33,8 @@ public sealed class FileTreeMapElement : RepoTreeMapElement
     {
         // Derived lazily: handle -> record -> dirId -> relpath.
         FileRecordV2 rec;
-        try { rec = Resolver.GetFileRecord(_file); }
+        try
+        { rec = Resolver.GetFileRecord(_file); }
         catch { return string.Empty; }
 
         return Resolver.GetRelativePath(rec.DirId);

@@ -1,5 +1,7 @@
 using Avalonia.Controls;
+
 using DuplicateFileFinder.Gui.Controls.TreeMap;
+
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;

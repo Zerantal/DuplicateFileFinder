@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+
 using DuplicateFileFinderLib.Util;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Util

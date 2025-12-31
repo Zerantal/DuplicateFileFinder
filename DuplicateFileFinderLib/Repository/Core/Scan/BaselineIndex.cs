@@ -1,7 +1,9 @@
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Util;
+
 using NLog;
+
 using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecordV2;
 
 namespace DuplicateFileFinderLib.Repository.Core.Scan;
@@ -10,7 +12,7 @@ using BaseLineMapValue = (long id, string name, ScanEntryStatus status, long las
 
 internal sealed class BaselineIndex
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
     private long _baselineNameCollisions;
     private const int BaselineCollisionTraceLimit = 25;
@@ -156,7 +158,7 @@ internal sealed class BaselineIndex
         if (collisions <= BaselineCollisionTraceLimit)
         {
 
-            Log.Trace(
+            _log.Trace(
                 $"Baseline collision ({kind}): container={parentOrDirId} name='{name}' " +
                 $"keptId={kept.id} keptStatus={kept.status} keptLastSeen={kept.lastSeen} " +
                 $"droppedId={existing.id} droppedStatus={existing.status} droppedLastSeen={existing.lastSeen}");

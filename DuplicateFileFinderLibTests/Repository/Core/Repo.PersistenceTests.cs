@@ -2,12 +2,14 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Core;
@@ -122,7 +124,9 @@ public sealed class Repo_PersistenceTests
 
     private static void TryDeleteDir(string dir)
     {
-        try { Directory.Delete(dir, recursive: true); } catch { /* ignore */ }
+        try
+        { Directory.Delete(dir, recursive: true); }
+        catch { /* ignore */ }
     }
 }
 

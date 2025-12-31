@@ -1,10 +1,13 @@
 // DuplicateFileFinderLibTests/Repository/Core/Scan/MutationBufferTests.cs
 
 using System.Linq;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using DuplicateFileFinderLibTests.TestUtils.Fakes;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Core.Scan;

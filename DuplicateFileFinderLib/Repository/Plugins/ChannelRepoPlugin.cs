@@ -1,6 +1,7 @@
 // DuplicateFileFinderLib/Repository/Plugins/ChannelRepoPlugin.cs
 
 using System.Threading.Channels;
+
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;

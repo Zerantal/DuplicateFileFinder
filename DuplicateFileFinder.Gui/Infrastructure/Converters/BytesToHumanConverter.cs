@@ -1,4 +1,5 @@
 using System.Globalization;
+
 using Avalonia;
 using Avalonia.Data.Converters;
 
@@ -10,11 +11,14 @@ public sealed class BytesToHumanConverter : IValueConverter
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is null) return null;
+        if (value is null)
+            return null;
 
-        if (!TryToLong(value, out var bytes)) return value;
+        if (!TryToLong(value, out var bytes))
+            return value;
 
-        if (bytes < 0) return "-" + Convert(-bytes, targetType, parameter, culture);
+        if (bytes < 0)
+            return "-" + Convert(-bytes, targetType, parameter, culture);
 
         string[] units = ["B", "KB", "MB", "GB", "TB", "PB"];
         double size = bytes;

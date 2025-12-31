@@ -3,12 +3,16 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using DuplicateFileFinderLibTests.TestUtils;
 using DuplicateFileFinderLibTests.TestUtils.Fakes;
+
 using Xunit;
+
 using ObservedDir = DuplicateFileFinderLib.Repository.Core.Models.ObservedDir;
 using ObservedFile = DuplicateFileFinderLib.Repository.Core.Models.ObservedFile;
 using ScanRun = DuplicateFileFinderLib.Repository.Storage.Models.ScanRun;
@@ -180,7 +184,8 @@ public sealed class ScanSessionTests
 
         var token = new FileHashToken(DirId: 50, Name: "X.bin", Size: 5);
         var bytes = new byte[16];
-        for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i + 1);
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] = (byte)(i + 1);
 
         session.OnFileHashCompleted(token, bytes, errorMessage: null);
 

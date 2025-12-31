@@ -1,4 +1,4 @@
-﻿namespace DuplicateFileFinderLib.Core;
+namespace DuplicateFileFinderLib.Core;
 
 public enum ScanPhase
 {

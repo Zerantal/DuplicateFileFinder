@@ -1,12 +1,17 @@
 // DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
 using Avalonia.Threading;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
+
 using NLog;
+
 using DuplicatesViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicatesViewModel;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
@@ -15,7 +20,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IRepoHost? _repoHost;
 
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
     private readonly IDialogService _dialogService;
 
@@ -76,7 +81,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (IsScanning || _scanCoordinator.IsScanning)
             return;
 
-        Log.Info("Initialising scan of {path}", path);
+        _log.Info("Initialising scan of {path}", path);
         IsScanning = true;
 
         await _scanCoordinator.RunScanWithDialogAsync(path);
@@ -107,6 +112,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_repoHost != null) await _repoHost.DisposeAsync();
+        if (_repoHost != null)
+            await _repoHost.DisposeAsync();
     }
 }

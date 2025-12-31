@@ -3,53 +3,56 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+
 using NLog;
 
 namespace DuplicateFileFinderLib.Logging;
 
 public sealed class TimingLog : IDisposable
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
     // One stack per async flow. Top = current scope.
-    private static readonly AsyncLocal<Stack<PhaseContext>?> ScopeStack = new();
+    private static readonly AsyncLocal<Stack<PhaseContext>?> _scopeStack = new();
 
     // global dictionary of counter formatters
     private static ConcurrentDictionary<string, Func<long, string>> CounterFormatter { get; } = new();
 
     private TimingLog(string operation, string? detail)
     {
-        var stack = ScopeStack.Value ??= new Stack<PhaseContext>(4);
+        var stack = _scopeStack.Value ??= new Stack<PhaseContext>(4);
         var ctx = new PhaseContext(operation, detail);
         stack.Push(ctx);
 
         if (detail is null)
-            Log.Debug("Started {operation}", operation);
+            _log.Debug("Started {operation}", operation);
 
         else
         {
-            Log.Debug("Started {operation} ({detail})", operation, detail);
+            _log.Debug("Started {operation} ({detail})", operation, detail);
         }
     }
 
     public void Dispose()
     {
-        var stack = ScopeStack.Value;
-        if (stack is null || stack.Count == 0) return;
+        var stack = _scopeStack.Value;
+        if (stack is null || stack.Count == 0)
+            return;
 
         var ctx = stack.Pop();
         ctx.Sw.Stop();
 
         var counters = BuildCounters(ctx.Counters);
         if (ctx.Detail is null)
-            Log.Info("Completed {operation} in {elapsedMs:N0} ms{counters}",
+            _log.Info("Completed {operation} in {elapsedMs:N0} ms{counters}",
                 ctx.Operation, ctx.Sw.Elapsed.TotalMilliseconds, counters);
         else
-            Log.Info("Completed {operation} ({detail}) in {elapsedMs:N0} ms{counters}",
+            _log.Info("Completed {operation} ({detail}) in {elapsedMs:N0} ms{counters}",
                 ctx.Operation, ctx.Detail, ctx.Sw.Elapsed.TotalMilliseconds, counters);
 
         // If the stack is empty, clear it so downstream awaits don’t hold onto objects.
-        if (stack.Count == 0) ScopeStack.Value = null;
+        if (stack.Count == 0)
+            _scopeStack.Value = null;
     }
 
 
@@ -69,8 +72,9 @@ public sealed class TimingLog : IDisposable
     /// <summary>Increment a named counter in the current phase.</summary>
     public static void Counter(string name, long delta = 1)
     {
-        var stack = ScopeStack.Value;
-        if (stack is null || stack.Count == 0) return;
+        var stack = _scopeStack.Value;
+        if (stack is null || stack.Count == 0)
+            return;
         var ctx = stack.Peek();
         ctx.Counters.AddOrUpdate(name, delta, (_, v) => v + delta);
     }
@@ -86,7 +90,8 @@ public sealed class TimingLog : IDisposable
 
     private static string BuildCounters(ConcurrentDictionary<string, long> counters)
     {
-        if (counters.IsEmpty) return string.Empty;
+        if (counters.IsEmpty)
+            return string.Empty;
         var sb = new StringBuilder();
         foreach (var kv in counters.OrderBy(k => k.Key))
         {

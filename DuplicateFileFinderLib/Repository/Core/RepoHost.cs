@@ -1,6 +1,7 @@
 // DuplicateFileFinderLib/Repository/Core/RepoHost.cs
 
 using System.Threading.Channels;
+
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;

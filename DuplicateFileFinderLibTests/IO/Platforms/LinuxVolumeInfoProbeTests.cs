@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
+
 using DuplicateFileFinderLib.IO.Platforms;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.IO.Platforms;

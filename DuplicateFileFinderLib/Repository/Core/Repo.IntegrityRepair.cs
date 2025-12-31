@@ -246,7 +246,8 @@ public sealed partial class Repo
 
                 foreach (var r in list)
                 {
-                    if (r.RootId == chosen.RootId) continue;
+                    if (r.RootId == chosen.RootId)
+                        continue;
                     remap[r.RootId] = chosen.RootId;
                 }
 
@@ -316,7 +317,9 @@ public sealed partial class Repo
 
                 if (!validRootIds.Contains(id))
                 {
-                    try { File.Delete(file); } catch { /* tolerate */ }
+                    try
+                    { File.Delete(file); }
+                    catch { /* tolerate */ }
                 }
             }
         }

@@ -1,16 +1,18 @@
 // Repository/Storage/RepoStore.cs
 
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using MemoryPack;
+
 using NLog;
 
 namespace DuplicateFileFinderLib.Repository.Storage;
 
 internal static partial class RepoStore
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
-    private static readonly SemaphoreSlim WriteGate = new(1, 1);
+    private static readonly SemaphoreSlim _writeGate = new(1, 1);
 
     private static string NewUniqueTmpPath(string finalPath)
         => $"{finalPath}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
@@ -22,7 +24,7 @@ internal static partial class RepoStore
         repoPath = Path.GetFullPath(repoPath);
         Directory.CreateDirectory(repoPath);
 
-        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var metaPath = GetMetaPath(repoPath);
@@ -56,7 +58,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            WriteGate.Release();
+            _writeGate.Release();
         }
     }
 
@@ -104,7 +106,7 @@ internal static partial class RepoStore
         var rootsFolder = GetRootsFolder(repoPath);
         Directory.CreateDirectory(rootsFolder);
 
-        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var path = GetRootSnapshotPath(repoPath, snapshot.ScanRootId);
@@ -138,7 +140,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            WriteGate.Release();
+            _writeGate.Release();
         }
     }
 
@@ -147,7 +149,7 @@ internal static partial class RepoStore
         repoPath = Path.GetFullPath(repoPath);
 
         // Delete is also gated to avoid racing a writer.
-        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var path = GetRootSnapshotPath(repoPath, scanRootId);
@@ -160,13 +162,13 @@ internal static partial class RepoStore
                 }
                 catch (IOException)
                 {
-                    Log.Error($"Delete ScanRoot snapshot failed (ScanRootId: {scanRootId}).", path);
+                    _log.Error($"Delete ScanRoot snapshot failed (ScanRootId: {scanRootId}).", path);
                 }
             }
         }
         finally
         {
-            WriteGate.Release();
+            _writeGate.Release();
         }
 
     }

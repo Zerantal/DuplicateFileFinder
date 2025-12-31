@@ -1,11 +1,14 @@
 using System.Globalization;
+
 using Avalonia.Media;
+
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Converters;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
@@ -30,7 +33,8 @@ public static class TreeMapBuilder
         var ctx = new BuildContext(snapshot, treeIndex, fileDirIndex, metric, opts, dirRelativePathResolver);
 
         var liveRoots = ctx.GetLiveScanRoots(scanRoots);
-        if (liveRoots.Count == 0) return null;
+        if (liveRoots.Count == 0)
+            return null;
 
         var results = new TreeMapNode<ITreeMapNodeElement>?[liveRoots.Count];
 
@@ -47,9 +51,11 @@ public static class TreeMapBuilder
         // Preserve original ordering of scan roots
         var scanRootNodes = new List<TreeMapNode<ITreeMapNodeElement>>(liveRoots.Count);
         foreach (var t in results)
-            if (t is { } n) scanRootNodes.Add(n);
+            if (t is { } n)
+                scanRootNodes.Add(n);
 
-        if (scanRootNodes.Count == 0) return null;
+        if (scanRootNodes.Count == 0)
+            return null;
 
         ctx.ApplyScanRootColours(scanRootNodes);
         return ctx.BuildDummyRoot(scanRootNodes);
@@ -177,7 +183,8 @@ public static class TreeMapBuilder
 
             // Build children (subdirs + files + collapsed "Other")
             var cap = _opts.MaxSubdirsPerDir + (_opts.DirectoriesOnly ? 0 : _opts.MaxFilesPerDir) + 2;
-            if (cap < 8) cap = 8;
+            if (cap < 8)
+                cap = 8;
 
             // Build children (subdirs + files + collapsed "Other")
             var children = new List<TreeMapNode<ITreeMapNodeElement>>(cap);
@@ -210,7 +217,8 @@ public static class TreeMapBuilder
             List<TreeMapNode<ITreeMapNodeElement>> childrenOut)
         {
             var k = _opts.MaxSubdirsPerDir;
-            if (k <= 0) return;
+            if (k <= 0)
+                return;
 
             // Top-K selection without sorting all children.
             // Keep a min-heap of the top K by Value.
@@ -237,11 +245,13 @@ public static class TreeMapBuilder
                 }
 
                 DirAggregateStats stats;
-                try { stats = _treeIndex.GetDirStats(child); }
+                try
+                { stats = _treeIndex.GetDirStats(child); }
                 catch { continue; }
 
                 var v = GetDirMetricValue(stats);
-                if (v <= 0) continue;
+                if (v <= 0)
+                    continue;
 
                 if (pq.Count < k)
                 {
@@ -299,7 +309,8 @@ public static class TreeMapBuilder
             List<TreeMapNode<ITreeMapNodeElement>> childrenOut)
         {
             int n = _opts.MaxFilesPerDir;
-            if (n <= 0) return;
+            if (n <= 0)
+                return;
 
             // min-heap keyed by size (smallest at top)
             var pq = new PriorityQueue<(FileHandle File, long Size), long>();
@@ -315,13 +326,16 @@ public static class TreeMapBuilder
                 var fh = childFiles[i];
 
                 FileRecordV2 f;
-                try { f = files[fh.Index]; }
+                try
+                { f = files[fh.Index]; }
                 catch { continue; }
 
-                if (f.Status == ScanEntryStatus.Deleted) continue;
+                if (f.Status == ScanEntryStatus.Deleted)
+                    continue;
 
                 var size = f.Size;
-                if (size <= 0) continue;
+                if (size <= 0)
+                    continue;
 
                 if (pq.Count < n)
                 {

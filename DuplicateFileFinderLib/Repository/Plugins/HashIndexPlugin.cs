@@ -1,10 +1,12 @@
 using System.Collections;
+
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
@@ -47,8 +49,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         int minDuplicates = 2,
         long minSize = 1)
     {
-        if (minDuplicates < 2) throw new ArgumentOutOfRangeException(nameof(minDuplicates));
-        if (minSize < 1) throw new ArgumentOutOfRangeException(nameof(minSize));
+        if (minDuplicates < 2)
+            throw new ArgumentOutOfRangeException(nameof(minDuplicates));
+        if (minSize < 1)
+            throw new ArgumentOutOfRangeException(nameof(minSize));
 
         var groups = _groupsByHash;
         var allFiles = _allFiles;

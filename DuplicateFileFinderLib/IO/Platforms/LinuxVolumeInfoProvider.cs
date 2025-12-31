@@ -21,10 +21,12 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
         // 1. Resolve the device node for this path (e.g. /dev/sdd1)
         var pathProbe = ProbeDeviceWithFindmnt(fullPath);
 
-        if (!pathProbe.HasValue) return null;
+        if (!pathProbe.HasValue)
+            return null;
         var devicePath = pathProbe.Value.devicePath;
         var volumePath = pathProbe.Value.volumePath;
-        if (string.IsNullOrEmpty(devicePath) || string.IsNullOrEmpty(volumePath)) return null;
+        if (string.IsNullOrEmpty(devicePath) || string.IsNullOrEmpty(volumePath))
+            return null;
 
         devicePath = NormalizeDevicePath(devicePath);
 
@@ -83,7 +85,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
                 return null;
 
             var line = output.Trim();
-            if (string.IsNullOrEmpty(line)) return null;
+            if (string.IsNullOrEmpty(line))
+                return null;
             var strList = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             string? devicePath = null;
             string? volumePath = null;
@@ -145,8 +148,10 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
     /// </summary>
     internal static VolumeInfo? BuildVolumeInfoFromLsblkJson(string json, string devicePath, string volumePath)
     {
-        if (string.IsNullOrWhiteSpace(devicePath)) return null;
-        if (string.IsNullOrWhiteSpace(json)) return new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
+        if (string.IsNullOrWhiteSpace(devicePath))
+            return null;
+        if (string.IsNullOrWhiteSpace(json))
+            return new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
 
         var volInfo = new VolumeInfo { DevicePath = devicePath, VolumePath = volumePath };
 
@@ -160,7 +165,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
             return volInfo;
         }
 
-        if (root?.Blockdevices == null || root.Blockdevices.Count == 0) return volInfo;
+        if (root?.Blockdevices == null || root.Blockdevices.Count == 0)
+            return volInfo;
 
         var devName = Path.GetFileName(devicePath);
 
@@ -197,7 +203,8 @@ public sealed class LinuxVolumeInfoProvider : IVolumeInfoProvider
             Dfs(top, asDisk);
         }
 
-        if (partitionNode is null) return volInfo;
+        if (partitionNode is null)
+            return volInfo;
 
         // Filesystem-level info (partition)
         var label = partitionNode.PartitionLabel ?? diskNode?.Label;

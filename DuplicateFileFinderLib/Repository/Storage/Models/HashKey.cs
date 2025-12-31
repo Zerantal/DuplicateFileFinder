@@ -2,6 +2,7 @@
 
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Storage.Models;
@@ -45,14 +46,16 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     /// </summary>
     public HashKey(ReadOnlySpan<byte> hashBytes)
     {
-        if (hashBytes.Length != 16) throw new ArgumentException("16 byte span required");
+        if (hashBytes.Length != 16)
+            throw new ArgumentException("16 byte span required");
         A = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes[..8]);
         B = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes.Slice(8, 8));
     }
 
     public HashKey(ReadOnlyMemory<byte> hashBytes)
     {
-        if (hashBytes.Length != 16) throw new ArgumentException("16 byte span required");
+        if (hashBytes.Length != 16)
+            throw new ArgumentException("16 byte span required");
         A = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes[..8].Span);
         B = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes.Slice(8, 8).Span);
     }
@@ -68,7 +71,8 @@ public readonly partial struct HashKey : IEquatable<HashKey>
 
     public void ToByteArray(Span<byte> buffer)
     {
-        if (buffer.Length < 16) throw new ArgumentException("Destination must be at least 16 bytes.");
+        if (buffer.Length < 16)
+            throw new ArgumentException("Destination must be at least 16 bytes.");
         BinaryPrimitives.WriteUInt64LittleEndian(buffer[..8], A);
         BinaryPrimitives.WriteUInt64LittleEndian(buffer.Slice(8, 8), B);
     }
@@ -106,8 +110,10 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     public override string ToString()
     {
         // 32-hex-character canonical representation with sentinel hints.
-        if (IsNotComputed) return "<NotComputed>";
-        if (IsCannotCompute) return "<CannotCompute>";
+        if (IsNotComputed)
+            return "<NotComputed>";
+        if (IsCannotCompute)
+            return "<CannotCompute>";
         return $"{A:X16}{B:X16}";
     }
 }

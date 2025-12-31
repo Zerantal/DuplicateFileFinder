@@ -1,4 +1,5 @@
-﻿using Avalonia;
+using Avalonia;
+
 using DuplicateFileFinderLib.Logging;
 // using Avalonia.Wayland;
 // using Avalonia.X11;

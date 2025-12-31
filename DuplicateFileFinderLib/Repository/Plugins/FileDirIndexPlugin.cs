@@ -3,6 +3,7 @@ using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;

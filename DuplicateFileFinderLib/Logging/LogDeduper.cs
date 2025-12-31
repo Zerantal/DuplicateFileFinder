@@ -12,7 +12,8 @@ public sealed class LogDeduper(TimeSpan window)
     {
         var now = DateTime.UtcNow;
         var last = _last.GetOrAdd(key, _ => DateTime.MinValue);
-        if (now - last > window) { _last[key] = now; return true; }
+        if (now - last > window)
+        { _last[key] = now; return true; }
         return false;
     }
 }

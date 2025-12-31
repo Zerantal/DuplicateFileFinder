@@ -23,7 +23,8 @@ public class BulkObservableCollection<T> : ObservableCollection<T>
 
     public void EndUpdate()
     {
-        if (!_suppressNotification) return;
+        if (!_suppressNotification)
+            return;
         _suppressNotification = false;
 
         RaiseReset();
@@ -37,7 +38,8 @@ public class BulkObservableCollection<T> : ObservableCollection<T>
         BeginUpdate();
         try
         {
-            if (clearCollection) Items.Clear();
+            if (clearCollection)
+                Items.Clear();
             foreach (var i in items)
                 Items.Add(i);
         }

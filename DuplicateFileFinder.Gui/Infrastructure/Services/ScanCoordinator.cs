@@ -1,9 +1,13 @@
 // DuplicateFileFinder.Gui/Infrastructure/Services/ScanCoordinator.cs
 
 using Avalonia.Threading;
-using DuplicateFileFinderLib.Repository.Interfaces;
+
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
+
+using DuplicateFileFinderLib.Repository.Interfaces;
+
 using NLog;
+
 using Dff = DuplicateFileFinderLib.Core;
 using ScanProgressViewModel = DuplicateFileFinder.Gui.Features.Scanning.ViewModels.ScanProgressViewModel;
 
@@ -15,7 +19,7 @@ public sealed class ScanCoordinator(
     IDialogService dialogService)
     : IScanCoordinator
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
     private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
     private readonly Dff.DuplicateFileFinder _finder = finder ?? throw new ArgumentNullException(nameof(finder));
@@ -42,7 +46,7 @@ public sealed class ScanCoordinator(
             return;
 
         IsScanning = true;
-        Log.Info("Starting scan of {root}", rootPath);
+        _log.Info("Starting scan of {root}", rootPath);
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -82,12 +86,12 @@ public sealed class ScanCoordinator(
             catch (OperationCanceledException)
             {
                 cancelled = true;
-                Log.Info("Scan cancelled for {root}", rootPath);
+                _log.Info("Scan cancelled for {root}", rootPath);
             }
             catch (Exception ex)
             {
                 error = ex;
-                Log.Error(ex, "Scan failed for {root}", rootPath);
+                _log.Error(ex, "Scan failed for {root}", rootPath);
             }
         }, _cts.Token);
 

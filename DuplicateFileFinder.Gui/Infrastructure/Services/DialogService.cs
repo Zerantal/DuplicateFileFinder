@@ -148,7 +148,8 @@ public sealed class DialogService : IDialogService
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
             {
                 MainWindow: { } main
-            }) return main;
+            })
+            return main;
 
         throw new InvalidOperationException("No main window available for dialogs.");
     }

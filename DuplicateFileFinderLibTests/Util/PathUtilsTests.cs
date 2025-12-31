@@ -2,7 +2,9 @@
 
 using System;
 using System.IO;
+
 using DuplicateFileFinderLib.Util;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Util;

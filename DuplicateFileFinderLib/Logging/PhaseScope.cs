@@ -1,4 +1,5 @@
 using DuplicateFileFinderLib.Core;
+
 using NLog;
 
 namespace DuplicateFileFinderLib.Logging;

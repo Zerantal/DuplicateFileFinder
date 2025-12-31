@@ -5,6 +5,7 @@ using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
+
 using FilesToHashList = System.Collections.Generic.List<DuplicateFileFinderLib.Core.FileToHash<
     DuplicateFileFinderLib.Repository.Core.Scan.FileHashToken>>;
 

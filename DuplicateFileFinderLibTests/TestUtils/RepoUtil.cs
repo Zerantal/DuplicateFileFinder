@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;

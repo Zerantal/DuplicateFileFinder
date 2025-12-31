@@ -1,4 +1,5 @@
 // Linux-only type checks without allocations beyond path string
+#pragma warning disable IDE1006
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -48,9 +49,12 @@ internal static partial class UnixTypes
     {
         kind = UnixKind.Unknown;
 
-        if (!OperatingSystem.IsLinux()) return false;
-        if (string.IsNullOrEmpty(path)) return false;
-        if (path.IndexOf('\0') >= 0) return false;
+        if (!OperatingSystem.IsLinux())
+            return false;
+        if (string.IsNullOrEmpty(path))
+            return false;
+        if (path.IndexOf('\0') >= 0)
+            return false;
 
         if (lstat_legacy(path, out var st) != 0)
             return false;
@@ -65,15 +69,31 @@ internal static partial class UnixTypes
 
         switch (mode & S_IFMT)
         {
-            case S_IFREG: kind = UnixKind.Regular; return true;
-            case S_IFDIR: kind = UnixKind.Directory; return true;
-            case S_IFLNK: kind = UnixKind.Symlink; return true;
-            case S_IFIFO: kind = UnixKind.Fifo; return true;
-            case S_IFSOCK: kind = UnixKind.Socket; return true;
-            case S_IFCHR: kind = UnixKind.CharDev; return true;
-            case S_IFBLK: kind = UnixKind.BlockDev; return true;
-            default: return false;
+            case S_IFREG:
+                kind = UnixKind.Regular;
+                return true;
+            case S_IFDIR:
+                kind = UnixKind.Directory;
+                return true;
+            case S_IFLNK:
+                kind = UnixKind.Symlink;
+                return true;
+            case S_IFIFO:
+                kind = UnixKind.Fifo;
+                return true;
+            case S_IFSOCK:
+                kind = UnixKind.Socket;
+                return true;
+            case S_IFCHR:
+                kind = UnixKind.CharDev;
+                return true;
+            case S_IFBLK:
+                kind = UnixKind.BlockDev;
+                return true;
+            default:
+                return false;
         }
 
     }
 }
+#pragma warning restore IDE1006

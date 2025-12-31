@@ -1,6 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -41,7 +43,8 @@ public partial class DuplicatesController : ObservableObject
         get => _selectedFolderPrefix;
         set
         {
-            if (value == _selectedFolderPrefix) return;
+            if (value == _selectedFolderPrefix)
+                return;
             _selectedFolderPrefix = value;
             ApplyFilters();
             OnPropertyChanged();

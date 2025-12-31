@@ -84,7 +84,8 @@ public sealed class PackedStringBuilder
 
         // Grow to next power-ish (2x) but at least required
         var newSize = _buffer.Length == 0 ? 256 : _buffer.Length * 2;
-        if (newSize < required) newSize = required;
+        if (newSize < required)
+            newSize = required;
 
         var newBuf = new byte[newSize];
         if (_length > 0)

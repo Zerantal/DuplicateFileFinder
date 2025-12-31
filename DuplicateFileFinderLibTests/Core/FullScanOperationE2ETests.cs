@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
@@ -13,7 +14,9 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Core;
@@ -418,8 +421,10 @@ public sealed class FullScanOperationE2ETests
 
             string DirPath(long dirId)
             {
-                if (dirId <= 0) return "";
-                if (pathCache.TryGetValue(dirId, out var cached)) return cached;
+                if (dirId <= 0)
+                    return "";
+                if (pathCache.TryGetValue(dirId, out var cached))
+                    return cached;
 
                 if (!dirById.TryGetValue(dirId, out var dRec))
                     return pathCache[dirId] = "";
