@@ -184,7 +184,8 @@ public static class TreeMapBuilder
 
             AddSubdirectoryNodes(scanRoot, dir, depth, children);
 
-            // Only add file nodes when showing bytes, and not for directory file counts
+            // Only add file nodes when showing *raw size*.
+            // For DuplicateBytes we currently keep directories-only to avoid misleading per-file attribution.
             if (!_opts.DirectoriesOnly && _metric == TreeMapMetric.TotalBytes)
                 AddFileNodes(scanRoot, rootSnapshot, dir, children);
 
@@ -443,7 +444,16 @@ public static class TreeMapBuilder
         // ---------------------------------------------------------------------
 
         private double GetDirMetricValue(DirAggregateStats stats)
-            => _metric == TreeMapMetric.TotalBytes ? stats.TotalBytes : stats.FileCount;
+        {
+            return _metric switch
+            {
+                TreeMapMetric.TotalBytes => stats.TotalBytes,
+                TreeMapMetric.TotalFiles => stats.FileCount,
+                TreeMapMetric.DuplicateFiles => stats.DuplicateFiles,
+                TreeMapMetric.DuplicateBytes => stats.DuplicateBytes,
+                _ => 0
+            };
+        }
 
         private ITreeMapNodeElement BuildSyntheticOtherDirs(int count, double value)
         {
@@ -473,17 +483,25 @@ public static class TreeMapBuilder
 
         private string FormatMetric(double value)
         {
-            if (_metric == TreeMapMetric.TotalBytes)
+            return _metric switch
             {
-                var bytesFormatted = (string?)BytesToHumanConverter.Instance.Convert(
-                        value,
-                        typeof(string),
-                        null,
-                        CultureInfo.CurrentUICulture) ?? $"{(long)value:n0} bytes";
-                return bytesFormatted;
-            }
-
-            return $"{(long)value:n0} files";
+                TreeMapMetric.TotalBytes => FormatBytes(value),
+                TreeMapMetric.DuplicateBytes => $"{FormatBytes(value)} (duplicates)",
+                TreeMapMetric.TotalFiles => $"{(long)value:n0} files",
+                TreeMapMetric.DuplicateFiles => $"{(long)value:n0} duplicate files",
+                _ => value.ToString(CultureInfo.CurrentUICulture)
+            };
         }
+
+        private static string FormatBytes(double value)
+        {
+            var bytesFormatted = (string?)BytesToHumanConverter.Instance.Convert(
+                    value,
+                    typeof(string),
+                    null,
+                    CultureInfo.CurrentUICulture) ?? $"{(long)value:n0} bytes";
+            return bytesFormatted;
+        }
+
     }
 }

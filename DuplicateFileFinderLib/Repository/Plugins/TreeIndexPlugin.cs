@@ -4,6 +4,7 @@ using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
@@ -57,7 +58,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         var map = _dirStatsById;
         return map.TryGetValue(dir, out var s)
             ? s
-            : new DirAggregateStats { DirCount = 0, FileCount = 0, TotalBytes = 0 };
+            : new DirAggregateStats { DirCount = 0, FileCount = 0, TotalBytes = 0, DuplicateFiles = 0, DuplicateBytes = 0 };
     }
 
     // ---------------------------------------------------------------------
@@ -208,7 +209,42 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         Dictionary<DirHandle, ImmutableArray<FileHandle>> childrenFilesByDir,
         IReadOnlyList<DirHandle> rootDirs)
     {
-        // Memoized DFS over the directory forest.
+        // -----------------------------------------------------------------
+        // 1) Global duplicate detection across ALL scan roots
+        // -----------------------------------------------------------------
+        // Count computed hashes for live files (filtered earlier by RebuildFromSnapshot),
+        // but keep the same Size>0 rule as FileCount/TotalBytes for consistency.
+        var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+
+        foreach (var snap in snapshotDict.Values)
+        {
+            var files = snap.Files;
+            for (int i = 0; i < files.Count; i++)
+            {
+                var f = files[i];
+
+                // RebuildFromSnapshot already filtered Deleted/None into childrenFilesByDir,
+                // but be defensive in case of future changes.
+                if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    continue;
+
+                if (f.Size <= 0)
+                    continue;
+
+                // Only count computed hashes. (NotComputed/CannotCompute are not duplicates)
+                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                    continue;
+
+                if (globalHashCounts.TryGetValue(f.Hash, out var c))
+                    globalHashCounts[f.Hash] = c + 1;
+                else
+                    globalHashCounts[f.Hash] = 1;
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // 2) Memoized DFS over the directory forest
+        // -----------------------------------------------------------------
         var memo = new Dictionary<DirHandle, DirAggregateStats>(capacity: Math.Max(1024, rootDirs.Count));
 
         DirAggregateStats Dfs(DirHandle dir)
@@ -219,6 +255,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             long bytes = 0;
             int fileCount = 0;
             int dirCount = 0;
+            long duplicateFiles = 0;
+            long duplicateBytes = 0;
 
             // Files directly under this dir
             if (childrenFilesByDir.TryGetValue(dir, out var files))
@@ -230,10 +268,23 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                         continue;
 
                     var f = snap.Files[fh.Index];
+
+                    // Should already be live due to childrenFilesByDir build, but keep defensive.
+                    if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                        continue;
+
                     if (f.Size > 0)
                     {
                         bytes += f.Size;
                         fileCount++;
+
+                        // Count this file as "duplicate" if its computed hash appears >= 2 globally.
+                        if (f.Hash != HashKey.NotComputed && f.Hash != HashKey.CannotCompute &&
+                            globalHashCounts.TryGetValue(f.Hash, out var hc) && hc >= 2)
+                        {
+                            duplicateFiles++;
+                            duplicateBytes += f.Size;
+                        }
                     }
                 }
             }
@@ -252,6 +303,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     bytes += childStats.TotalBytes;
                     fileCount += childStats.FileCount;
                     dirCount += childStats.DirCount;
+                    duplicateFiles += childStats.DuplicateFiles;
+                    duplicateBytes += childStats.DuplicateBytes;
                 }
             }
 
@@ -259,7 +312,9 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             {
                 TotalBytes = bytes,
                 FileCount = fileCount,
-                DirCount = dirCount
+                DirCount = dirCount,
+                DuplicateFiles = duplicateFiles,
+                DuplicateBytes = duplicateBytes
             };
 
             memo[dir] = stats;
@@ -272,6 +327,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
         return memo;
     }
+
 
     // ---------------------------------------------------------------------
     // Persistence

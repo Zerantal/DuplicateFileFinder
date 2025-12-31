@@ -14,8 +14,8 @@ public partial class TreeMapController : ObservableObject
     private readonly IFileDirReadModel _fileDirIndex;
 
     private RepoSnapshotView? _lastSnapshot;
-    [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
 
+    [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _root;
 
     public TreeMapController(IRepoHost host)
@@ -48,6 +48,28 @@ public partial class TreeMapController : ObservableObject
             if (!value) return;
             if (Metric != TreeMapMetric.TotalFiles)
                 Metric = TreeMapMetric.TotalFiles;
+        }
+    }
+
+    public bool IsMetricDuplicateFiles
+    {
+        get => Metric == TreeMapMetric.DuplicateFiles;
+        set
+        {
+            if (!value) return;
+            if (Metric != TreeMapMetric.DuplicateFiles)
+                Metric = TreeMapMetric.DuplicateFiles;
+        }
+    }
+
+    public bool IsMetricDuplicateBytes
+    {
+        get => Metric == TreeMapMetric.DuplicateBytes;
+        set
+        {
+            if (!value) return;
+            if (Metric != TreeMapMetric.DuplicateBytes)
+                Metric = TreeMapMetric.DuplicateBytes;
         }
     }
 
@@ -89,5 +111,7 @@ public partial class TreeMapController : ObservableObject
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));
+        OnPropertyChanged(nameof(IsMetricDuplicateFiles));
+        OnPropertyChanged(nameof(IsMetricDuplicateBytes));
     }
 }
