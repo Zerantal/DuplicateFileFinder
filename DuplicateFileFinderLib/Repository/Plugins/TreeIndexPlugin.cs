@@ -11,7 +11,7 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
     private const string StateFileName = "tree-index.bin";
-    
+
     // Published, read-only snapshots (never mutate after publishing).
     // Rebuilt on plugin worker thread; swapped atomically for readers.
     private volatile Dictionary<DirHandle, ImmutableArray<DirHandle>> _childrenDirsByParentId
@@ -39,7 +39,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // ---------------------------------------------------------------------
     // Public query surface (lock-free)
     // ---------------------------------------------------------------------
-    
+
     public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir)
     {
         var map = _childrenDirsByParentId;
@@ -185,11 +185,11 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             // Capacity hints prevent rehashing.
             var newChildDirs = new Dictionary<DirHandle, ImmutableArray<DirHandle>>(childrenDirsTmp.Count);
             foreach (var (parent, list) in childrenDirsTmp)
-                newChildDirs[parent] = list.Count == 0 ? ImmutableArray<DirHandle>.Empty : [..list];
+                newChildDirs[parent] = list.Count == 0 ? ImmutableArray<DirHandle>.Empty : [.. list];
 
             var newChildFiles = new Dictionary<DirHandle, ImmutableArray<FileHandle>>(childrenFilesTmp.Count);
             foreach (var (parent, list) in childrenFilesTmp)
-                newChildFiles[parent] = list.Count == 0 ? ImmutableArray<FileHandle>.Empty : [..list];
+                newChildFiles[parent] = list.Count == 0 ? ImmutableArray<FileHandle>.Empty : [.. list];
 
             var newStats = ComputeDirStats(snapshotDict, newChildDirs, newChildFiles, rootDirs);
 
@@ -201,7 +201,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             _dirStatsById = newStats;
         }
     }
-    
+
     private static Dictionary<DirHandle, DirAggregateStats> ComputeDirStats(
         IReadOnlyDictionary<long, ScanRootSnapshotView> snapshotDict,
         Dictionary<DirHandle, ImmutableArray<DirHandle>> childrenDirsByParent,
@@ -215,11 +215,11 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         {
             if (memo.TryGetValue(dir, out var cached))
                 return cached;
-    
+
             long bytes = 0;
             int fileCount = 0;
             int dirCount = 0;
-    
+
             // Files directly under this dir
             if (childrenFilesByDir.TryGetValue(dir, out var files))
             {
@@ -237,7 +237,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     }
                 }
             }
-    
+
             // Recurse into child dirs
             if (childrenDirsByParent.TryGetValue(dir, out var childDirs))
             {
@@ -247,25 +247,25 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
                     // Count the child itself
                     dirCount++;
-    
+
                     var childStats = Dfs(child);
                     bytes += childStats.TotalBytes;
                     fileCount += childStats.FileCount;
                     dirCount += childStats.DirCount;
                 }
             }
-    
+
             var stats = new DirAggregateStats
             {
                 TotalBytes = bytes,
                 FileCount = fileCount,
                 DirCount = dirCount
             };
-    
+
             memo[dir] = stats;
             return stats;
         }
-    
+
         // Compute stats for each forest root; DFS will memoize descendants.
         foreach (var t in rootDirs)
             _ = Dfs(t);
@@ -293,7 +293,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             ChildrenFilesByDirId = childFiles,
             DirStatsById = stats
         };
-        
+
         var path = GetStateFilePath();
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))

@@ -14,9 +14,9 @@ namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IRepoHost? _repoHost;
-    
+
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    
+
     private readonly IDialogService _dialogService;
 
     private readonly IScanCoordinator _scanCoordinator;
@@ -68,7 +68,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         await StartScan(path);
     }
-    
+
     // ---------------- Scan orchestration ----------------
 
     private async Task StartScan(string path)
@@ -78,7 +78,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         Log.Info("Initialising scan of {path}", path);
         IsScanning = true;
-        
+
         await _scanCoordinator.RunScanWithDialogAsync(path);
     }
 
@@ -92,7 +92,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             var dialogService = new DialogService();
             var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(host);
             var scanCoordinator = new ScanCoordinator(host, scanEngine, dialogService);
-        
+
             mainWindowVm = new MainWindowViewModel(host, scanCoordinator, dialogService);
         }
         catch (Exception e)
@@ -100,7 +100,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             Console.Error.WriteLine(e);
             throw;
         }
-        
+
         // mainWindowVm responsible for disposing of RepoHost (called via MainWindow.OnClosed)
         return mainWindowVm;
     }

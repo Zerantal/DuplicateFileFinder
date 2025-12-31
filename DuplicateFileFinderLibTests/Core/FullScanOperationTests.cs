@@ -22,7 +22,7 @@ namespace DuplicateFileFinderLibTests.Core;
 public sealed class FullScanOperationTests
 {
     private readonly TempFsFixture _fs = new("dff_scan_");
-    
+
     [Fact]
     public async Task ExecuteAsync_RootMissing_FailsSession_AndRethrows()
     {
@@ -54,11 +54,11 @@ public sealed class FullScanOperationTests
                 Run = null!,
                 Options = new ScanOptions()
             });
-        
+
         session.SetupGet(s => s.RootDirCursor).Returns(new DirCursor(1));
 
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
-        
+
         session.Setup(s => s.FailAsync(
                 It.Is<string>(m => m.Contains("does not exist", StringComparison.OrdinalIgnoreCase)),
                 cancelled: false,
@@ -105,12 +105,12 @@ public sealed class FullScanOperationTests
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync( new ScanContext
+            .ReturnsAsync(new ScanContext
             {
                 Session = session.Object,
                 ScanRoot = null!,
                 Run = null!,
-                Options = new  ScanOptions()
+                Options = new ScanOptions()
             });
 
         // Root cursor used by enumerator
@@ -161,7 +161,7 @@ public sealed class FullScanOperationTests
         repoHost.SetupGet(h => h.Repo).Returns(repo.Object);
 
         volume.Setup(v => v.GetVolumeInfoForPath(It.IsAny<string>()))
-            .Returns( (string volPath) =>  new VolumeInfo { DevicePath = "/dev/sda", IsRotational = true, VolumePath = volPath});
+            .Returns((string volPath) => new VolumeInfo { DevicePath = "/dev/sda", IsRotational = true, VolumePath = volPath });
 
         // Verify exact values (rotational => dop 1, buffer 512k)
         hashing.SetupSet(h => h.ReadBufferSize = 512 * 1024).Verifiable();
@@ -171,7 +171,7 @@ public sealed class FullScanOperationTests
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ScanContext { Session = session.Object, Run = null!, ScanRoot = null!, Options = new  ScanOptions() });
+            .ReturnsAsync(new ScanContext { Session = session.Object, Run = null!, ScanRoot = null!, Options = new ScanOptions() });
 
         session.SetupGet(s => s.RootDirCursor).Returns(new DirCursor(1));
 
@@ -180,7 +180,7 @@ public sealed class FullScanOperationTests
             .Returns(Array.Empty<FsEntry>());
 
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
-        
+
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(parentDirId: 1,
                 expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
@@ -201,7 +201,7 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
         var op = new FullScanOperation(repoHost.Object, fs.Object, hashing.Object, volume.Object);
-        
+
         await op.ExecuteAsync(_fs.Root, progress: null, CancellationToken.None);
 
         hashing.Verify();
@@ -237,13 +237,13 @@ public sealed class FullScanOperationTests
         session.FileDecisionsByName["zero.bin"] = true;
         session.FileDecisionsByName["ten.bin"] = true;
         session.FileDecisionsByName["skip.bin"] = false;
-        
+
         repo.Setup(r => r.BeginScanAsync(It.IsAny<string>(),
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ScanContext {Session = session, Run = null!, ScanRoot = null!, Options = new  ScanOptions()});
-        
+            .ReturnsAsync(new ScanContext { Session = session, Run = null!, ScanRoot = null!, Options = new ScanOptions() });
+
         var normRoot = PathUtils.NormalizePath(_fs.Root);
 
         var entries = new[]

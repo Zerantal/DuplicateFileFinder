@@ -48,7 +48,7 @@ public sealed class ChecksumPipelineMD5 : IChecksumPipeline
 
             var pooled = ArrayPool<byte>.Shared.Rent(digest.Length);
             Buffer.BlockCopy(digest, 0, pooled, 0, digest.Length);
-        
+
             return new PooledHash(pooled, digest.Length);
         }
         finally

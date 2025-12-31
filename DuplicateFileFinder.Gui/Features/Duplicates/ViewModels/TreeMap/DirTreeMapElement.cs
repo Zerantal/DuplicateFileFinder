@@ -24,7 +24,7 @@ public sealed class DirTreeMapElement : RepoTreeMapElement
 
     // If I ever decide to show labels for big items.
     // public override string Label => Resolver.GetDirRecord(_dir).DirId.ToString();
-    
+
     protected override string ResolveName()
         => Resolver.DecodeDirName(_dir);
 

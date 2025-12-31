@@ -12,25 +12,25 @@ namespace DuplicateFileFinderLib.Repository.Core;
 public sealed partial class Repo : IRepoInternal
 {
     private const int RepoSchemaVersion = 6;
-    
+
     private readonly string _repoPath;
-    
+
     // live state
     private RepoMeta _meta = null!;
-    private readonly Dictionary<long, ScanRootSnapshotV2> _scanRootSnapshots = new(); 
+    private readonly Dictionary<long, ScanRootSnapshotV2> _scanRootSnapshots = new();
     private List<ScanRun> _scanRuns = new();
-    private Dictionary<long, ScanRoot>   _scanRoots  = new();
+    private Dictionary<long, ScanRoot> _scanRoots = new();
 
     private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run 
-    
-    private readonly Lock _sync = new();
-    
+
+    private readonly object _sync = new();
+
     private RepoMetaFile _metaFile = null!;
-    private bool _disposed; 
-    
+    private bool _disposed;
+
     private Repo(string repoPath, RepoMetaFile metaFile)
     {
-        _repoPath  = Path.GetFullPath(repoPath);
+        _repoPath = Path.GetFullPath(repoPath);
 
         Directory.CreateDirectory(_repoPath);
 

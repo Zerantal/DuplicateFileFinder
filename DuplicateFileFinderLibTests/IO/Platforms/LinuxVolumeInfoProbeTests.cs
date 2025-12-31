@@ -7,7 +7,7 @@ namespace DuplicateFileFinderLibTests.IO.Platforms;
 [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility")]
 public sealed class LinuxVolumeInfoProviderTests
 {
-  
+
     [Fact]
     public void BuildVolumeInfoFromLsblkJson_UsesWwnForDeviceId_AndPartuuidForVolumeId()
     {

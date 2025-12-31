@@ -54,7 +54,7 @@ public readonly partial struct HashKey : IEquatable<HashKey>
     {
         if (hashBytes.Length != 16) throw new ArgumentException("16 byte span required");
         A = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes[..8].Span);
-        B = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes.Slice(8,8).Span);
+        B = BinaryPrimitives.ReadUInt64LittleEndian(hashBytes.Slice(8, 8).Span);
     }
 
     /// <summary>

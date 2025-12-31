@@ -34,14 +34,14 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
             // Drive exists but media not ready (no disk, etc.)
             return new VolumeInfo
             {
-                DevicePath      = root,
-                VolumePath      = "",
-                VolumeId        = null,
-                DeviceId        = null,
-                Label           = null,
-                FileSystemType  = null,
-                IsRotational    = null,
-                DeviceModel     = null
+                DevicePath = root,
+                VolumePath = "",
+                VolumeId = null,
+                DeviceId = null,
+                Label = null,
+                FileSystemType = null,
+                IsRotational = null,
+                DeviceModel = null
             };
         }
 
@@ -50,36 +50,36 @@ public sealed class WindowsVolumeInfoProvider : IVolumeInfoProvider
         {
             return new VolumeInfo
             {
-                DevicePath      = root,
-                VolumePath      = "",
-                VolumeId        = null,
-                DeviceId        = null,
-                Label           = SafeGetVolumeLabel(driveInfo),
-                FileSystemType  = SafeGetDriveFormat(driveInfo),
-                IsRotational    = null,
-                DeviceModel     = null
+                DevicePath = root,
+                VolumePath = "",
+                VolumeId = null,
+                DeviceId = null,
+                Label = SafeGetVolumeLabel(driveInfo),
+                FileSystemType = SafeGetDriveFormat(driveInfo),
+                IsRotational = null,
+                DeviceModel = null
             };
         }
 
         var volumeGuidPath = TryGetVolumeGuidPath(root); // e.g. "\\\\?\\Volume{GUID}\\"
-        var devicePath     = volumeGuidPath ?? root;
-        var volumeId       = volumeGuidPath;             // Treat the volume GUID as the VolumeId on Windows.
+        var devicePath = volumeGuidPath ?? root;
+        var volumeId = volumeGuidPath;             // Treat the volume GUID as the VolumeId on Windows.
 
-        var label          = SafeGetVolumeLabel(driveInfo);
+        var label = SafeGetVolumeLabel(driveInfo);
         var fileSystemType = SafeGetDriveFormat(driveInfo);
 
         var (deviceId, deviceModel) = TryGetPhysicalDeviceInfo(root, driveInfo);
 
         return new VolumeInfo
         {
-            DevicePath      = devicePath,
-            VolumePath      = "",
-            VolumeId        = volumeId,
-            DeviceId        = deviceId,        // e.g. "\\\\.\\PHYSICALDRIVE0"
-            DeviceModel     = deviceModel,     // e.g. "Samsung SSD 980 ..."
-            Label           = label,
-            FileSystemType  = fileSystemType,
-            IsRotational    = null            // Can be populated later via DeviceIoControl / MSFT_PhysicalDisk if desired.
+            DevicePath = devicePath,
+            VolumePath = "",
+            VolumeId = volumeId,
+            DeviceId = deviceId,        // e.g. "\\\\.\\PHYSICALDRIVE0"
+            DeviceModel = deviceModel,     // e.g. "Samsung SSD 980 ..."
+            Label = label,
+            FileSystemType = fileSystemType,
+            IsRotational = null            // Can be populated later via DeviceIoControl / MSFT_PhysicalDisk if desired.
         };
     }
 

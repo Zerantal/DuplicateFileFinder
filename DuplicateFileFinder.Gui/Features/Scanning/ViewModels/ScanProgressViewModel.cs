@@ -10,7 +10,7 @@ namespace DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
 public partial class ScanProgressViewModel : ObservableObject
 {
     private readonly IScanCoordinator _coordinator;
-    
+
     [ObservableProperty] private bool _isCancelEnabled = true;
     [ObservableProperty] private bool _isIndeterminate = true;
     [ObservableProperty] private string _phaseText = string.Empty;

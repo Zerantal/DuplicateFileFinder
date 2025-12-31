@@ -22,7 +22,7 @@ public interface IFileEnumerator
 public sealed class FileEnumerator : IFileEnumerator
 {
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-    
+
     private static readonly EnumerationOptions EnumOpts = new()
     {
         IgnoreInaccessible = true,
@@ -84,18 +84,22 @@ public sealed class FileEnumerator : IFileEnumerator
                         if (string.IsNullOrEmpty(full) || IsVirtualOrEphemeralRoot(full))
                             return false;
                     }
-                    if (fe.IsDirectory) return true; // dirs always included (we decide traversal elsewhere)
 
-                    if (fe.Length > 0) return true; // fast-path for regular files
+                    if (fe.IsDirectory) return true;
 
+                    if (fe.Length > 0) return true;
+
+                    // length == 0 (or odd values)
                     if (OperatingSystem.IsLinux())
                     {
                         var full = fe.ToFullPath();
                         return UnixTypes.TryGetKind(full, out var k) && k == UnixTypes.UnixKind.Regular;
                     }
 
-                    return false;
+                    // Windows: treat 0-byte as valid
+                    return fe.Length == 0;
                 }
+
             };
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
@@ -132,9 +136,9 @@ public sealed class FileEnumerator : IFileEnumerator
     private void TryFillBufferFallback(string dir, List<FsEntry> buffer, CancellationToken token)
     {
         buffer.Clear();
-        
+
         Log.Info("Attempting fallback directory enumeration of {path}", dir);
-        
+
         // Step 1: directories
         string[] dirs;
         try
@@ -144,21 +148,21 @@ public sealed class FileEnumerator : IFileEnumerator
         catch (Exception ex)
         {
             Log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
-            return; 
+            return;
         }
 
         foreach (var d in dirs)
         {
             token.ThrowIfCancellationRequested();
             DirectoryInfo di = new DirectoryInfo(d);
-            var topLevelDirectoryName = Path.GetDirectoryName(Path.GetPathRoot(d));
+            var topLevelDirectoryName = Path.GetFileName(d);
             buffer.Add(new FsEntry(
                 true,
                 d,
-                topLevelDirectoryName ?? d,
+                topLevelDirectoryName,
                 0,
                 di.CreationTimeUtc,
-                di.LastWriteTimeUtc ));
+                di.LastWriteTimeUtc));
         }
 
         // Step 2: files
@@ -192,14 +196,14 @@ public sealed class FileEnumerator : IFileEnumerator
             catch (Exception ex)
             {
                 Log.Warn(ex, "Skipping file {path}", f);
-                
+
                 // Some NTFS special files throw or report -1; skip them
                 continue;
             }
 
             // Include normal files (0-byte or greater)
             if (len >= 0)
-                buffer.Add(new FsEntry(false, f, filename,  len, creationTimeUtc, modifiedTimeUtc));
+                buffer.Add(new FsEntry(false, f, filename, len, creationTimeUtc, modifiedTimeUtc));
         }
     }
 

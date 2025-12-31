@@ -119,7 +119,7 @@ public partial class DuplicatesController : ObservableObject
                             string.IsNullOrWhiteSpace(rootFullPath))
                         {
                             // No root info => keep relative.
-                        return relativePath;
+                            return relativePath;
                         }
 
                         return Path.Combine(rootFullPath, relativePath);

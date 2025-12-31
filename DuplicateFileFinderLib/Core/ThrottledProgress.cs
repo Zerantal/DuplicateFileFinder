@@ -6,13 +6,13 @@ public sealed class ThrottledProgress(
     double minDelta = 0.01)
     : IProgress<DuplicateFileFinderProgressReport>
 {
-    private readonly Lock _gate = new();
+    private readonly object _gate = new();
     private readonly TimeSpan _minInterval = minInterval ?? TimeSpan.FromMilliseconds(120);
     private double _lastPercent = double.NaN;
 
     private DateTime _lastSent = DateTime.MinValue;
     private bool _sentAny;
-    
+
     public void Report(DuplicateFileFinderProgressReport value)
     {
         lock (_gate)

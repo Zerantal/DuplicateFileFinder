@@ -13,13 +13,13 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     // We swap the reference atomically when rebuilding.
     private volatile Dictionary<long, FileHandle> _filesById = new();
     private volatile Dictionary<long, DirHandle> _dirsById = new();
-    
+
     // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
-    
+
     // Persisted position (only mutated on bootstrap/worker thread)
     private long _lastIndexedGeneration;
-    
+
     private readonly string _dataDirectory;
     private const string StateFileName = "file-dir-index.bin";
 
@@ -31,7 +31,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         _dataDirectory = dataDirectory;
         Directory.CreateDirectory(_dataDirectory);
     }
-    
+
     // ---------------------------------------------------------------------
     // Event handlers
     // ---------------------------------------------------------------------
@@ -39,7 +39,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
         _snapshotView = evt.RepoSnapshotView;
-        
+
         if (!TryLoadState(evt.Generation))
         {
             // Fallback: rebuild from snapshot and persist.
@@ -69,7 +69,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         _lastIndexedGeneration = evt.Generation;
         SaveState();
     }
-    
+
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)
     // ---------------------------------------------------------------------
@@ -125,9 +125,9 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         }
     }
 
-// ---------------------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------------------
+    // ---------------------------------------------------------------------
+    // Persistence
+    // ---------------------------------------------------------------------
 
     private string GetStateFilePath() => Path.Combine(_dataDirectory, StateFileName);
 
@@ -143,7 +143,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             DirsById = dirs.ToDictionary(x => x.Key, x => x.Value),
             FilesById = files.ToDictionary(x => x.Key, x => x.Value)
         };
-        
+
         var path = GetStateFilePath();
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
@@ -171,10 +171,10 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             // Only use the state if it matches the current repo position.
             if (state.LastIndexedGeneration != expectedGeneration)
                 return false;
-            
+
             _dirsById = state.DirsById;
             _filesById = state.FilesById;
-            
+
             _lastIndexedGeneration = state.LastIndexedGeneration;
             return true;
         }
@@ -183,8 +183,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             // Corrupt or incompatible state; ignore and rebuild from snapshot.
             return false;
         }
-    }    
-    
+    }
+
     // ---------------------------------------------------------------------
     // Public query surface (lock-free)
     // ---------------------------------------------------------------------
@@ -272,7 +272,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             return false;
 
         var segments = new List<string>(capacity: 8);
-        
+
         // Snapshot dirs dictionary for stable lookups during traversal
         var dirsById = _dirsById;
 

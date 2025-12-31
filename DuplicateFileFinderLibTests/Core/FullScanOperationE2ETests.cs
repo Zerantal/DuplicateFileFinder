@@ -21,7 +21,7 @@ namespace DuplicateFileFinderLibTests.Core;
 public sealed class FullScanOperationE2ETests
 {
     private readonly TempFsFixture _tempFsFixture = new("dff_E2E_tests");
-    
+
     [Fact]
     public async Task FullScan_PersistsSnapshot_AndComputesMd5Hashes()
     {
@@ -57,7 +57,7 @@ public sealed class FullScanOperationE2ETests
             ct: CancellationToken.None);
 
         // Assert run completed
-        var run = Assert.Single(host.Repo.ScanRunsView); 
+        var run = Assert.Single(host.Repo.ScanRunsView);
         Assert.Equal(ScanRunStatus.Completed, run.Status);
 
         var snap = host.Repo.TryGetScanRootView(run.ScanRootId);

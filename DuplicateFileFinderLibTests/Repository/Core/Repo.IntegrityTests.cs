@@ -370,7 +370,7 @@ public sealed class RepoIntegrityTests : IDisposable
         Assert.Contains(issues, i => i.Code is "FILE_NAMEIDX_OOB" or "ROOT_SNAPSHOT_FILE_NAMEIDX_OOB");
 
         await repo.DisposeAsync();
-        }
+    }
 
     [Fact]
     public async Task ValidateIntegrity_Errors_WhenErrorMessageStrIdxOutOfRange()

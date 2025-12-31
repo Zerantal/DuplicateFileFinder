@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using DuplicateFileFinderLib.IO;
@@ -13,7 +14,7 @@ namespace DuplicateFileFinderLibTests.IO;
 public sealed class FileEnumeratorTests : IDisposable
 {
     private readonly TempFsFixture _fs = new();
-    
+
     public void Dispose()
     {
         _fs.Dispose();
@@ -54,22 +55,22 @@ public sealed class FileEnumeratorTests : IDisposable
         // No exception and usually empty due to fast short-circuit
         Assert.NotNull(list);
     }
-    
+
     [Fact]
     public void ZeroLengthRegularFile_IsIncluded_OnLinux()
     {
         if (!OperatingSystem.IsLinux())
             return;
-        
+
         var emptyFileName = _fs.File("empty.bin", []);
-    
+
         var sut = new FileEnumerator();
-        var list =  new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
-        
+        var list = new List<FsEntry>(sut.EnumerateChildren(_fs.Root, CancellationToken.None));
+
         // zero-length regular file should be present
         Assert.Contains(list, e => !e.IsDirectory && e.FullPath == emptyFileName);
     }
-    
+
     [Fact]
     public void ScanLocation_SkipsSymlinkedDirectories_WhenPossible()
     {
@@ -139,7 +140,46 @@ public sealed class FileEnumeratorTests : IDisposable
         if (made)
             Assert.DoesNotContain(list, e => !e.IsDirectory && e.FullPath == fifo);
     }
-    
+
+    [Fact]
+    public void FallbackEnumeration_DirectoryEntry_Name_ShouldBeDirectoryName_NotRootOrFullPath()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), "dff_tests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var subDir = Directory.CreateDirectory(Path.Combine(root, "sub")).FullName;
+
+            var sut = new FileEnumerator();
+            var buffer = new List<FsEntry>();
+
+            // Call private TryFillBufferFallback(root, buffer, ct)
+            var mi = typeof(FileEnumerator).GetMethod(
+                "TryFillBufferFallback",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(mi);
+
+            // Act
+            mi.Invoke(sut, [root, buffer, CancellationToken.None]);
+
+            // Assert
+            var subEntry = Assert.Single(buffer, e => e.IsDirectory && e.FullPath == subDir);
+
+            // This is the invariant implied by FsEntry.Name comment: "top level name"
+            Assert.Equal("sub", subEntry.Name);
+            Assert.DoesNotContain(Path.DirectorySeparatorChar, subEntry.Name);
+
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch { /* best-effort */ }
+        }
+    }
+
     private static bool TryMkFifo(string path)
     {
         try

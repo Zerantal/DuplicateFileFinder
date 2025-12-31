@@ -12,7 +12,7 @@ internal static class Program
     public static void Main(string[] args)
     {
         LoggingSetup.Configure();
-        
+
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             LogManager.GetCurrentClassLogger().Fatal(e.ExceptionObject as Exception, "AppDomain crash");
 
@@ -21,7 +21,7 @@ internal static class Program
             LogManager.GetCurrentClassLogger().Error(e.Exception, "Unobserved task exception");
             e.SetObserved();
         };
-        
+
         // ---- 2. Run Avalonia normally ----
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);

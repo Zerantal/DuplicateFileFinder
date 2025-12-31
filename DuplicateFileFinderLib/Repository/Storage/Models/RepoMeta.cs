@@ -15,5 +15,5 @@ public partial record RepoMeta
     [MemoryPackOrder(8)] public long NextScanRootId { get; init; } = 1;
     [MemoryPackOrder(10)] public long NextDirId { get; init; } = 1;
     [MemoryPackOrder(11)] public long NextFileId { get; init; } = 1;
-    
+
 }

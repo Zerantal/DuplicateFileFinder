@@ -9,13 +9,13 @@ public partial class PackedStringPool(byte[] data, int[] offsets)
 {
     // UTF-8 bytes packed contiguously: [s0][s1]...[sN-1]
     [MemoryPackInclude] private readonly byte[] _data = data;
-    
+
     // Sentinel offsets: length == Count + 1, with _offsets[Count] == _data.Length.
     [MemoryPackInclude] private readonly int[] _offsets = offsets;
-    
+
     [MemoryPackIgnore] internal byte[] Data => _data;
     [MemoryPackIgnore] internal int[] Offsets => _offsets;
-    
+
     [MemoryPackIgnore]
     public int Count => _offsets.Length - 1;
 
@@ -24,10 +24,10 @@ public partial class PackedStringPool(byte[] data, int[] offsets)
     {
         if ((uint)index >= (uint)Count)
             throw new ArgumentOutOfRangeException(nameof(index));
-        
+
         int off = _offsets[index];
         int len = _offsets[index + 1] - off; // no branch, sentinel makes this safe
-        
+
         return Encoding.UTF8.GetString(_data, off, len);
     }
 

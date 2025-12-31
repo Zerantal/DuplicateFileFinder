@@ -24,7 +24,7 @@ public sealed partial class Repo
                             $"Cannot migrate to {RepoSchemaVersion}.");
                 }
             }
-            
+
             // If nothing changed, ensure meta schema is at least RepoSchemaVersion and leave.
             if (!migrated)
             {

@@ -25,7 +25,7 @@ public static class SemanticRepoComparer
         IRepo repoB, string repoPathB)
     {
         var diff = new SemanticComparisonResult();
-        
+
         var snapA = repoA.GetRepoSnapshotView();
         var snapB = repoB.GetRepoSnapshotView();
 
@@ -34,7 +34,7 @@ public static class SemanticRepoComparer
         // CompareHashIndex(repoA, snapA, repoB, snapB, diff);
         CompareDirs(snapA, snapB, diff);
         CompareFiles(snapA, snapB, diff);
-        
+
 
         return diff;
     }

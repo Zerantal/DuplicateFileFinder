@@ -15,6 +15,6 @@ public sealed class VolumeInfo
     public required string DevicePath { get; init; }
 
     public string? DeviceModel { get; init; }
-    
+
     public required string VolumePath { get; init; }
 }

@@ -59,7 +59,7 @@ public sealed class HashIndexPluginTests
                 ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: hashDup),
                 ("c.bin", dirId: 12L, fileId: 3L, size: 100L, hash: hashUnique)
             ]);
-        
+
 
         await using var plugin = new HashIndexPlugin(_fs.Root);
 
@@ -86,7 +86,7 @@ public sealed class HashIndexPluginTests
     public async Task DefaultHash_IsIgnored_AndDoesNotProduceGroup()
     {
         var defaultHash = default(HashKey);
-        
+
         var snapshot = RepoUtil.MakeSnapshotV2(
             1,
             dirs: [],
@@ -95,7 +95,7 @@ public sealed class HashIndexPluginTests
                 ("a.bin", dirId: 10L, fileId: 1L, size: 100L, hash: defaultHash),
                 ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: defaultHash)
             ]);
-        
+
 
         await using var plugin = new HashIndexPlugin(_fs.Root);
 
@@ -103,13 +103,13 @@ public sealed class HashIndexPluginTests
 
         // Even though there are two files with the same default hash,
         // the plugin should ignore default hashes and not produce a group.
-        await AsyncUtil. WaitForConditionAsync(
+        await AsyncUtil.WaitForConditionAsync(
             () => plugin.GetDuplicateGroups().Count == 0,
             TimeSpan.FromSeconds(2));
 
         Assert.Empty(plugin.GetDuplicateGroups());
     }
-    
+
     [Fact]
     public async Task RebuildFromSnapshot_DoesNotDoubleCountDuplicates_AcrossMultipleRoots()
     {
@@ -125,7 +125,7 @@ public sealed class HashIndexPluginTests
             // Correct total duplicates:
             //  - per root: (2-1)=1 duplicate file, 1*100 bytes
             //  - across 2 roots: 2 duplicates, 200 bytes
-            var h = new HashKey([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]);
+            var h = new HashKey([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
             var snapshot = new RepoSnapshotView
             {

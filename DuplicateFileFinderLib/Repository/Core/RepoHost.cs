@@ -11,9 +11,9 @@ public sealed class RepoHost : IRepoHost
 {
     public IRepo Repo { get; }
     public IHashIndexReadModel HashIndex { get; }
-    
+
     public ITreeIndexReadModel TreeIndex { get; }
-    
+
     public IFileDirReadModel FileDirIndex { get; }
 
     public event EventHandler<RepoIndexesRebuiltEventArgs>? IndexesRebuilt;
@@ -23,7 +23,7 @@ public sealed class RepoHost : IRepoHost
 
     private RepoHost(IRepo repo, IFileDirReadModel fileDirIndex, IHashIndexReadModel hashIndex, ITreeIndexReadModel treeIndex)
     {
-        Repo      = repo;
+        Repo = repo;
         FileDirIndex = fileDirIndex;
         HashIndex = hashIndex;
         TreeIndex = treeIndex;
@@ -46,7 +46,7 @@ public sealed class RepoHost : IRepoHost
         repo.RegisterEventSinkWithBootstrap(fileDirIndex);
         repo.RegisterEventSinkWithBootstrap(hashIndex);
         repo.RegisterEventSinkWithBootstrap(treeIndex);
-        
+
         // 3.5 Wait until plugins have processed their bootstrap events
         await fileDirIndex.WhenReadyAsync(ct).ConfigureAwait(false);
         await hashIndex.WhenReadyAsync(ct).ConfigureAwait(false);

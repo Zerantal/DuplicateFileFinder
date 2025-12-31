@@ -24,10 +24,10 @@ public sealed class BaselineIndexTests
     {
         // parent=10: include 3 invalid dirs and 1 valid
         var view = new TestSnapshotViewBuilder()
-            .Dir(dirId: 1, parentDirId: 10, status: ScanEntryStatus.None,   name: "Skip-None", lastSeenScanSequence: 1)  // ignored (Status None)
-            .Dir(dirId: 2, parentDirId: -1, status: ScanEntryStatus.Enumerated,  name: "Skip-Neg",  lastSeenScanSequence: 1)  // ignored (ParentDirId < 0)
-            .Dir(dirId: 3, parentDirId: 10, status: ScanEntryStatus.Enumerated,  name: "",          lastSeenScanSequence: 1)  // ignored (empty name)
-            .Dir(dirId: 4, parentDirId: 10, status: ScanEntryStatus.Enumerated,  name: "Keep-Me",   lastSeenScanSequence: 7)  // kept
+            .Dir(dirId: 1, parentDirId: 10, status: ScanEntryStatus.None, name: "Skip-None", lastSeenScanSequence: 1)  // ignored (Status None)
+            .Dir(dirId: 2, parentDirId: -1, status: ScanEntryStatus.Enumerated, name: "Skip-Neg", lastSeenScanSequence: 1)  // ignored (ParentDirId < 0)
+            .Dir(dirId: 3, parentDirId: 10, status: ScanEntryStatus.Enumerated, name: "", lastSeenScanSequence: 1)  // ignored (empty name)
+            .Dir(dirId: 4, parentDirId: 10, status: ScanEntryStatus.Enumerated, name: "Keep-Me", lastSeenScanSequence: 7)  // kept
             .Build();
 
         var idx = new BaselineIndex(view);
@@ -49,8 +49,8 @@ public sealed class BaselineIndexTests
         // file 100 has empty name => still indexed by id (BaselineIndex adds to _fileById),
         // but should not be present in per-dir name map.
         var view = new TestSnapshotViewBuilder()
-            .File(fileId: 100, dirId: 20, status: ScanEntryStatus.Enumerated, name: "",      lastSeenScanSequence: 5)
-            .File(fileId: 101, dirId: 20, status: ScanEntryStatus.None,  name: "Skip",  lastSeenScanSequence: 5) // ignored entirely (Status None)
+            .File(fileId: 100, dirId: 20, status: ScanEntryStatus.Enumerated, name: "", lastSeenScanSequence: 5)
+            .File(fileId: 101, dirId: 20, status: ScanEntryStatus.None, name: "Skip", lastSeenScanSequence: 5) // ignored entirely (Status None)
             .File(fileId: 102, dirId: 20, status: ScanEntryStatus.Enumerated, name: "A.txt", lastSeenScanSequence: 5)
             .Build();
 
@@ -72,7 +72,7 @@ public sealed class BaselineIndexTests
     {
         var view = new TestSnapshotViewBuilder()
             .Dir(dirId: 1, parentDirId: 10, status: ScanEntryStatus.Deleted, name: "X", lastSeenScanSequence: 100)
-            .Dir(dirId: 2, parentDirId: 10, status: ScanEntryStatus.Enumerated,   name: "X", lastSeenScanSequence: 1)
+            .Dir(dirId: 2, parentDirId: 10, status: ScanEntryStatus.Enumerated, name: "X", lastSeenScanSequence: 1)
             .Build();
 
         var idx = new BaselineIndex(view);

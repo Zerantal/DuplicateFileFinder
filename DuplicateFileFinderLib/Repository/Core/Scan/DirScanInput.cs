@@ -10,5 +10,5 @@ public readonly record struct DirScanInput()
     public long CreatedTicks { get; init; } = 0;         // 0 if unknown
     public long ModifiedTicks { get; init; } = 0;        // 0 if unknown
     public ScanEntryStatus Status { get; init; } = ScanEntryStatus.None;
-    public string? ErrorMessage { get; init; } = null;  
+    public string? ErrorMessage { get; init; } = null;
 }

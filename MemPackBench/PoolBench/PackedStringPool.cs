@@ -30,7 +30,7 @@ public partial class PackedStringPool
 
         int off = Offsets[index];
         int len = Offsets[index + 1] - off; // no branch, sentinel makes this safe
-        
+
         return Encoding.UTF8.GetString(Data, off, len);
     }
 

@@ -48,21 +48,21 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             var rootRec = snapshot.GetDirRecord(rootHandle);
             if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
                 continue;
-            
+
             var scanRootFullPath = GetScanRootFullPath(scanRoot.DirId);
             var node = GetOrCreateNode(rootHandle, scanRootFullPath);
-        
+
             node.Parent = null;
             node.ShowFullPath = true;
             node.OnRootRemoved = n => folderRoots.Remove(n);
             node.ScanRootId = scanRoot.RootId;
-            
+
             InsertRootSorted(folderRoots, node);
         }
     }
 
     private FolderNodeViewModel GetOrCreateNode(DirHandle dirHandle, string parentPath)
-                {
+    {
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called before building nodes.");
 
@@ -74,7 +74,7 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
 
         var name = _snapshot.DecodeDirName(dirHandle);
         var fullPath = Path.Combine(parentPath, name);
-        
+
         var node = new FolderNodeViewModel(dirId, name, fullPath, _scanner)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded

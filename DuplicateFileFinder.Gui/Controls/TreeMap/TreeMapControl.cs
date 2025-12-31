@@ -16,11 +16,11 @@ public sealed class TreeMapControl : Control
     private int _shadeLevelsCached = 16;
     private int _maxRectanglesCached = 25_000;
     private bool _valuesArePreSummedCached;
-    
+
     // Scratch buffers to avoid per-call allocations.
     private readonly List<TreeItem> _itemsScratch = new(256);
-    private readonly List<TreeItem> _rowScratch   = new(64);
-    
+    private readonly List<TreeItem> _rowScratch = new(64);
+
     // ----------------- Styled properties -----------------
 
     public static readonly StyledProperty<TreeMapNode<ITreeMapNodeElement>?> RootProperty =
@@ -78,7 +78,7 @@ public sealed class TreeMapControl : Control
         AvaloniaProperty.Register<TreeMapControl, int>(
             nameof(MaxRectangles),
             25_000);
-    
+
     public static readonly StyledProperty<bool> ValuesArePreSummedProperty =
         AvaloniaProperty.Register<TreeMapControl, bool>(
             nameof(ValuesArePreSummed),
@@ -173,7 +173,7 @@ public sealed class TreeMapControl : Control
         var h = double.IsInfinity(availableSize.Height) ? 200 : availableSize.Height;
         return new Size(w, h);
     }
-    
+
     public bool ValuesArePreSummed
     {
         get => GetValue(ValuesArePreSummedProperty);
@@ -188,13 +188,13 @@ public sealed class TreeMapControl : Control
         _valuesArePreSummedCached = ValuesArePreSummed;
     }
 
-    
+
     protected override Size ArrangeOverride(Size finalSize)
     {
         using (TimingLog.Start("TreeMapControl.ArrangeOverride"))
         {
             RefreshCachedProps();
-            
+
             _layout.Clear();
             _layout.EnsureCapacity(_maxRectanglesCached + _shadeLevelsCached);
             _valueCache.Clear();
@@ -276,52 +276,52 @@ public sealed class TreeMapControl : Control
     {
         if (_rectCount >= _maxRectanglesCached)
             return;
-    
+
         if (!node.HasChildren)
             return;
-    
+
         // Border margin logic (same semantics as before).
         var minSize = MinBorderSize;
         var canDrawBorder = bounds.Width >= minSize && bounds.Height >= minSize;
         var usePrimary = depth <= PrimaryBorderDepth;
         var thickness = usePrimary ? PrimaryBorderThickness : SecondaryBorderThickness;
         var margin = (canDrawBorder && thickness > 0) ? thickness : 0.0;
-    
+
         var inner = bounds.Deflate(new Thickness(margin));
         if (inner.Width <= 0 || inner.Height <= 0)
             return;
-    
+
         // Build treemap items (single pass, reuse scratch list).
         _itemsScratch.Clear();
         var children = node.Children;
         if (_itemsScratch.Capacity < children.Count)
             _itemsScratch.Capacity = children.Count;
-    
+
         double total = 0;
         foreach (var c in children)
         {
             var v = Math.Max(0, GetNodeValue(c));
             if (v <= 0)
                 continue;
-    
+
             _itemsScratch.Add(new TreeItem { Node = c, Value = v });
             total += v;
         }
-    
+
         if (_itemsScratch.Count == 0 || total <= 0)
             return;
-    
+
         // Scale values into areas for this rect.
         var totalArea = inner.Width * inner.Height;
         var scale = totalArea / total;
-    
+
         for (int i = 0; i < _itemsScratch.Count; i++)
         {
             var ti = _itemsScratch[i];
             ti.Area = ti.Value * scale;
             _itemsScratch[i] = ti;
         }
-    
+
         // Consume produced rects immediately: emit + enqueue frames.
         var consumer = new ChildRectConsumer(
             owner: this,
@@ -329,7 +329,7 @@ public sealed class TreeMapControl : Control
             childDepth: depth + 1,
             inheritedBaseColor: inheritedBaseColor,
             baseDepth: baseDepth);
-    
+
         SquarifyFlat(_itemsScratch, inner, ref consumer);
     }
 
@@ -345,14 +345,14 @@ public sealed class TreeMapControl : Control
             _rowScratch.Capacity = Math.Min(items.Count, 64);
 
         int index = 0;
-    
+
         while (index < items.Count && rect is { Width: > 0, Height: > 0 })
         {
             _rowScratch.Clear();
 
             bool horizontal = rect.Width >= rect.Height;
             double w = horizontal ? rect.Width : rect.Height;
-    
+
             // Start row with first item
             var first = items[index++];
             _rowScratch.Add(first);
@@ -360,7 +360,7 @@ public sealed class TreeMapControl : Control
             double rowArea = first.Area;
             double minA = first.Area;
             double maxA = first.Area;
-    
+
             double bestWorst = WorstAspectFromStats(rowArea, minA, maxA, w);
 
             // Greedily grow row while aspect ratio improves
@@ -373,7 +373,7 @@ public sealed class TreeMapControl : Control
                 double newMaxA = candidate.Area > maxA ? candidate.Area : maxA;
 
                 double newWorst = WorstAspectFromStats(newRowArea, newMinA, newMaxA, w);
-    
+
                 if (newWorst <= bestWorst)
                 {
                     _rowScratch.Add(candidate);
@@ -388,36 +388,36 @@ public sealed class TreeMapControl : Control
                     break;
                 }
             }
-    
+
             if (rowArea <= 0)
                 return;
-    
+
             if (horizontal)
             {
                 double rowHeight = rowArea / rect.Width;
                 double x = rect.X;
-    
+
                 foreach (var item in _rowScratch)
                 {
                     double itemWidth = item.Area / rowHeight;
                     consumer.Consume(item.Node, new Rect(x, rect.Y, itemWidth, rowHeight));
                     x += itemWidth;
                 }
-    
+
                 rect = new Rect(rect.X, rect.Y + rowHeight, rect.Width, Math.Max(0, rect.Height - rowHeight));
             }
             else
             {
                 double rowWidth = rowArea / rect.Height;
                 double y = rect.Y;
-    
+
                 foreach (var item in _rowScratch)
                 {
                     double itemHeight = item.Area / rowWidth;
                     consumer.Consume(item.Node, new Rect(rect.X, y, rowWidth, itemHeight));
                     y += itemHeight;
                 }
-    
+
                 rect = new Rect(rect.X + rowWidth, rect.Y, Math.Max(0, rect.Width - rowWidth), rect.Height);
             }
         }
@@ -436,7 +436,7 @@ public sealed class TreeMapControl : Control
         double b = s2 / (w2 * minArea);
         return a > b ? a : b;
     }
-    
+
     public override void Render(DrawingContext context)
     {
         using (TimingLog.Start("TreeMapControl.Render"))
@@ -507,7 +507,7 @@ public sealed class TreeMapControl : Control
     }
 
     // ----------------- Value aggregation -----------------
-    
+
     // recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
     private double GetNodeValue(TreeMapNode<ITreeMapNodeElement> node)
     {
@@ -562,12 +562,12 @@ public sealed class TreeMapControl : Control
         uint key = ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
         if (_brushCache.TryGetValue(key, out var b))
             return b;
-    
+
         b = new SolidColorBrush(c);
         _brushCache[key] = b;
         return b;
     }
-    
+
     private IBrush GetEffectiveBrush(int depth, Color? baseColor, int baseDepth)
     {
         if (baseColor.HasValue)
@@ -735,11 +735,11 @@ public sealed class TreeMapControl : Control
     {
         if (row.Count == 0 || w <= 0)
             return double.MaxValue;
-    
+
         double sum = 0;
         double minA = double.PositiveInfinity;
         double maxA = 0;
-    
+
         for (int i = 0; i < row.Count; i++)
         {
             var a = row[i].Area;
@@ -747,19 +747,19 @@ public sealed class TreeMapControl : Control
             if (a < minA) minA = a;
             if (a > maxA) maxA = a;
         }
-    
+
         if (sum <= 0 || minA <= 0)
             return double.MaxValue;
-    
+
         double s2 = sum * sum;
         double w2 = w * w;
-    
+
         var r1 = (w2 * maxA) / s2;
         var r2 = s2 / (w2 * minA);
-    
+
         return r1 > r2 ? r1 : r2;
     }
-    
+
     private Rect LayoutRow(
         IReadOnlyList<TreeItem> row,
         double rowArea,
@@ -835,7 +835,7 @@ public sealed class TreeMapControl : Control
                 break;
             }
         }
-        
+
         if (element is null)
         {
             if (_currentTooltipElement is not null)
@@ -845,15 +845,15 @@ public sealed class TreeMapControl : Control
             }
             return;
         }
-        
+
         if (!ReferenceEquals(_currentTooltipElement, element))
         {
             _currentTooltipElement = element;
-            
-            var tip = element.ToolTipFactory(); 
+
+            var tip = element.ToolTipFactory();
             ToolTip.SetTip(this, tip);
         }
-            
+
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
@@ -894,12 +894,12 @@ public sealed class TreeMapControl : Control
         public required double Value { get; init; }
         public double Area { get; set; }
     }
-    
+
     private interface IRectConsumer
     {
         void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect);
     }
-    
+
     private readonly struct ChildRectConsumer : IRectConsumer
     {
         private readonly TreeMapControl _owner;

@@ -14,7 +14,7 @@ public static class LoggingSetup
     public static void Configure(string appName = "DuplicateFileFinder")
     {
         var cfg = new LoggingConfiguration();
-        
+
         string baseDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             appName, "logs");

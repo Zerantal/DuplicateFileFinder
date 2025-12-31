@@ -40,9 +40,9 @@ public sealed class ScanRunTests
         Assert.Equal(1, (byte)ScanRunStatus.Completed);
         Assert.Equal(2, (byte)ScanRunStatus.Failed);
         Assert.Equal(3, (byte)ScanRunStatus.Cancelled);
-        
+
         Assert.Equal(0, (byte)HashPolicyMode.Default);
         Assert.Equal(1, (byte)HashPolicyMode.ForceRehash);
-        
+
     }
 }

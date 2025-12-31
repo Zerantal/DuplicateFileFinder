@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "path": "DuplicateFileFinder.sln",
+    "projects": [
+      "DuplicateFileFinder.Gui\\DuplicateFileFinder.Gui.csproj",
+      "DuplicateFileFinderLib\\DuplicateFileFinderLib.csproj",
+      "DuplicateFileFinderLibTests\\DuplicateFileFinderLibTests.csproj",
+      "RepoCompareTool\\RepoCompareTool.csproj",
+      "RepoRepair\\RepoRepair.csproj"
+    ]
+  }
+}
+

@@ -16,10 +16,10 @@ public static class Conversions
         // Pre-size to avoid rehash churn.
         var dirs = new Dictionary<long, DirHandle>(capacity: v2.DirsById.Length);
         var files = new Dictionary<long, FileHandle>(capacity: v2.FilesById.Length);
-        
+
         foreach (var kv in v2.DirsById)
             dirs[kv.Key] = kv.Value;
-        
+
         foreach (var kv in v2.FilesById)
             files[kv.Key] = kv.Value;
 

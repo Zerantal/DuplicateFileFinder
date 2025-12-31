@@ -36,7 +36,7 @@ public static class Program
             var repoB = await Repo.OpenAsync(pathB);
 
             var result = SemanticRepoComparer.Compare(repoA, pathA, repoB, pathB);
-            
+
             if (result.SemanticallyIdentical)
             {
                 Console.WriteLine();

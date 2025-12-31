@@ -29,7 +29,7 @@ public sealed class FileRecordV2Tests
 
         AssertFileEqual(original, clone);
     }
-    
+
     [Fact]
     public void FileRecordV2_Array_MemoryPack_RoundTrips_AllElements()
     {
@@ -55,7 +55,7 @@ public sealed class FileRecordV2Tests
         for (int i = 0; i < originals.Length; i++)
             AssertFileEqual(originals[i], clones[i]);
     }
-    
+
     // NOTE: FileRecordV2 implement IEquatable based on Id only.
     // These assertions verify full field roundtrip (stronger than Equals()).
     private static void AssertFileEqual(in FileRecordV2 a, in FileRecordV2 b)

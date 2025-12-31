@@ -24,7 +24,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         lock (Sync)
         {
             var dirId = input.DirId > 0 ? input.DirId : repo.AllocateDirId();
-            
+
             UpsertDirInto(_full, input, dirId);
             UpsertDirInto(_delta, input, dirId);
 
@@ -125,7 +125,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
 
             // Build snapshot from drained delta
             var snap = BuildSnapshotFrom(_drain, scanRootId);
-            
+
             // Clear drained buffer so it can be reused next time
             ClearBuffer(_drain);
 
@@ -147,12 +147,12 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
 
     private static ScanRootSnapshotV2 BuildSnapshotFrom(Buffer b, long scanRootId)
         => new()
-            {
-                ScanRootId = scanRootId,
-                StringPool = b.Sb.Build(),
-                Dirs = b.Dirs.Where(d => d.Status != ScanEntryStatus.None).ToArray(),
-                Files = b.Files.Where(f => f.Status != ScanEntryStatus.None).ToArray()
-            };
+        {
+            ScanRootId = scanRootId,
+            StringPool = b.Sb.Build(),
+            Dirs = b.Dirs.Where(d => d.Status != ScanEntryStatus.None).ToArray(),
+            Files = b.Files.Where(f => f.Status != ScanEntryStatus.None).ToArray()
+        };
 
     private void UpsertDirInto(Buffer b, in DirScanInput input, long dirId)
     {
@@ -177,7 +177,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         idx = b.Dirs.Count;
         b.Dirs.Add(rec);
         b.DirIdToIndex.Add(dirId, idx);
-        }
+    }
 
     private void UpsertFileInto(Buffer b, in FileScanInput input, long fileId)
     {
@@ -368,7 +368,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
 
         b.Files[idx] = b.Files[idx] with
         {
-            Hash = hash, 
+            Hash = hash,
             Status = ScanEntryStatus.Hashed,
             ErrorMessageStrIdx = -1,
         };
@@ -397,7 +397,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         public int GetHashCode((long dirId, string name) obj)
             => HashCode.Combine(obj.dirId, PathUtils.PathComparer.GetHashCode(obj.name));
     }
-    
+
     private sealed class Buffer
     {
         public readonly PackedStringBuilder Sb =

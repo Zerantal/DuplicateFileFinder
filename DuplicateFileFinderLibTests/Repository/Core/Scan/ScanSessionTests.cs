@@ -260,7 +260,7 @@ public sealed class ScanSessionTests
         Assert.Equal(1, repo.GetMethodCount("MarkScanFailedAsync"));
         Assert.True(repo.LastFailedCancelled);
     }
-    
+
     [Fact]
     public async Task CompleteAsync_EmptyRootDirectory_IncludesRootDirInSnapshot_WithStatusEnumerated_WhenRootIdProvided()
     {
@@ -351,7 +351,7 @@ public sealed class ScanSessionTests
         Assert.Equal(1000, root.DirId);
         Assert.Equal(ScanEntryStatus.Enumerated, root.Status);
     }
-    
+
     [Fact]
     public async Task FlushProgressAsync_TimeBased_NoFasterThanInterval_WritesAtMostOneCheckpoint()
     {
@@ -433,7 +433,7 @@ public sealed class ScanSessionTests
         await session.FlushProgressAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, repo.GetMethodCount("CommitCheckpoint"));
     }
-    
+
     // ---------------- helpers ----------------
 
     private static ScanSession NewSession(CapturingRepo repo, ScanRun run, long rootDirId = -1)
@@ -460,6 +460,6 @@ public sealed class ScanSessionTests
             StartedAt = DateTimeOffset.UtcNow,
             Status = ScanRunStatus.InProgress
         };
-    
-    
+
+
 }

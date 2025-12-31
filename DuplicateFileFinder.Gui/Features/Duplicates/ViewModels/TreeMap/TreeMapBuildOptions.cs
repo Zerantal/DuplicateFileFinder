@@ -15,6 +15,6 @@ public sealed record TreeMapBuildOptions
     public bool DirectoriesOnly { get; init; } = false;
 
     public int MaxTotalFileNodes { get; init; } = int.MaxValue;
-    
+
     public static TreeMapBuildOptions Default => new();
 }
