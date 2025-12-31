@@ -44,16 +44,16 @@ jobs:
             **/packages.lock.json
             global.json
 
-      - name: Restore solution
-        run: dotnet restore DuplicateFileFinder.sln
+      - name: Restore
+        run: dotnet restore DuplicateFileFinder.ci.slnf
 
       - name: Build solution (Release) - Windows (no parallel)
         if: runner.os == 'Windows'
-        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false /m:1
+        run: dotnet build DuplicateFileFinder.ci.slnf -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false /m:1
       
       - name: Build solution (Release) - Non-Windows
         if: runner.os != 'Windows'
-        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false
+        run: dotnet build DuplicateFileFinder.ci.slnf -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false
       
       - name: Test (DuplicateFileFinderLibTests)
         run: >

@@ -1,0 +1,60 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DuplicateFileFinder.Gui", "DuplicateFileFinder.Gui\DuplicateFileFinder.Gui.csproj", "{06B9BD8B-69E4-4618-85B5-B1F858A239EF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DuplicateFileFinderLib", "DuplicateFileFinderLib\DuplicateFileFinderLib.csproj", "{836BD36E-E777-4B3A-9459-A3449FBAB424}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DuplicateFileFinderLibTests", "DuplicateFileFinderLibTests\DuplicateFileFinderLibTests.csproj", "{F50E6AAF-5956-4CD9-98E2-8F4F04C42968}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RepoCompareTool", "RepoCompareTool\RepoCompareTool.csproj", "{094372BA-7178-40E6-B88B-325D5A4DB9A0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RepoRepair", "RepoRepair\RepoRepair.csproj", "{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{E59152DC-4F76-4229-B6B8-F160EB36433D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{49FC59A2-5A40-40F0-A470-371D7887F0AD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{CA315BF2-4FCC-459F-8E8C-9C36AF0B8943}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution		
+		{06B9BD8B-69E4-4618-85B5-B1F858A239EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{06B9BD8B-69E4-4618-85B5-B1F858A239EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{06B9BD8B-69E4-4618-85B5-B1F858A239EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{06B9BD8B-69E4-4618-85B5-B1F858A239EF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{836BD36E-E777-4B3A-9459-A3449FBAB424}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{836BD36E-E777-4B3A-9459-A3449FBAB424}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{836BD36E-E777-4B3A-9459-A3449FBAB424}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{836BD36E-E777-4B3A-9459-A3449FBAB424}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F50E6AAF-5956-4CD9-98E2-8F4F04C42968}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F50E6AAF-5956-4CD9-98E2-8F4F04C42968}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F50E6AAF-5956-4CD9-98E2-8F4F04C42968}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F50E6AAF-5956-4CD9-98E2-8F4F04C42968}.Release|Any CPU.Build.0 = Release|Any CPU		
+		{094372BA-7178-40E6-B88B-325D5A4DB9A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{094372BA-7178-40E6-B88B-325D5A4DB9A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{094372BA-7178-40E6-B88B-325D5A4DB9A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{094372BA-7178-40E6-B88B-325D5A4DB9A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B}.Release|Any CPU.Build.0 = Release|Any CPU		
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{CA315BF2-4FCC-459F-8E8C-9C36AF0B8943} = {E59152DC-4F76-4229-B6B8-F160EB36433D}		
+		{836BD36E-E777-4B3A-9459-A3449FBAB424} = {E59152DC-4F76-4229-B6B8-F160EB36433D}		
+		{094372BA-7178-40E6-B88B-325D5A4DB9A0} = {CA315BF2-4FCC-459F-8E8C-9C36AF0B8943}
+		{8A6393EE-52D4-4C58-9B73-A5E2AE3F463B} = {CA315BF2-4FCC-459F-8E8C-9C36AF0B8943}
+		{F50E6AAF-5956-4CD9-98E2-8F4F04C42968} = {49FC59A2-5A40-40F0-A470-371D7887F0AD}
+		{06B9BD8B-69E4-4618-85B5-B1F858A239EF} = {E59152DC-4F76-4229-B6B8-F160EB36433D}		
+	EndGlobalSection
+EndGlobal
