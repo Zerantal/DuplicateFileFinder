@@ -1,4 +1,5 @@
 // Linux-only type checks without allocations beyond path string
+#pragma warning disable IDE1006
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -95,3 +96,4 @@ internal static partial class UnixTypes
 
     }
 }
+#pragma warning restore IDE1006
