@@ -47,7 +47,12 @@ jobs:
       - name: Restore solution
         run: dotnet restore DuplicateFileFinder.sln
 
-      - name: Build solution (Release)
+      - name: Build solution (Release) - Windows (no parallel)
+        if: runner.os == 'Windows'
+        run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false /m:1
+      
+      - name: Build solution (Release) - Non-Windows
+        if: runner.os != 'Windows'
         run: dotnet build DuplicateFileFinder.sln -c ${{ env.CONFIGURATION }} --no-restore /p:UseSharedCompilation=false
       
       - name: Test (DuplicateFileFinderLibTests)
