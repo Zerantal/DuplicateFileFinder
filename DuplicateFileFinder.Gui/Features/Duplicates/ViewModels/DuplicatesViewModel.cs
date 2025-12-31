@@ -105,6 +105,8 @@ public partial class DuplicatesViewModel : ObservableObject
             _treeMap.IsMetricBytes = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricFiles));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateBytes));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateFiles));
         }
     }
 
@@ -117,8 +119,39 @@ public partial class DuplicatesViewModel : ObservableObject
             _treeMap.IsMetricFiles = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricBytes));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateBytes));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateFiles));
         }
     }
+
+    public bool IsTreeMapMetricDuplicateFiles
+    {
+        get => _treeMap.IsMetricDuplicateFiles;
+        set
+        {
+            if (_treeMap.IsMetricDuplicateFiles == value) return;
+            _treeMap.IsMetricDuplicateFiles = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsTreeMapMetricBytes));
+            OnPropertyChanged(nameof(IsTreeMapMetricFiles));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateBytes));
+        }
+    }
+
+    public bool IsTreeMapMetricDuplicateBytes
+    {
+        get => _treeMap.IsMetricDuplicateBytes;
+        set
+        {
+            if (_treeMap.IsMetricDuplicateBytes == value) return;
+            _treeMap.IsMetricDuplicateBytes = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsTreeMapMetricBytes));
+            OnPropertyChanged(nameof(IsTreeMapMetricFiles));
+            OnPropertyChanged(nameof(IsTreeMapMetricDuplicateFiles));
+        }
+    }
+
 
     public object MaxDepth => _treeMap.Options.MaxDepth + 2;
 

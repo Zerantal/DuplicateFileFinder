@@ -174,15 +174,23 @@
                         <RadioButton Content="File Count"
                                      GroupName="TreeMapMetric"
                                      IsChecked="{Binding IsTreeMapMetricFiles, Mode=TwoWay}" />
+
+                        <RadioButton Content="Duplicate Files"
+                                     GroupName="TreeMapMetric"
+                                     IsChecked="{Binding IsTreeMapMetricDuplicateFiles, Mode=TwoWay}" />
+
+                        <RadioButton Content="Duplicate Bytes"
+                                     GroupName="TreeMapMetric"
+                                     IsChecked="{Binding IsTreeMapMetricDuplicateBytes, Mode=TwoWay}" />
                     </StackPanel>
                     <!-- Bind Root to whatever TreeMapNode you expose from DuplicatesViewModel -->
                     <treeMap:TreeMapControl Root="{Binding DirectoryTreeMapRoot}"
-                                             PrimaryBorderDepth="2"
-                                             ValuesArePreSummed="True"
-                                             MaxRectangles="150000"
-                                             ShadeLevels="{Binding MaxDepth}"
-                                             Margin="0,6,0,0" />
-                    
+                                            PrimaryBorderDepth="2"
+                                            ValuesArePreSummed="True"
+                                            MaxRectangles="150000"
+                                            ShadeLevels="{Binding MaxDepth}"
+                                            Margin="0,6,0,0" />
+
                 </DockPanel>
             </TabItem>
 
