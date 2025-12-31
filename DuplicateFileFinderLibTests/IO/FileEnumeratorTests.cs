@@ -140,7 +140,7 @@ public sealed class FileEnumeratorTests : IDisposable
         if (made)
             Assert.DoesNotContain(list, e => !e.IsDirectory && e.FullPath == fifo);
     }
-    
+
     [Fact]
     public void FallbackEnumeration_DirectoryEntry_Name_ShouldBeDirectoryName_NotRootOrFullPath()
     {
