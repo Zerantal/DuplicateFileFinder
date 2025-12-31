@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Storage.Models;
@@ -51,7 +52,8 @@ public partial class PackedStringPool(byte[] data, int[] offsets)
         for (int i = 0; i < n; i++)
             total += Encoding.UTF8.GetByteCount(strings[i]);
 
-        if (total > int.MaxValue) throw new InvalidOperationException("Pool data too large for single byte[]");
+        if (total > int.MaxValue)
+            throw new InvalidOperationException("Pool data too large for single byte[]");
 
         var data = new byte[(int)total];
 

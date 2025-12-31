@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
@@ -89,8 +90,10 @@ public sealed partial class Repo
             _scanRunIndex[sequence] = updated;
 
             var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
-            if (idx >= 0) _scanRuns[idx] = updated;
-            else _scanRuns.Add(updated);
+            if (idx >= 0)
+                _scanRuns[idx] = updated;
+            else
+                _scanRuns.Add(updated);
 
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };
@@ -123,8 +126,10 @@ public sealed partial class Repo
             _scanRunIndex[sequence] = updated;
 
             var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
-            if (idx >= 0) _scanRuns[idx] = updated;
-            else _scanRuns.Add(updated);
+            if (idx >= 0)
+                _scanRuns[idx] = updated;
+            else
+                _scanRuns.Add(updated);
 
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };

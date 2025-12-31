@@ -8,7 +8,8 @@ public sealed class ChecksumPipelineMD5 : IChecksumPipeline
 {
     public ChecksumPipelineMD5(int bufferSize = 128 * 1024)
     {
-        if (bufferSize <= 0) throw new ArgumentOutOfRangeException(nameof(bufferSize));
+        if (bufferSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(bufferSize));
         BufferSize = bufferSize;
     }
 

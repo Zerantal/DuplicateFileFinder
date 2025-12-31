@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+
 using JetBrains.Annotations;
+
 using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
 using DuplicatesViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicatesViewModel;
 using FolderNodeViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.FolderNodeViewModel;

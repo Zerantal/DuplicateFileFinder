@@ -1,6 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -34,7 +36,8 @@ public partial class TreeMapController : ObservableObject
         get => Metric == TreeMapMetric.TotalBytes;
         set
         {
-            if (!value) return;
+            if (!value)
+                return;
             if (Metric != TreeMapMetric.TotalBytes)
                 Metric = TreeMapMetric.TotalBytes;
         }
@@ -45,7 +48,8 @@ public partial class TreeMapController : ObservableObject
         get => Metric == TreeMapMetric.TotalFiles;
         set
         {
-            if (!value) return;
+            if (!value)
+                return;
             if (Metric != TreeMapMetric.TotalFiles)
                 Metric = TreeMapMetric.TotalFiles;
         }
@@ -56,7 +60,8 @@ public partial class TreeMapController : ObservableObject
         get => Metric == TreeMapMetric.DuplicateFiles;
         set
         {
-            if (!value) return;
+            if (!value)
+                return;
             if (Metric != TreeMapMetric.DuplicateFiles)
                 Metric = TreeMapMetric.DuplicateFiles;
         }
@@ -67,7 +72,8 @@ public partial class TreeMapController : ObservableObject
         get => Metric == TreeMapMetric.DuplicateBytes;
         set
         {
-            if (!value) return;
+            if (!value)
+                return;
             if (Metric != TreeMapMetric.DuplicateBytes)
                 Metric = TreeMapMetric.DuplicateBytes;
         }

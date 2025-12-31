@@ -1,8 +1,10 @@
 // ViewModels/FolderNodeViewModel.cs
 
 using System.Collections.ObjectModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
@@ -17,7 +19,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     private long _scanRootId = -1;
 
     // Dummy child used to show the expand arrow before children are loaded.
-    private static readonly FolderNodeViewModel DummyChild =
+    private static readonly FolderNodeViewModel _dummyChild =
         new(0, string.Empty, string.Empty, null, isDummy: true);
 
     public FolderNodeViewModel(
@@ -53,7 +55,8 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         get => _name;
         set
         {
-            if (value == _name) return;
+            if (value == _name)
+                return;
             _name = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(DisplayName));
@@ -65,7 +68,8 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         get => _fullPath;
         set
         {
-            if (value == _fullPath) return;
+            if (value == _fullPath)
+                return;
             _fullPath = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(DisplayName));
@@ -112,11 +116,11 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     internal void AddDummyChild()
     {
         Children.Clear();
-        Children.Add(DummyChild);
+        Children.Add(_dummyChild);
     }
 
     internal bool HasDummyChild =>
-        Children.Count == 1 && ReferenceEquals(Children[0], DummyChild);
+        Children.Count == 1 && ReferenceEquals(Children[0], _dummyChild);
 
     public long ScanRootId
     {

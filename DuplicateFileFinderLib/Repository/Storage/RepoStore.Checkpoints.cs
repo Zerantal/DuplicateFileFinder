@@ -1,8 +1,10 @@
 // DuplicateFileFinderLib/Repository/Storage/RepoStore.Checkpoints.cs
 
 using System.Globalization;
-using MemoryPack;
+
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
+using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Storage;
 
@@ -47,7 +49,7 @@ internal static partial class RepoStore
 
         var tmp = NewUniqueTmpPath(path);
 
-        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             try
@@ -79,7 +81,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            WriteGate.Release();
+            _writeGate.Release();
         }
     }
 
@@ -132,14 +134,16 @@ internal static partial class RepoStore
         if (!Directory.Exists(dir))
             return;
 
-        await WriteGate.WaitAsync(ct).ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             try
             {
                 foreach (var path in Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk"))
                 {
-                    try { File.Delete(path); } catch { /* tolerate */ }
+                    try
+                    { File.Delete(path); }
+                    catch { /* tolerate */ }
                 }
             }
             catch
@@ -149,7 +153,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            WriteGate.Release();
+            _writeGate.Release();
         }
     }
 }

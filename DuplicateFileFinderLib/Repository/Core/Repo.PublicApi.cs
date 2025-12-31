@@ -1,6 +1,7 @@
 // DuplicateFileFinderLib/Repository/Core/Repo.PublicApi.cs
 
 using System.Collections.ObjectModel;
+
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -41,7 +42,8 @@ public sealed partial class Repo
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
 
         // Repo does not own plugins; RepoHost disposes plugins.

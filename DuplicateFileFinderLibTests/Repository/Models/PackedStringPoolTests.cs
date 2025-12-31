@@ -2,7 +2,9 @@
 
 using System;
 using System.Linq;
+
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Models;

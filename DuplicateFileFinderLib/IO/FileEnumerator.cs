@@ -1,7 +1,9 @@
 // DuplicateFileFinderLib/FileSystem/FileEnumerator.cs
 
 using System.IO.Enumeration;
+
 using DuplicateFileFinderLib.Util;
+
 using NLog;
 
 namespace DuplicateFileFinderLib.IO;
@@ -21,9 +23,9 @@ public interface IFileEnumerator
 
 public sealed class FileEnumerator : IFileEnumerator
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
-    private static readonly EnumerationOptions EnumOpts = new()
+    private static readonly EnumerationOptions _enumOpts = new()
     {
         IgnoreInaccessible = true,
         RecurseSubdirectories = false,
@@ -40,7 +42,7 @@ public sealed class FileEnumerator : IFileEnumerator
     {
         if (IsVirtualOrEphemeralRoot(dir))
         {
-            Log.Info("Skipping ephemeral directory: {dir}", dir);
+            _log.Info("Skipping ephemeral directory: {dir}", dir);
             yield break;
         }
 
@@ -74,7 +76,7 @@ public sealed class FileEnumerator : IFileEnumerator
                     fe.Length,
                     fe.CreationTimeUtc,
                     fe.LastWriteTimeUtc),
-                EnumOpts)
+                _enumOpts)
             {
                 ShouldIncludePredicate = (ref fe) =>
                 {
@@ -85,9 +87,11 @@ public sealed class FileEnumerator : IFileEnumerator
                             return false;
                     }
 
-                    if (fe.IsDirectory) return true;
+                    if (fe.IsDirectory)
+                        return true;
 
-                    if (fe.Length > 0) return true;
+                    if (fe.Length > 0)
+                        return true;
 
                     // length == 0 (or odd values)
                     if (OperatingSystem.IsLinux())
@@ -104,7 +108,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
         {
-            Log.Warn(ex, "Aborting enumeration of {path}", dir);
+            _log.Warn(ex, "Aborting enumeration of {path}", dir);
             return true;
         }
 
@@ -116,12 +120,13 @@ public sealed class FileEnumerator : IFileEnumerator
             FsEntry current;
             try
             {
-                if (!en.MoveNext()) break;
+                if (!en.MoveNext())
+                    break;
                 current = en.Current;
             }
             catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
             {
-                Log.Warn(ex, "Aborting fast enumeration of {path}", dir);
+                _log.Warn(ex, "Aborting fast enumeration of {path}", dir);
                 return false;
             }
 
@@ -137,7 +142,7 @@ public sealed class FileEnumerator : IFileEnumerator
     {
         buffer.Clear();
 
-        Log.Info("Attempting fallback directory enumeration of {path}", dir);
+        _log.Info("Attempting fallback directory enumeration of {path}", dir);
 
         // Step 1: directories
         string[] dirs;
@@ -147,7 +152,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex)
         {
-            Log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
+            _log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
             return;
         }
 
@@ -173,7 +178,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex)
         {
-            Log.Warn(ex, "Unable to retrieve file listing. Skipping file enumeration of {path}", dir);
+            _log.Warn(ex, "Unable to retrieve file listing. Skipping file enumeration of {path}", dir);
             return;
         }
 
@@ -195,7 +200,7 @@ public sealed class FileEnumerator : IFileEnumerator
             }
             catch (Exception ex)
             {
-                Log.Warn(ex, "Skipping file {path}", f);
+                _log.Warn(ex, "Skipping file {path}", f);
 
                 // Some NTFS special files throw or report -1; skip them
                 continue;
@@ -211,13 +216,18 @@ public sealed class FileEnumerator : IFileEnumerator
 
     private static bool IsVirtualOrEphemeralRoot(string path)
     {
-        if (!OperatingSystem.IsLinux()) return false;
+        if (!OperatingSystem.IsLinux())
+            return false;
         var p = path.AsSpan();
-        if (p.StartsWith("/proc".AsSpan(), StringComparison.Ordinal)) return true;
-        if (p.StartsWith("/sys".AsSpan(), StringComparison.Ordinal)) return true;
-        if (p.StartsWith("/dev".AsSpan(), StringComparison.Ordinal)) return true;
+        if (p.StartsWith("/proc".AsSpan(), StringComparison.Ordinal))
+            return true;
+        if (p.StartsWith("/sys".AsSpan(), StringComparison.Ordinal))
+            return true;
+        if (p.StartsWith("/dev".AsSpan(), StringComparison.Ordinal))
+            return true;
         if (p.StartsWith("/run/user/".AsSpan(), StringComparison.Ordinal) &&
-            p.Contains("/gvfs".AsSpan(), StringComparison.Ordinal)) return true;
+            p.Contains("/gvfs".AsSpan(), StringComparison.Ordinal))
+            return true;
         return false;
     }
 }

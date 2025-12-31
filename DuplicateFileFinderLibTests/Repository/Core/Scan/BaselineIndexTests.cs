@@ -2,7 +2,9 @@
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Core.Scan;

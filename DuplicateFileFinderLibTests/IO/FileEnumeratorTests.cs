@@ -4,8 +4,11 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+
 using DuplicateFileFinderLib.IO;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.IO;
@@ -48,7 +51,8 @@ public sealed class FileEnumeratorTests : IDisposable
     [Fact]
     public void Linux_VirtualRoots_AreSkipped()
     {
-        if (!OperatingSystem.IsLinux()) return;
+        if (!OperatingSystem.IsLinux())
+            return;
 
         var sut = new FileEnumerator();
         var list = new List<FsEntry>(sut.EnumerateChildren("/proc", CancellationToken.None));
@@ -127,7 +131,8 @@ public sealed class FileEnumeratorTests : IDisposable
     [Fact]
     public void Linux_Fifo_IsFiltered()
     {
-        if (!OperatingSystem.IsLinux()) return;
+        if (!OperatingSystem.IsLinux())
+            return;
 
         var dir = PathUtil.P(_fs.Root, "pipes");
         Directory.CreateDirectory(dir);
@@ -175,7 +180,8 @@ public sealed class FileEnumeratorTests : IDisposable
         }
         finally
         {
-            try { Directory.Delete(root, recursive: true); }
+            try
+            { Directory.Delete(root, recursive: true); }
             catch { /* best-effort */ }
         }
     }

@@ -76,7 +76,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
     /// </summary>
     public void Upsert(TItem item)
     {
-        if (item == null) throw new ArgumentNullException(nameof(item));
+        if (item == null)
+            throw new ArgumentNullException(nameof(item));
         var key = _keySelector(item);
 
         if (_index.TryGetValue(key, out var existing))
@@ -112,7 +113,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
     /// </summary>
     public void EndUpdate()
     {
-        if (!_suppressNotification) return;
+        if (!_suppressNotification)
+            return;
         _suppressNotification = false;
         RaiseReset();
     }
@@ -122,7 +124,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
     /// </summary>
     public void ResetWith(IEnumerable<TItem> items)
     {
-        if (items is null) throw new ArgumentNullException(nameof(items));
+        if (items is null)
+            throw new ArgumentNullException(nameof(items));
 
         BeginUpdate();
         try
@@ -130,7 +133,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
             base.ClearItems();
             _index.Clear();
 
-            foreach (var i in items) AddInternal(i);
+            foreach (var i in items)
+                AddInternal(i);
         }
         finally
         {
@@ -143,7 +147,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
     /// </summary>
     public void AddRange(IEnumerable<TItem> items, bool clearCollection = false)
     {
-        if (items is null) throw new ArgumentNullException(nameof(items));
+        if (items is null)
+            throw new ArgumentNullException(nameof(items));
 
         BeginUpdate();
         try
@@ -154,7 +159,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
                 _index.Clear();
             }
 
-            foreach (var i in items) AddInternal(i);
+            foreach (var i in items)
+                AddInternal(i);
         }
         finally
         {
@@ -172,7 +178,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
 
     protected override void InsertItem(int index, TItem item)
     {
-        if (item == null) throw new ArgumentNullException(nameof(item));
+        if (item == null)
+            throw new ArgumentNullException(nameof(item));
         var key = _keySelector(item);
 
         // Ensure no duplicate keys; if needed, treat as upsert.
@@ -194,7 +201,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
 
     protected override void SetItem(int index, TItem item)
     {
-        if (item == null) throw new ArgumentNullException(nameof(item));
+        if (item == null)
+            throw new ArgumentNullException(nameof(item));
 
         var oldItem = this[index];
         var oldKey = _keySelector(oldItem);
@@ -202,7 +210,8 @@ public class BulkKeyedObservableCollection<TKey, TItem> : ObservableCollection<T
 
         base.SetItem(index, item);
 
-        if (!EqualityComparer<TKey>.Default.Equals(oldKey, newKey)) _index.Remove(oldKey);
+        if (!EqualityComparer<TKey>.Default.Equals(oldKey, newKey))
+            _index.Remove(oldKey);
 
         _index[newKey] = item;
     }

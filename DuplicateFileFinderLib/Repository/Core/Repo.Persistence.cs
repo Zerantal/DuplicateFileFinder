@@ -101,7 +101,8 @@ public sealed partial class Repo
             var snap = await RepoStore.LoadScanRootSnapshotV2Async(_repoPath, root.RootId, ct)
                 .ConfigureAwait(false);
 
-            if (snap is null) continue;
+            if (snap is null)
+                continue;
             _scanRootSnapshots[root.RootId] = snap.Value;
         }
     }

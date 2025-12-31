@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+
 using MainWindowViewModel = DuplicateFileFinder.Gui.Features.Shell.ViewModels.MainWindowViewModel;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.Views;

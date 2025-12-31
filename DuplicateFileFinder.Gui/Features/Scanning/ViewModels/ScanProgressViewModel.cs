@@ -2,7 +2,9 @@
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+
 using DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.Gui.Features.Scanning.ViewModels;

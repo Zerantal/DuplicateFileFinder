@@ -1,4 +1,4 @@
-﻿using DuplicateFileFinder.Gui.Shared.Models;
+using DuplicateFileFinder.Gui.Shared.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Models;
 

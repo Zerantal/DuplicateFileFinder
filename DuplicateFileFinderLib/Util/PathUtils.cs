@@ -51,14 +51,16 @@ public static class PathUtils
 
         void EnsureCapacity()
         {
-            if (segCount < segStarts.Length) return;
+            if (segCount < segStarts.Length)
+                return;
             Array.Resize(ref segStarts, segStarts.Length * 2);
             Array.Resize(ref segLens, segLens.Length * 2);
         }
 
         void PushSeg(int start, int len)
         {
-            if (len <= 0) return;
+            if (len <= 0)
+                return;
             EnsureCapacity();
             segStarts[segCount] = start;
             segLens[segCount] = len;
@@ -67,7 +69,8 @@ public static class PathUtils
 
         void PopSeg()
         {
-            if (segCount > 0) segCount--;
+            if (segCount > 0)
+                segCount--;
         }
 
         // Parse segments
@@ -77,7 +80,8 @@ public static class PathUtils
             while (i < n && IsSep(span[i], isWindows))
                 i++;
 
-            if (i >= n) break;
+            if (i >= n)
+                break;
 
             int start = i;
             while (i < n && !IsSep(span[i], isWindows))
@@ -237,7 +241,8 @@ public static class PathUtils
     {
         var a = NormalizePath(ancestor).TrimEnd(Path.DirectorySeparatorChar);
         var p = NormalizePath(path);
-        if (string.Equals(a, p, StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.Equals(a, p, StringComparison.OrdinalIgnoreCase))
+            return false;
         return p.StartsWith(a + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -272,7 +277,8 @@ public static class PathUtils
             }
         }
 
-        if (sb.Length > 0) parts.Add(sb.ToString());
+        if (sb.Length > 0)
+            parts.Add(sb.ToString());
         return parts;
     }
 

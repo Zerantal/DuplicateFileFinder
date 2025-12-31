@@ -3,8 +3,10 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Core;
@@ -50,7 +52,9 @@ public sealed class Repo_EventingTests
 
     private static void TryDeleteDir(string dir)
     {
-        try { Directory.Delete(dir, recursive: true); } catch { /* ignore */ }
+        try
+        { Directory.Delete(dir, recursive: true); }
+        catch { /* ignore */ }
     }
 
     private sealed class CapturingSink : IRepoEventSink

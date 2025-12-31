@@ -3,12 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins;

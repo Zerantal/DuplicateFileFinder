@@ -1,8 +1,11 @@
 using System;
+
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-using Xunit;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
+using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Models;
 

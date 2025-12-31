@@ -14,10 +14,12 @@ internal sealed class DirectoryComparator(BaselineIndex baseline)
         var expectedFiles = new Dictionary<string, BaseLineMapValue>(PathUtils.PathComparer);
 
         if (baseline.TryGetChildDirMap(parentId, out var dirs))
-            foreach (var kv in dirs) expectedDirs[kv.Key] = kv.Value;
+            foreach (var kv in dirs)
+                expectedDirs[kv.Key] = kv.Value;
 
         if (baseline.TryGetChildFileMap(parentId, out var files))
-            foreach (var kv in files) expectedFiles[kv.Key] = kv.Value;
+            foreach (var kv in files)
+                expectedFiles[kv.Key] = kv.Value;
 
         return new DirEnumerationContext(parentId, expectedDirs, expectedFiles);
     }

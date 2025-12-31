@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
@@ -31,7 +32,8 @@ public sealed class DirTreeMapElement : RepoTreeMapElement
     protected override string ResolveRelativePath()
     {
         DirRecordV2 rec;
-        try { rec = Resolver.GetDirRecord(_dir); }
+        try
+        { rec = Resolver.GetDirRecord(_dir); }
         catch { return string.Empty; }
 
         return Resolver.GetRelativePath(rec.DirId);

@@ -1,8 +1,10 @@
 using System.Globalization;
+
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+
 using DuplicateFileFinderLib.Logging;
 
 // ReSharper disable MemberCanBePrivate.Global
@@ -470,10 +472,12 @@ public sealed class TreeMapControl : Control
                     var usePrimary = item.Depth <= primaryDepth;
 
                     var pen = usePrimary ? primaryPen : secondaryPen;
-                    if (pen != null) context.DrawRectangle(pen, rect);
+                    if (pen != null)
+                        context.DrawRectangle(pen, rect);
                 }
 
-                if (ShowLabels) DrawLabel(context, item.Node.Label, rect);
+                if (ShowLabels)
+                    DrawLabel(context, item.Node.Label, rect);
             }
         }
     }
@@ -744,8 +748,10 @@ public sealed class TreeMapControl : Control
         {
             var a = row[i].Area;
             sum += a;
-            if (a < minA) minA = a;
-            if (a > maxA) maxA = a;
+            if (a < minA)
+                minA = a;
+            if (a > maxA)
+                maxA = a;
         }
 
         if (sum <= 0 || minA <= 0)

@@ -1,13 +1,17 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Linq;
+
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using DuplicateFileFinderLibTests.TestUtils;
+
 using MemoryPack;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Core;

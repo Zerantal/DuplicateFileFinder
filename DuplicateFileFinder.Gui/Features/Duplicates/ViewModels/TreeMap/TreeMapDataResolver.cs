@@ -26,13 +26,15 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
 
     public string DecodeDirName(DirHandle dir)
     {
-        try { return _snapshot.DecodeDirName(dir); }
+        try
+        { return _snapshot.DecodeDirName(dir); }
         catch { return string.Empty; }
     }
 
     public string DecodeFileName(FileHandle file)
     {
-        try { return _snapshot.DecodeFileName(file); }
+        try
+        { return _snapshot.DecodeFileName(file); }
         catch { return string.Empty; }
     }
 
@@ -44,7 +46,8 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
 
     public string GetRelativePath(long dirId)
     {
-        try { return _dirRelativePathResolver(dirId); }
+        try
+        { return _dirRelativePathResolver(dirId); }
         catch { return string.Empty; }
     }
 

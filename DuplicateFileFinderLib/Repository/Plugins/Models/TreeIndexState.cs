@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;

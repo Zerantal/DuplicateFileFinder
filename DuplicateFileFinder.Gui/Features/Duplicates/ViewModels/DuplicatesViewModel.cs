@@ -1,7 +1,9 @@
 // ViewModels/DuplicatesViewModel.cs
 
 using System.Collections.ObjectModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
+
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
@@ -9,9 +11,11 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
+
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
+
 using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
@@ -101,7 +105,8 @@ public partial class DuplicatesViewModel : ObservableObject
         get => _treeMap.IsMetricBytes;
         set
         {
-            if (_treeMap.IsMetricBytes == value) return;
+            if (_treeMap.IsMetricBytes == value)
+                return;
             _treeMap.IsMetricBytes = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricFiles));
@@ -115,7 +120,8 @@ public partial class DuplicatesViewModel : ObservableObject
         get => _treeMap.IsMetricFiles;
         set
         {
-            if (_treeMap.IsMetricFiles == value) return;
+            if (_treeMap.IsMetricFiles == value)
+                return;
             _treeMap.IsMetricFiles = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricBytes));
@@ -129,7 +135,8 @@ public partial class DuplicatesViewModel : ObservableObject
         get => _treeMap.IsMetricDuplicateFiles;
         set
         {
-            if (_treeMap.IsMetricDuplicateFiles == value) return;
+            if (_treeMap.IsMetricDuplicateFiles == value)
+                return;
             _treeMap.IsMetricDuplicateFiles = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricBytes));
@@ -143,7 +150,8 @@ public partial class DuplicatesViewModel : ObservableObject
         get => _treeMap.IsMetricDuplicateBytes;
         set
         {
-            if (_treeMap.IsMetricDuplicateBytes == value) return;
+            if (_treeMap.IsMetricDuplicateBytes == value)
+                return;
             _treeMap.IsMetricDuplicateBytes = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsTreeMapMetricBytes));

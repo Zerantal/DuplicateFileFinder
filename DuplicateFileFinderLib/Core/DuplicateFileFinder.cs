@@ -1,6 +1,7 @@
 // DuplicateFileFinderLib/Core/DuplicateFileFinder.cs
 
 using System.Runtime.InteropServices;
+
 using DuplicateFileFinderLib.Hashing;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.IO.Platforms;

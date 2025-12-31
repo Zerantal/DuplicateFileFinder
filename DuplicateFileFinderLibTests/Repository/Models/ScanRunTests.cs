@@ -1,6 +1,9 @@
 using System;
+
 using DuplicateFileFinderLib.Repository.Storage.Models;
+
 using MemoryPack;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Models;

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -12,9 +13,12 @@ using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
+
 using DuplicateFileFinderLibTests.TestUtils;
 using DuplicateFileFinderLibTests.TestUtils.Fakes;
+
 using Moq;
+
 using Xunit;
 
 namespace DuplicateFileFinderLibTests.Core;
