@@ -75,6 +75,12 @@ internal sealed class CapturingRepo : IRepoInternal
         return ValueTask.CompletedTask;
     }
 
+    public Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return Task.CompletedTask;
+    }
+
     public IReadOnlyList<ScanRun> ScanRunsView => [];
     public IReadOnlyList<ScanRoot> ScanRootsView => [];
 
@@ -90,7 +96,9 @@ internal sealed class CapturingRepo : IRepoInternal
 
     public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
-        throw new NotImplementedException();
+        _methodCounter.IncrementMethodCalCount();
+
+        return Task.CompletedTask;
     }
 
     public long AllocateRunId()

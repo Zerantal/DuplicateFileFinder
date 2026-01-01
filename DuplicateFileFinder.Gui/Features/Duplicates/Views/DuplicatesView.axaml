@@ -44,6 +44,12 @@
                                 <MenuItem Header="Remove scan root"
                                           Command="{Binding RemoveRootCommand}"
                                           IsVisible="{Binding IsScanRoot}" />
+                                <MenuItem Header="Set display name..."
+                                          Command="{Binding SetDisplayNameCommand}"
+                                          IsVisible="{Binding IsScanRoot}" />
+                                <MenuItem Header="Clear display name"
+                                          Command="{Binding ClearDisplayNameCommand}"
+                                          IsVisible="{Binding IsScanRoot}" />
                             </ContextMenu>
                         </TextBlock.ContextMenu>
                     </TextBlock>

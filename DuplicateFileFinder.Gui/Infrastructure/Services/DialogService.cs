@@ -12,14 +12,87 @@ namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
 public sealed class DialogService : IDialogService
 {
-    public Task ShowInfoAsync(string title, string message)
-    {
-        return ShowMessageAsync(title, message, "OK");
-    }
+    public Task ShowInfoAsync(string title, string message) => ShowMessageAsync(title, message, "OK");
 
-    public Task ShowErrorAsync(string title, string message)
+    public Task ShowErrorAsync(string title, string message) => ShowMessageAsync(title, message, "OK");
+
+    public async Task<string?> ShowTextInputAsync(
+        string title,
+        string message,
+        string? initialText = null,
+        string okText = "OK",
+        string cancelText = "Cancel")
     {
-        return ShowMessageAsync(title, message, "OK");
+        var owner = GetOwnerWindow();
+
+        return await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var tcs = new TaskCompletionSource<string?>();
+
+            var window = CreateBasicDialogWindow(title);
+            window.Width = 520;
+            window.Height = 220;
+
+            var content = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 12,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var textBlock = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var input = new TextBox
+            {
+                Text = initialText ?? string.Empty,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var buttonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8
+            };
+
+            var okButton = new Button { Content = okText, MinWidth = 80, IsDefault = true };
+            var cancelButton = new Button { Content = cancelText, MinWidth = 80, IsCancel = true };
+
+            okButton.Click += (_, _) =>
+            {
+                tcs.TrySetResult(input.Text);
+                window.Close();
+            };
+            cancelButton.Click += (_, _) =>
+            {
+                tcs.TrySetResult(null);
+                window.Close();
+            };
+
+            window.Closed += (_, _) =>
+            {
+                // If user closes via window chrome, treat as cancel
+                if (!tcs.Task.IsCompleted)
+                    tcs.TrySetResult(null);
+            };
+
+            buttonsPanel.Children.Add(okButton);
+            buttonsPanel.Children.Add(cancelButton);
+
+            content.Children.Add(textBlock);
+            content.Children.Add(input);
+            content.Children.Add(buttonsPanel);
+
+            window.Content = content;
+
+            await window.ShowDialog(owner);
+            return await tcs.Task;
+        });
     }
 
     public async Task<bool> ShowConfirmationAsync(
