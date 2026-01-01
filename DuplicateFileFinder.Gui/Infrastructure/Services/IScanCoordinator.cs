@@ -25,4 +25,7 @@ public interface IScanCoordinator
     public Task RemoveScanRoot(long scanRootId);
 
     public void CancelScan();
+
+    Task SetScanRootDisplayName(long scanRootId, string? displayName);
+
 }

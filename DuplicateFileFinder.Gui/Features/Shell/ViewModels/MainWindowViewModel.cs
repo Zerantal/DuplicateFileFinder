@@ -38,7 +38,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _repoHost = host;
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
-        Duplicates = new DuplicatesViewModel(host, scanCoordinator);
+        Duplicates = new DuplicatesViewModel(host, scanCoordinator, dialogService);
 
         _scanCoordinator.ScanCompleted += (_, _) =>
         {

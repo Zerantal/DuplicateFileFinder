@@ -25,6 +25,7 @@ internal interface IRepoInternal : IRepo
 public interface IRepo : IDisposable, IAsyncDisposable
 {
     public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct = default);
+    public Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default);
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
     ScanRootSnapshotView? TryGetScanRootView(long scanRootId);

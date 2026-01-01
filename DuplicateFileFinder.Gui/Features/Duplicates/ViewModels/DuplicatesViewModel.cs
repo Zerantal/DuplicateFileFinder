@@ -28,14 +28,14 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
 
-    public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner)
+    public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _repo = host.Repo;
         var hashIndexService = host.HashIndex;
 
-        _folderTreeBuilder = new FolderTreeBuilder(host, scanner);
+        _folderTreeBuilder = new FolderTreeBuilder(host, scanner, dialogService);
         _treeMap = new TreeMapController(host)
         {
             Options = new TreeMapBuildOptions

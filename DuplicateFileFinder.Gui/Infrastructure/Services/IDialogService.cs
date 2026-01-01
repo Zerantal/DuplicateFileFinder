@@ -34,4 +34,14 @@ public interface IDialogService
         string? initialDirectory = null,
         string? suggestedFileName = null,
         IReadOnlyList<(string Description, string[] Extensions)>? filters = null);
+
+    /// <summary>
+    /// Shows a simple modal text input dialog. Returns null if cancelled.
+    /// </summary>
+    Task<string?> ShowTextInputAsync(
+        string title,
+        string message,
+        string? initialText = null,
+        string okText = "OK",
+        string cancelText = "Cancel");
 }

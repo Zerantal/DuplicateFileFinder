@@ -12,6 +12,7 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 public sealed partial class FolderNodeViewModel : ObservableObject
 {
     private readonly IScanCoordinator? _scanCoordinator;
+    private readonly IDialogService? _dialogs;
     private readonly bool _isDummy;
 
     private string _fullPath;
@@ -20,15 +21,27 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     // Dummy child used to show the expand arrow before children are loaded.
     private static readonly FolderNodeViewModel _dummyChild =
-        new(0, string.Empty, string.Empty, null, isDummy: true);
+        new(0, string.Empty, string.Empty, null, null, isDummy: true);
 
     public FolderNodeViewModel(
         long dirId,
         string name,
         string fullPath,
         IScanCoordinator scanCoordinator,
+        IDialogService dialogs,
         long scanRootId = -1)
-        : this(dirId, name, fullPath, scanCoordinator, isDummy: false, scanRootId: scanRootId)
+        : this(dirId, name, fullPath, scanCoordinator, dialogs, isDummy: false, scanRootId: scanRootId)
+    {
+    }
+
+    // Back-compat constructor (existing call sites)
+    public FolderNodeViewModel(
+        long dirId,
+        string name,
+        string fullPath,
+        IScanCoordinator scanCoordinator,
+        long scanRootId = -1)
+        : this(dirId, name, fullPath, scanCoordinator, dialogs: null, isDummy: false, scanRootId: scanRootId)
     {
     }
 
@@ -37,6 +50,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         string name,
         string fullPath,
         IScanCoordinator? scanCoordinator,
+        IDialogService? dialogs,
         bool isDummy,
         long scanRootId = -1)
     {
@@ -44,6 +58,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         _name = name;
         _fullPath = fullPath;
         _scanCoordinator = scanCoordinator;
+        _dialogs = dialogs;
         ScanRootId = scanRootId;
         _isDummy = isDummy;
     }
@@ -97,7 +112,10 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     // A callback that the owning viewmodel can set to remove this node
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
 
-    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; set; }
+    // Called after updating scan root metadata so the owner can rebuild the tree labels
+    public Action? OnRootLabelRefreshRequested { get; set; }
+
+    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; init; }
 
     public bool IsExpanded
     {
@@ -112,7 +130,6 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         }
     }
 
-    // NEW: used by the owner VM when building the tree
     internal void AddDummyChild()
     {
         Children.Clear();
@@ -129,7 +146,6 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     }
 
     internal void ClearChildren() => Children.Clear();
-
 
     [RelayCommand]
     private async Task FullRescanAsync()
@@ -153,8 +169,44 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         OnRootRemoved?.Invoke(this);
     }
 
-    public override string ToString()
+    [RelayCommand]
+    private async Task SetDisplayNameAsync()
     {
-        return FullPath;
+        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null || _dialogs is null)
+            return;
+
+        if (!IsScanRoot)
+            return;
+
+        var input = await _dialogs.ShowTextInputAsync(
+            title: "Set display name",
+            message: "Enter a display name for this scan root (blank = clear).",
+            initialText: null);
+
+        if (input is null)
+            return; // cancelled
+
+        var trimmed = input.Trim();
+        var newName = trimmed.Length == 0 ? null : trimmed;
+
+        await _scanCoordinator.SetScanRootDisplayName(ScanRootId, newName);
+
+        // Rebuild labels from ScanRootsView (to apply VolumeLabel/path formatting too)
+        OnRootLabelRefreshRequested?.Invoke();
     }
+
+    [RelayCommand]
+    private async Task ClearDisplayNameAsync()
+    {
+        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null)
+            return;
+
+        if (!IsScanRoot)
+            return;
+
+        await _scanCoordinator.SetScanRootDisplayName(ScanRootId, null);
+        OnRootLabelRefreshRequested?.Invoke();
+    }
+
+    public override string ToString() => FullPath;
 }

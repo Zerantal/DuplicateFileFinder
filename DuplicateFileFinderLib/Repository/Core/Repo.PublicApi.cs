@@ -143,6 +143,43 @@ public sealed partial class Repo
         });
     }
 
+    public async Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default)
+    {
+        long generation;
+        ScanRoot updatedScanRoot;
+
+        // Normalise: treat blank as null
+        if (displayName is not null)
+        {
+            displayName = displayName.Trim();
+            if (displayName.Length == 0)
+                displayName = null;
+        }
+
+        lock (_sync)
+        {
+            if (!_scanRoots.TryGetValue(scanRootId, out var scanRoot))
+                return;
+
+            // No-op if unchanged
+            if (string.Equals(scanRoot.DisplayName, displayName, StringComparison.Ordinal))
+                return;
+
+            updatedScanRoot = scanRoot with { DisplayName = displayName };
+            _scanRoots[scanRootId] = updatedScanRoot;
+            generation = _meta.Generation;  // don't bump generation
+            MarkMetaDirty_NoLock();
+        }
+
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+
+        PublishEvent(new ScanRootMetaChangedEvent
+        {
+            Generation = generation,
+            UpdatedScanRoot = updatedScanRoot
+        });
+    }
+
     // -------- BeginScan (creates ScanRun + ScanSession) --------
 
     public bool HasScanCheckpoint(long scanRootId)

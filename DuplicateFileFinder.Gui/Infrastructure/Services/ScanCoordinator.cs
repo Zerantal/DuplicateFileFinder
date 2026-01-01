@@ -31,6 +31,11 @@ public sealed class ScanCoordinator(
 
     public bool IsScanning { get; private set; }
 
+    public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+    {
+        return _host.Repo.SetScanRootDisplayNameAsync(scanRootId, displayName);
+    }
+
     public async Task RunScanWithDialogAsync(
         string rootPath,
         CancellationToken cancellationToken = default)

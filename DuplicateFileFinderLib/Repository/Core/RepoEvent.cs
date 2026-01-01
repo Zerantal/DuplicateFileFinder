@@ -29,3 +29,9 @@ public sealed record ScanRootSnapshotCommittedEvent : RepoEvent
 
     public required RepoSnapshotView RepoSnapshotView { get; init; }
 }
+
+public sealed record ScanRootMetaChangedEvent : RepoEvent
+{
+    // ReSharper disable once UnusedAutoPropertyAccessor.Global
+    public required ScanRoot UpdatedScanRoot { get; init; }
+}
