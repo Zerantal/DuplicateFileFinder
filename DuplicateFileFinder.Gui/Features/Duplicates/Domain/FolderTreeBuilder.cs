@@ -130,8 +130,10 @@ public sealed class FolderTreeBuilder(IRepoHost? repoHost, IScanCoordinator scan
             var rp = sr.RootPath
                 .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            if (string.IsNullOrEmpty(vp)) return rp;
-            if (string.IsNullOrEmpty(rp)) return vp;
+            if (string.IsNullOrEmpty(vp))
+                return rp;
+            if (string.IsNullOrEmpty(rp))
+                return vp;
             return Path.Combine(vp, rp);
         }
 
