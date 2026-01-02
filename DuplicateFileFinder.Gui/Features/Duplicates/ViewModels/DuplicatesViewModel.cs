@@ -1,13 +1,12 @@
 // ViewModels/DuplicatesViewModel.cs
 
-using System.Collections.ObjectModel;
-
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
@@ -16,17 +15,15 @@ using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
-using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
-
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
     private readonly DuplicatesController _duplicates;
-
-    private readonly FolderTreeBuilder _folderTreeBuilder;
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
+
+    public ScanRootsTreeViewModel ScanRootsTree { get; }
 
     public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
     {
@@ -35,7 +32,16 @@ public partial class DuplicatesViewModel : ObservableObject
         _repo = host.Repo;
         var hashIndexService = host.HashIndex;
 
-        _folderTreeBuilder = new FolderTreeBuilder(host, scanner, dialogService);
+        // folder view
+        var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService);
+        ScanRootsTree = new ScanRootsTreeViewModel(treeBuilder);
+        ScanRootsTree.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ScanRootsTreeViewModel.SelectedPath))
+                SelectedFolderPrefix = ScanRootsTree.SelectedPath;
+        };
+
+        // Treemap
         _treeMap = new TreeMapController(host)
         {
             Options = new TreeMapBuildOptions
@@ -43,7 +49,6 @@ public partial class DuplicatesViewModel : ObservableObject
                 MaxDepth = 8
             }
         };
-
 
         _treeMap.PropertyChanged += (_, e) =>
         {
@@ -54,7 +59,6 @@ public partial class DuplicatesViewModel : ObservableObject
         _duplicates = new DuplicatesController(host, hashIndexService);
         _duplicates.PropertyChanged += (_, e) =>
         {
-            // bubble up for existing bindings (if your view binds directly to VM props)
             switch (e.PropertyName)
             {
                 case nameof(DuplicatesController.DuplicatesFound):
@@ -93,9 +97,7 @@ public partial class DuplicatesViewModel : ObservableObject
     public int FilesScanned => _duplicates.FilesScanned;
     public long WastedBytes => _duplicates.WastedBytes;
 
-
     public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
-    public ObservableCollection<FolderNodeViewModel> FolderRoots { get; } = [];
 
     // Expose treemap for binding
     public TreeMapNode<ITreeMapNodeElement>? DirectoryTreeMapRoot => _treeMap.Root;
@@ -160,7 +162,6 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
 
-
     public object MaxDepth => _treeMap.Options.MaxDepth + 2;
 
     public void LoadFromRepo()
@@ -168,16 +169,15 @@ public partial class DuplicatesViewModel : ObservableObject
         using (TimingLog.StartPhase("LoadFromRepo()"))
         {
             RepoSnapshotView repoSnapshot = _repo.GetRepoSnapshotView();
-
             InitializeFromSnapshot(repoSnapshot);
         }
     }
 
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
-        using (TimingLog.StartPhase("BuildFolderTree()"))
+        using (TimingLog.StartPhase("BuildScanRootsTree()"))
         {
-            _folderTreeBuilder.Rebuild(snapshot, FolderRoots);
+            ScanRootsTree.Rebuild(snapshot);
         }
 
         using (TimingLog.StartPhase("RebuildDuplicatesAndState()"))

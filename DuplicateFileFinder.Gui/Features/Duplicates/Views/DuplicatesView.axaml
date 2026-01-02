@@ -10,57 +10,31 @@
     xmlns:treeMap="clr-namespace:DuplicateFileFinder.Gui.Controls.TreeMap"
     xmlns:models1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
     xmlns:viewModels="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels"
+    xmlns:scanRoots="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots"
     mc:Ignorable="d"
     x:DataType="viewModels:DuplicatesViewModel">
 
-    <!-- Row0: filters; Row1/2: tree + right pane -->
-    <Grid RowDefinitions="Auto,2*,*"
-          ColumnDefinitions="2*,5*">
+  <Grid RowDefinitions="Auto,*">
 
-        <!-- LEFT: folder tree, spans both grids vertically -->
-        <TreeView Grid.Row="1"
-                  Grid.RowSpan="2"
-                  Grid.Column="0"
-                  ItemsSource="{Binding FolderRoots}"
-                  SelectionChanged="OnFolderSelected"
-                  SelectionMode="Single"
-                  FontFamily="monospace">
-            <TreeView.Styles>
-                <!-- Bind the container's IsExpanded to the VM's IsExpanded -->
-                <Style Selector="TreeViewItem"
-                       x:DataType="viewModels:FolderNodeViewModel">
-                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-                </Style>
-            </TreeView.Styles>
-            <TreeView.ItemTemplate>
-                <TreeDataTemplate DataType="viewModels:FolderNodeViewModel"
-                                  ItemsSource="{Binding Children}">
-                    <TextBlock Text="{Binding DisplayName}"
-                               FontFamily="monospace">
-                        <TextBlock.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="Full rescan"
-                                          Command="{Binding FullRescanCommand}" />
-                                <MenuItem Header="Remove scan root"
-                                          Command="{Binding RemoveRootCommand}"
-                                          IsVisible="{Binding IsScanRoot}" />
-                                <MenuItem Header="Set display name..."
-                                          Command="{Binding SetDisplayNameCommand}"
-                                          IsVisible="{Binding IsScanRoot}" />
-                                <MenuItem Header="Clear display name"
-                                          Command="{Binding ClearDisplayNameCommand}"
-                                          IsVisible="{Binding IsScanRoot}" />
-                            </ContextMenu>
-                        </TextBlock.ContextMenu>
-                    </TextBlock>
-                </TreeDataTemplate>
-            </TreeView.ItemTemplate>
-        </TreeView>
+    <!-- TOP: ScanRootsTreeView (max 1/3 height) -->
+    <Grid Grid.Row="0"
+          Name="ScanRootsHost">
 
-        <!-- RIGHT: tabbed pane (Duplicates / Tree Map), spans both right rows -->
-        <TabControl Grid.Row="1"
-                    Grid.RowSpan="2"
-                    Grid.Column="1">
+      <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        MaxHeight="{Binding Bounds.Height,
+                                RelativeSource={RelativeSource AncestorType=UserControl},
+                                Converter={StaticResource OneThirdConverter}}">
+
+        <scanRoots:ScanRootsTreeView
+          DataContext="{Binding ScanRootsTree}" />
+
+      </ScrollViewer>
+    </Grid>
+
+        <!-- tabbed pane (Duplicates / Tree Map), spans both right rows -->
+        <TabControl Grid.Row="1">
 
             <!-- Tab 1: existing duplicates view -->
             <TabItem Header="Duplicates">

@@ -7,7 +7,9 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
+
+namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
 public sealed partial class FolderNodeViewModel : ObservableObject
 {
@@ -18,6 +20,15 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     private string _fullPath;
     private string _name;
     private long _scanRootId = -1;
+
+    // Aggregate stats (from TreeIndexStats)
+    private long _totalBytes;
+    private int _fileCount;
+    private int _dirCount;
+    private long _duplicateFiles;
+    private long _duplicateBytes;
+    private double _percentOfScanRoot;
+    private long _scanRootTotalBytes;
 
     // Dummy child used to show the expand arrow before children are loaded.
     private static readonly FolderNodeViewModel _dummyChild =
@@ -147,6 +158,71 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     internal void ClearChildren() => Children.Clear();
 
+    // ---- Aggregate stats bindings (TreeIndexStats) ----
+
+    public long TotalBytes
+    {
+        get => _totalBytes;
+        private set => SetProperty(ref _totalBytes, value);
+    }
+
+    public int FileCount
+    {
+        get => _fileCount;
+        private set => SetProperty(ref _fileCount, value);
+    }
+
+    public int DirCount
+    {
+        get => _dirCount;
+        private set => SetProperty(ref _dirCount, value);
+    }
+
+    public int ItemCount => FileCount + DirCount;
+
+    public long DuplicateFiles
+    {
+        get => _duplicateFiles;
+        private set => SetProperty(ref _duplicateFiles, value);
+    }
+
+    public long DuplicateBytes
+    {
+        get => _duplicateBytes;
+        private set => SetProperty(ref _duplicateBytes, value);
+    }
+
+    /// <summary>Percent of the scan-root total (WinDirStat-like “Subtree %”).</summary>
+    public double PercentOfScanRoot
+    {
+        get => _percentOfScanRoot;
+        private set => SetProperty(ref _percentOfScanRoot, value);
+    }
+
+    /// <summary>Total bytes of the scan root this node belongs to (used to compute PercentOfScanRoot).</summary>
+    public long ScanRootTotalBytes
+    {
+        get => _scanRootTotalBytes;
+        private set => SetProperty(ref _scanRootTotalBytes, value);
+    }
+
+    public void ApplyAggregateStats(DirAggregateStats stats, long scanRootTotalBytes)
+    {
+        TotalBytes = stats.TotalBytes;
+        FileCount = stats.FileCount;
+        DirCount = stats.DirCount;
+        DuplicateFiles = stats.DuplicateFiles;
+        DuplicateBytes = stats.DuplicateBytes;
+
+        ScanRootTotalBytes = scanRootTotalBytes <= 0 ? 0 : scanRootTotalBytes;
+        PercentOfScanRoot =
+            ScanRootTotalBytes <= 0 ? 0.0 : TotalBytes * 100.0 / ScanRootTotalBytes;
+
+        OnPropertyChanged(nameof(ItemCount));
+    }
+
+    // ---- Existing commands ----
+
     [RelayCommand]
     private async Task FullRescanAsync()
     {
@@ -190,8 +266,6 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         var newName = trimmed.Length == 0 ? null : trimmed;
 
         await _scanCoordinator.SetScanRootDisplayName(ScanRootId, newName);
-
-        // Rebuild labels from ScanRootsView (to apply VolumeLabel/path formatting too)
         OnRootLabelRefreshRequested?.Invoke();
     }
 

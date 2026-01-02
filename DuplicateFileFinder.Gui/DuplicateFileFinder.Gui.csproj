@@ -46,6 +46,10 @@
             <DependentUpon>ScanProgressWindow.axaml</DependentUpon>
             <SubType>Code</SubType>
         </Compile>
+        <Compile Update="Features\Duplicates\Views\ScanRoots\ScanRootsTreeView.axaml.cs">
+          <DependentUpon>ScanRootsTreeView.axaml</DependentUpon>
+          <SubType>Code</SubType>
+        </Compile>
     </ItemGroup>
 
 </Project>
