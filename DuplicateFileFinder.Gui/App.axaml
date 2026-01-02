@@ -12,6 +12,7 @@
 
     <Application.Resources>
         <conv:BytesToHumanConverter x:Key="BytesToHuman" />
+        <conv:OneThirdConverter x:Key="OneThirdConverter"/>
     </Application.Resources>
 
     <Application.DataTemplates>

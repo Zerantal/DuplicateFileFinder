@@ -1,11 +1,10 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 
-using JetBrains.Annotations;
+using DuplicateFileFinder.Gui.Features.Duplicates.Models;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
-using DuplicateSetRow = DuplicateFileFinder.Gui.Features.Duplicates.Models.DuplicateSetRow;
-using DuplicatesViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicatesViewModel;
-using FolderNodeViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.FolderNodeViewModel;
+using JetBrains.Annotations;
 
 // using NLog;
 
@@ -18,24 +17,6 @@ public partial class DuplicatesView : UserControl
     public DuplicatesView()
     {
         InitializeComponent();
-    }
-
-    private DuplicatesViewModel? Vm => DataContext as DuplicatesViewModel;
-
-    [UsedImplicitly]
-    private void OnFolderSelected(object? sender, SelectionChangedEventArgs e)
-    {
-        if (Vm is null)
-            return;
-
-        if (e.AddedItems.Count > 0 && e.AddedItems[0] is FolderNodeViewModel node)
-        {
-            Vm.SelectedFolderPrefix = node.FullPath;
-        }
-        else
-        {
-            Vm.SelectedFolderPrefix = null;
-        }
     }
 
     [UsedImplicitly]

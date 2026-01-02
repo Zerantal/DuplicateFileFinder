@@ -30,10 +30,7 @@ public sealed class BytesToHumanConverter : IValueConverter
             unit++;
         }
 
-        var formatted = size >= 100 ? size.ToString("N0", culture)
-            : size >= 10 ? size.ToString("N1", culture)
-            : size.ToString("N2", culture);
-
+        var formatted = size.ToString("N1", culture);
         return $"{formatted} {units[unit]}";
     }
 
