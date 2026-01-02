@@ -19,24 +19,6 @@ public partial class DuplicatesView : UserControl
         InitializeComponent();
     }
 
-    // private DuplicatesViewModel? Vm => DataContext as DuplicatesViewModel;
-
-    // [UsedImplicitly]
-    // private void OnFolderSelected(object? sender, SelectionChangedEventArgs e)
-    // {
-    //     if (Vm is null)
-    //         return;
-    //
-    //     if (e.AddedItems.Count > 0 && e.AddedItems[0] is FolderNodeViewModel node)
-    //     {
-    //         Vm.SelectedFolderPrefix = node.FullPath;
-    //     }
-    //     else
-    //     {
-    //         Vm.SelectedFolderPrefix = null;
-    //     }
-    // }
-
     [UsedImplicitly]
     private void OnDuplicateSetPointerPressed(object? sender, PointerPressedEventArgs e)
     {

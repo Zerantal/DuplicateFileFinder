@@ -142,12 +142,32 @@
         <TreeDataTemplate DataType="vm:FolderNodeViewModel"
                           ItemsSource="{Binding Children}">
           <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
-                Margin="0,0,16,0">
+                Margin="0,0,16,0"
+                Background="Transparent">
+
+            <Grid.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Full rescan"
+                          Command="{Binding FullRescanCommand}" />
+                <MenuItem Header="Remove scan root"
+                          Command="{Binding RemoveRootCommand}"
+                          IsVisible="{Binding IsScanRoot}" />
+                <MenuItem Header="Set display name..."
+                          Command="{Binding SetDisplayNameCommand}"
+                          IsVisible="{Binding IsScanRoot}" />
+                <MenuItem Header="Clear display name"
+                          Command="{Binding ClearDisplayNameCommand}"
+                          IsVisible="{Binding IsScanRoot}" />
+              </ContextMenu>
+            </Grid.ContextMenu>
 
             <!-- Name -->
-            <TextBlock Grid.Column="0"
-                       Text="{Binding DisplayName}"
-                       TextTrimming="CharacterEllipsis" />
+            <Border Grid.Column="0">
+              <TextBlock Text="{Binding DisplayName}"
+                         TextTrimming="CharacterEllipsis"
+                         FontFamily="monospace">
+              </TextBlock>
+            </Border>
 
             <!-- Subtree % -->
             <Grid Grid.Column="1"
