@@ -49,11 +49,17 @@ public partial class DuplicatesViewModel : ObservableObject
                 MaxDepth = 8
             }
         };
-
         _treeMap.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(TreeMapController.Root))
-                OnPropertyChanged(nameof(DirectoryTreeMapRoot));
+            switch (e.PropertyName)
+            {
+                case nameof(TreeMapController.Root):
+                    OnPropertyChanged(nameof(DirectoryTreeMapRoot));
+                    break;
+                case nameof(TreeMapController.SelectedNode):
+                    OnTreeMapSelectionChanged();
+                    break;
+            }
         };
 
         _duplicates = new DuplicatesController(host, hashIndexService);
@@ -79,6 +85,29 @@ public partial class DuplicatesViewModel : ObservableObject
         LoadFromRepo();
     }
 
+    private void OnTreeMapSelectionChanged()
+    {
+        var node = _treeMap.SelectedNode;
+        if (node?.Element == null)
+            return;
+
+        if (node.Element is DirTreeMapElement dirNode)
+        {
+            var dir = dirNode.Dir;
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => ScanRootsTree.NavigateToDir(dir),
+                Avalonia.Threading.DispatcherPriority.Background);
+        }
+        else if (node.Element is FileTreeMapElement fileNode)
+        {
+            var file = fileNode.File;
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => ScanRootsTree.NavigateToFile(file),
+                Avalonia.Threading.DispatcherPriority.Background);
+        }
+    }
+
+
     public DuplicateSetRow? SelectedSet
     {
         get => _duplicates.SelectedSet;
@@ -101,6 +130,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
     // Expose treemap for binding
     public TreeMapNode<ITreeMapNodeElement>? DirectoryTreeMapRoot => _treeMap.Root;
+    public TreeMapController TreeMapController => _treeMap;
 
     public bool IsTreeMapMetricBytes
     {

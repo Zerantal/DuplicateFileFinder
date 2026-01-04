@@ -20,6 +20,8 @@ public partial class TreeMapController : ObservableObject
     [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _root;
 
+    [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _selectedNode;
+
     public TreeMapController(IRepoHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -95,6 +97,8 @@ public partial class TreeMapController : ObservableObject
                 _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
                 return dirPath;
             });
+
+        SelectedNode = null;
     }
 
     partial void OnMetricChanged(TreeMapMetric value)
@@ -114,6 +118,8 @@ public partial class TreeMapController : ObservableObject
                 _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
                 return dirPath;
             });
+
+        SelectedNode = null;
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));
