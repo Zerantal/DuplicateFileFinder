@@ -12,16 +12,17 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
 /// <summary>
 /// Builds a scan-root directory tree (WinDirStat-like), with aggregate stats pulled from TreeIndex stats.
+/// Supports lazy materialization and navigation by ancestry expansion.
 /// </summary>
-public sealed class ScanRootsTreeBuilder
+public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
 {
-    private readonly Dictionary<long, FolderNodeViewModel> _nodesByDirId = new();
+    private readonly Dictionary<DirHandle, FolderNodeViewModel> _nodesByDirHandle = new();
 
-    private readonly IRepo _repo;
-    private readonly ITreeIndexReadModel _treeIndex;
-    private readonly IFileDirReadModel _mainIndex;
-    private readonly IScanCoordinator _scanner;
-    private readonly IDialogService _dialogs;
+    private readonly IRepo _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
+    private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
+    private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
+    private readonly IScanCoordinator _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+    private readonly IDialogService _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
 
     private RepoSnapshotView? _snapshot;
 
@@ -32,31 +33,20 @@ public sealed class ScanRootsTreeBuilder
         string RootPath,
         string? VolumePath,
         string? VolumeLabel,
-        string? DisplayName,
-        long RootId);
-
-    public ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
-    {
-        _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
-        _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
-        _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
-
-        _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
-        _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
-    }
+        string? DisplayName);
 
     public void Rebuild(RepoSnapshotView snapshot, ObservableCollection<FolderNodeViewModel> roots)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
 
         roots.Clear();
-        _nodesByDirId.Clear();
+        _nodesByDirHandle.Clear();
 
         _scanRootByDirId = _repo.ScanRootsView
             .Where(r => !r.IsDeleted)
             .ToDictionary(
                 r => r.DirId,
-                r => new ScanRootViewEntry(r.RootPath, r.VolumePath, r.VolumeLabel, r.DisplayName, r.RootId));
+                r => new ScanRootViewEntry(r.RootPath, r.VolumePath, r.VolumeLabel, r.DisplayName));
 
         foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
         {
@@ -80,8 +70,93 @@ public sealed class ScanRootsTreeBuilder
             if (HasChildDirs(rootHandle))
                 rootNode.AddDummyChild();
 
-            InsertRootSorted(roots, rootNode);
+            InsertSortedBySizeDesc(roots, rootNode);
         }
+    }
+
+    public bool TryGetNode(DirHandle dirHandle, out FolderNodeViewModel node)
+        => _nodesByDirHandle.TryGetValue(dirHandle, out node!);
+
+    public bool TryGetDirHandle(long dirId, out DirHandle handle)
+        => _mainIndex.TryGetDir(dirId, out handle);
+
+    public bool TryGetParentDirHandle(FileHandle fileHandle, out DirHandle parentDirHandle)
+    {
+        parentDirHandle = default;
+
+        if (_snapshot is null)
+            return false;
+
+        var fileRec = _snapshot.GetFileRecord(fileHandle);
+
+        if (!_mainIndex.TryGetDir(fileRec.DirId, out parentDirHandle))
+            return false;
+
+        return true;
+    }
+
+    public bool TryBuildAncestorChainToScanRoot(DirHandle target, out List<DirHandle> chainRootToTarget)
+    {
+        chainRootToTarget = new List<DirHandle>(32);
+
+        if (_snapshot is null)
+            return false;
+
+        // Walk upward by ParentDirId until we hit a scan-root dirId.
+        var current = target;
+
+        while (true)
+        {
+            chainRootToTarget.Add(current);
+
+            var curRec = _snapshot.GetDirRecord(current);
+            var curDirId = curRec.DirId;
+
+            if (_scanRootByDirId.ContainsKey(curDirId))
+                break;
+
+            // NOTE: assumes DirRecord has ParentDirId. If yours differs, adjust here.
+            var parentDirId = curRec.ParentDirId;
+            if (parentDirId <= 0)
+                return false;
+
+            if (!_mainIndex.TryGetDir(parentDirId, out var parentHandle))
+                return false;
+
+            current = parentHandle;
+        }
+
+        chainRootToTarget.Reverse(); // scanroot -> ... -> target
+        return true;
+    }
+
+    public FolderNodeViewModel EnsureNodeExistsUnderParent(
+        FolderNodeViewModel parentNode,
+        DirHandle childHandle)
+    {
+        if (_snapshot is null)
+            throw new InvalidOperationException("Rebuild must be called first.");
+
+        // Ensure parent children are loaded (no-op if already loaded).
+        EnsureChildrenLoaded(parentNode);
+
+        // If the child VM already exists (loaded or created earlier), return it.
+        if (_nodesByDirHandle.TryGetValue(childHandle, out var existing))
+            return existing;
+
+        // Otherwise create just this child and attach it to the parent.
+        var childNode = GetOrCreateNode(
+            childHandle,
+            parentNode.FullPath,
+            parentNode.ScanRootTotalBytes,
+            parentNode.ScanRootId);
+
+        childNode.Parent = parentNode;
+        childNode.ShowFullPath = false;
+
+        InsertSortedBySizeDesc(parentNode.Children, childNode);
+
+        return childNode;
     }
 
     private FolderNodeViewModel CreateRootNode(
@@ -94,15 +169,18 @@ public sealed class ScanRootsTreeBuilder
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called first.");
 
-        var dirRec = _snapshot.GetDirRecord(rootHandle);
-        var dirId = dirRec.DirId;
-
-        var node = new FolderNodeViewModel(dirId, label, fullPath, _scanner, _dialogs, scanRootId: scanRootId)
+        var node = new FolderNodeViewModel(
+            dirId: _snapshot.GetDirRecord(rootHandle).DirId,
+            name: label,
+            fullPath: fullPath,
+            scanCoordinator: _scanner,
+            dialogs: _dialogs,
+            scanRootId: scanRootId)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded
         };
 
-        _nodesByDirId[dirId] = node;
+        _nodesByDirHandle[rootHandle] = node;
 
         node.Parent = null;
         node.ShowFullPath = false;
@@ -117,26 +195,33 @@ public sealed class ScanRootsTreeBuilder
         return node;
     }
 
-    private FolderNodeViewModel GetOrCreateNode(DirHandle dirHandle, string parentPath, long scanRootTotalBytes, long scanRootId)
+    private FolderNodeViewModel GetOrCreateNode(
+        DirHandle dirHandle,
+        string parentPath,
+        long scanRootTotalBytes,
+        long scanRootId)
     {
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called first.");
 
-        var dirRec = _snapshot.GetDirRecord(dirHandle);
-        var dirId = dirRec.DirId;
-
-        if (_nodesByDirId.TryGetValue(dirId, out var existing))
+        if (_nodesByDirHandle.TryGetValue(dirHandle, out var existing))
             return existing;
 
         var name = _snapshot.DecodeDirName(dirHandle);
         var fullPath = Path.Combine(parentPath, name);
 
-        var node = new FolderNodeViewModel(dirId, name, fullPath, _scanner, _dialogs, scanRootId: scanRootId)
+        var node = new FolderNodeViewModel(
+            dirId: _snapshot.GetDirRecord(dirHandle).DirId,
+            name: name,
+            fullPath: fullPath,
+            scanCoordinator: _scanner,
+            dialogs: _dialogs,
+            scanRootId: scanRootId)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded
         };
 
-        _nodesByDirId[dirId] = node;
+        _nodesByDirHandle[dirHandle] = node;
 
         // Stats from index
         var stats = _treeIndex.GetDirStats(dirHandle);
@@ -177,7 +262,7 @@ public sealed class ScanRootsTreeBuilder
             childNode.Parent = node;
             childNode.ShowFullPath = false;
 
-            InsertChildSorted(node, childNode);
+            InsertSortedBySizeDesc(node.Children, childNode);
         }
     }
 
@@ -224,31 +309,11 @@ public sealed class ScanRootsTreeBuilder
         return rootDirId.ToString();
     }
 
-    private static void InsertRootSorted(
-        ObservableCollection<FolderNodeViewModel> roots,
-        FolderNodeViewModel node)
+    private static void InsertSortedBySizeDesc(ObservableCollection<FolderNodeViewModel> list, FolderNodeViewModel node)
     {
-        var index = 0;
-        while (index < roots.Count &&
-               roots[index].TotalBytes > node.TotalBytes)
-        {
-            index++;
+        var i = 0;
+        while (i < list.Count && list[i].TotalBytes > node.TotalBytes)
+            i++;
+        list.Insert(i, node);
         }
-        roots.Insert(index, node);
-    }
-
-    private static void InsertChildSorted(FolderNodeViewModel parent, FolderNodeViewModel node)
-    {
-        var children = parent.Children;
-        var index = 0;
-
-        while (index < children.Count &&
-               children[index].TotalBytes > node.TotalBytes)
-        {
-            index++;
-        }
-
-        children.Insert(index, node);
-    }
-
 }

@@ -6,14 +6,10 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
 using JetBrains.Annotations;
 
-// using NLog;
-
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Views;
 
 public partial class DuplicatesView : UserControl
 {
-    // private static readonly Logger Log = LogManager.GetCurrentClassLogger();
-
     public DuplicatesView()
     {
         InitializeComponent();

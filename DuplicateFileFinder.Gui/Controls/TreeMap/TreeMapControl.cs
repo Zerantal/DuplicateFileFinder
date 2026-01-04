@@ -4,10 +4,12 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Media.Immutable;
 
 using DuplicateFileFinderLib.Logging;
-
 // ReSharper disable MemberCanBePrivate.Global
+// ReSharper disable ForCanBeConvertedToForeach
 
 namespace DuplicateFileFinder.Gui.Controls.TreeMap;
 
@@ -15,9 +17,27 @@ public sealed class TreeMapControl : Control
 {
     private readonly Dictionary<uint, SolidColorBrush> _brushCache = new();
     private readonly Dictionary<TreeMapNode<ITreeMapNodeElement>, double> _valueCache = new();
+    private readonly Dictionary<TreeMapNode<ITreeMapNodeElement>, Rect> _rectByNode = new();
+
+    // cached property values
     private int _shadeLevelsCached = 16;
     private int _maxRectanglesCached = 25_000;
     private bool _valuesArePreSummedCached;
+    private int _primaryBorderDepthCached = 3;
+    private double _minBorderSizeCached = 6.0;
+
+    private volatile uint _primaryBorderArgb;
+    private volatile float _primaryBorderThickness;
+    private volatile bool _primaryBorderEnabled;
+
+    private volatile uint _secondaryBorderArgb;
+    private volatile float _secondaryBorderThickness;
+    private volatile bool _secondaryBorderEnabled;
+
+    private RenderTargetBitmap? _cacheBitmap;
+    private bool _cacheDirty = true;
+    private PixelSize _cachePixelSize;
+    private double _cacheScaling;
 
     // Scratch buffers to avoid per-call allocations.
     private readonly List<TreeItem> _itemsScratch = new(256);
@@ -29,62 +49,44 @@ public sealed class TreeMapControl : Control
         AvaloniaProperty.Register<TreeMapControl, TreeMapNode<ITreeMapNodeElement>?>(nameof(Root));
 
     public static readonly StyledProperty<int> ShadeLevelsProperty =
-        AvaloniaProperty.Register<TreeMapControl, int>(
-            nameof(ShadeLevels),
-            16);
+        AvaloniaProperty.Register<TreeMapControl, int>(nameof(ShadeLevels), 16);
 
-    /// <summary>
-    ///     Depth (0 = dummy root) at which the primary border style stops.
-    ///     Nodes with depth &lt;= PrimaryBorderDepth use the primary border;
-    ///     deeper nodes use the secondary border style.
-    /// </summary>
     public static readonly StyledProperty<int> PrimaryBorderDepthProperty =
-        AvaloniaProperty.Register<TreeMapControl, int>(
-            nameof(PrimaryBorderDepth),
-            3);
+        AvaloniaProperty.Register<TreeMapControl, int>(nameof(PrimaryBorderDepth), 3);
 
-    /// <summary>
-    ///     Do not render borders for rectangles smaller than this (in px) along
-    ///     either dimension.
-    /// </summary>
     public static readonly StyledProperty<double> MinBorderSizeProperty =
-        AvaloniaProperty.Register<TreeMapControl, double>(
-            nameof(MinBorderSize),
-            6.0);
+        AvaloniaProperty.Register<TreeMapControl, double>(nameof(MinBorderSize), 6.0);
 
     public static readonly StyledProperty<bool> ShowLabelsProperty =
-        AvaloniaProperty.Register<TreeMapControl, bool>(
-            nameof(ShowLabels));
+        AvaloniaProperty.Register<TreeMapControl, bool>(nameof(ShowLabels));
 
     public static readonly StyledProperty<IBrush?> PrimaryBorderBrushProperty =
-        AvaloniaProperty.Register<TreeMapControl, IBrush?>(
-            nameof(PrimaryBorderBrush),
-            Brushes.Black);
+        AvaloniaProperty.Register<TreeMapControl, IBrush?>(nameof(PrimaryBorderBrush), Brushes.Black);
 
     public static readonly StyledProperty<double> PrimaryBorderThicknessProperty =
-        AvaloniaProperty.Register<TreeMapControl, double>(
-            nameof(PrimaryBorderThickness),
-            1.0);
+        AvaloniaProperty.Register<TreeMapControl, double>(nameof(PrimaryBorderThickness), 1.0);
 
     public static readonly StyledProperty<IBrush?> SecondaryBorderBrushProperty =
-        AvaloniaProperty.Register<TreeMapControl, IBrush?>(
-            nameof(SecondaryBorderBrush),
-            Brushes.Gray);
+        AvaloniaProperty.Register<TreeMapControl, IBrush?>(nameof(SecondaryBorderBrush), Brushes.Gray);
 
     public static readonly StyledProperty<double> SecondaryBorderThicknessProperty =
-        AvaloniaProperty.Register<TreeMapControl, double>(
-            nameof(SecondaryBorderThickness),
-            0.5);
+        AvaloniaProperty.Register<TreeMapControl, double>(nameof(SecondaryBorderThickness), 0.5);
 
     public static readonly StyledProperty<int> MaxRectanglesProperty =
-        AvaloniaProperty.Register<TreeMapControl, int>(
-            nameof(MaxRectangles),
-            25_000);
+        AvaloniaProperty.Register<TreeMapControl, int>(nameof(MaxRectangles), 25_000);
 
     public static readonly StyledProperty<bool> ValuesArePreSummedProperty =
-        AvaloniaProperty.Register<TreeMapControl, bool>(
-            nameof(ValuesArePreSummed),
-            defaultValue: false);
+        AvaloniaProperty.Register<TreeMapControl, bool>(nameof(ValuesArePreSummed), defaultValue: false);
+
+    // Selection should not dirty the bitmap cache.
+    public static readonly StyledProperty<TreeMapNode<ITreeMapNodeElement>?> SelectedNodeProperty =
+        AvaloniaProperty.Register<TreeMapControl, TreeMapNode<ITreeMapNodeElement>?>(nameof(SelectedNode));
+
+    public static readonly StyledProperty<IBrush?> SelectionBorderBrushProperty =
+        AvaloniaProperty.Register<TreeMapControl, IBrush?>(nameof(SelectionBorderBrush), Brushes.DeepSkyBlue);
+
+    public static readonly StyledProperty<double> SelectionBorderThicknessProperty =
+        AvaloniaProperty.Register<TreeMapControl, double>(nameof(SelectionBorderThickness), 2.0);
 
     private readonly List<LayoutItem> _layout = new();
     private int _rectCount;
@@ -94,13 +96,36 @@ public sealed class TreeMapControl : Control
         RootProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) =>
         {
             ctrl._layout.Clear();
+            ctrl._rectByNode.Clear();
+            ctrl._valueCache.Clear();
+            ctrl._cacheDirty = true;
+
             ctrl.InvalidateMeasure();
             ctrl.InvalidateVisual();
         });
+
         ShadeLevelsProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
         MaxRectanglesProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
         ValuesArePreSummedProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
 
+        PrimaryBorderDepthProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
+        MinBorderSizeProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshCachedProps());
+
+        PrimaryBorderBrushProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshBorderCache());
+        SecondaryBorderBrushProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshBorderCache());
+        PrimaryBorderThicknessProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshBorderCache());
+        SecondaryBorderThicknessProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.RefreshBorderCache());
+
+        // Selection must redraw the control, but must NOT dirty the bitmap cache.
+        SelectedNodeProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
+        SelectionBorderBrushProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
+        SelectionBorderThicknessProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
+    }
+
+    public TreeMapControl()
+    {
+        RefreshCachedProps();
+        RefreshBorderCache();
     }
 
     // -------- CLR wrappers --------
@@ -111,10 +136,6 @@ public sealed class TreeMapControl : Control
         set => SetValue(RootProperty, value);
     }
 
-    /// <summary>
-    ///     Number of depth steps from a colour origin before it shades to black.
-    ///     Children share their ancestor's base colour but get darker with depth.
-    /// </summary>
     public int ShadeLevels
     {
         get => GetValue(ShadeLevelsProperty);
@@ -169,6 +190,30 @@ public sealed class TreeMapControl : Control
         set => SetValue(MaxRectanglesProperty, value);
     }
 
+    public bool ValuesArePreSummed
+    {
+        get => GetValue(ValuesArePreSummedProperty);
+        set => SetValue(ValuesArePreSummedProperty, value);
+    }
+
+    public TreeMapNode<ITreeMapNodeElement>? SelectedNode
+    {
+        get => GetValue(SelectedNodeProperty);
+        set => SetValue(SelectedNodeProperty, value);
+    }
+
+    public IBrush? SelectionBorderBrush
+    {
+        get => GetValue(SelectionBorderBrushProperty);
+        set => SetValue(SelectionBorderBrushProperty, value);
+    }
+
+    public double SelectionBorderThickness
+    {
+        get => GetValue(SelectionBorderThicknessProperty);
+        set => SetValue(SelectionBorderThicknessProperty, value);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var w = double.IsInfinity(availableSize.Width) ? 200 : availableSize.Width;
@@ -176,20 +221,50 @@ public sealed class TreeMapControl : Control
         return new Size(w, h);
     }
 
-    public bool ValuesArePreSummed
-    {
-        get => GetValue(ValuesArePreSummedProperty);
-        set => SetValue(ValuesArePreSummedProperty, value);
-    }
-
     private void RefreshCachedProps()
     {
         _shadeLevelsCached = Math.Max(1, ShadeLevels);
-
         _maxRectanglesCached = MaxRectangles;
         _valuesArePreSummedCached = ValuesArePreSummed;
+
+        _primaryBorderDepthCached = PrimaryBorderDepth;
+        _minBorderSizeCached = MinBorderSize;
+
+        _cacheDirty = true;
     }
 
+    private void RefreshBorderCache()
+    {
+        (_primaryBorderEnabled, _primaryBorderArgb) = TryBrushToArgb(PrimaryBorderBrush);
+        _primaryBorderThickness = (float)PrimaryBorderThickness;
+        if (_primaryBorderThickness <= 0) _primaryBorderEnabled = false;
+
+        (_secondaryBorderEnabled, _secondaryBorderArgb) = TryBrushToArgb(SecondaryBorderBrush);
+        _secondaryBorderThickness = (float)SecondaryBorderThickness;
+        if (_secondaryBorderThickness <= 0) _secondaryBorderEnabled = false;
+
+        _cacheDirty = true;
+        InvalidateVisual();
+    }
+
+    private static (bool ok, uint argb) TryBrushToArgb(IBrush? brush)
+    {
+        if (brush is SolidColorBrush sb)
+        {
+            var c = sb.Color;
+            uint argb = ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+            return (true, argb);
+        }
+
+        if (brush is ImmutableSolidColorBrush ib)
+        {
+            var c = ib.Color;
+            uint argb = ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+            return (true, argb);
+        }
+
+        return (false, 0);
+    }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
@@ -199,7 +274,10 @@ public sealed class TreeMapControl : Control
 
             _layout.Clear();
             _layout.EnsureCapacity(_maxRectanglesCached + _shadeLevelsCached);
+
+            _rectByNode.Clear();
             _valueCache.Clear();
+
             _rectCount = 0;
 
             if (Root == null || finalSize.Width <= 0 || finalSize.Height <= 0)
@@ -228,11 +306,14 @@ public sealed class TreeMapControl : Control
 
                 LayoutChildrenFrames(frame.Node, frame.Bounds, frame.Depth, frame.BaseColor, frame.BaseDepth, pq);
             }
+
+            RebuildCacheBitmapIfNeeded(finalSize);
         }
 
         return finalSize;
     }
 
+    // ----------------- Layout helpers -----------------
 
     private void EmitRect(
         TreeMapNode<ITreeMapNodeElement> node,
@@ -256,15 +337,23 @@ public sealed class TreeMapControl : Control
         }
 
         var fill = GetEffectiveBrush(depth, outBaseColor, outBaseDepth);
+        var fillColor = fill switch
+        {
+            SolidColorBrush sb => sb.Color,
+            ImmutableSolidColorBrush ib => ib.Color,
+            _ => Colors.Gray
+        };
 
         _layout.Add(new LayoutItem
         {
             Rect = bounds,
             Node = node,
             Depth = depth,
-            Fill = fill
+            Fill = fill,
+            FillColor = fillColor
         });
 
+        _rectByNode[node] = bounds;
         _rectCount++;
     }
 
@@ -283,10 +372,10 @@ public sealed class TreeMapControl : Control
             return;
 
         // Border margin logic (same semantics as before).
-        var minSize = MinBorderSize;
+        var minSize = _minBorderSizeCached;
         var canDrawBorder = bounds.Width >= minSize && bounds.Height >= minSize;
-        var usePrimary = depth <= PrimaryBorderDepth;
-        var thickness = usePrimary ? PrimaryBorderThickness : SecondaryBorderThickness;
+        var usePrimary = depth <= _primaryBorderDepthCached;
+        var thickness = usePrimary ? _primaryBorderThickness : _secondaryBorderThickness;
         var margin = (canDrawBorder && thickness > 0) ? thickness : 0.0;
 
         var inner = bounds.Deflate(new Thickness(margin));
@@ -295,6 +384,7 @@ public sealed class TreeMapControl : Control
 
         // Build treemap items (single pass, reuse scratch list).
         _itemsScratch.Clear();
+
         var children = node.Children;
         if (_itemsScratch.Capacity < children.Count)
             _itemsScratch.Capacity = children.Count;
@@ -334,7 +424,6 @@ public sealed class TreeMapControl : Control
 
         SquarifyFlat(_itemsScratch, inner, ref consumer);
     }
-
 
     private void SquarifyFlat<T>(List<TreeItem> items, Rect rect, ref T consumer)
         where T : struct, IRectConsumer
@@ -439,80 +528,263 @@ public sealed class TreeMapControl : Control
         return a > b ? a : b;
     }
 
+    // ----------------- Click / hit test -----------------
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        using (TimingLog.Start("TreeMapControl.OnPointerPressed"))
+        {
+            base.OnPointerPressed(e);
+
+            if (_layout.Count == 0)
+                return;
+
+            var p = e.GetPosition(this);
+
+            TreeMapNode<ITreeMapNodeElement>? hit = null;
+            for (var i = _layout.Count - 1; i >= 0; i--)
+            {
+                var item = _layout[i];
+                if (item.Rect.Contains(p))
+                {
+                    hit = item.Node;
+                    break;
+                }
+            }
+
+            if (hit is null)
+                return;
+
+            if (!ReferenceEquals(SelectedNode, hit))
+            {
+                SelectedNode = hit;
+                e.Handled = true;
+            }
+        }
+    }
+
+    public bool TryGetRect(TreeMapNode<ITreeMapNodeElement> node, out Rect rect)
+        => _rectByNode.TryGetValue(node, out rect);
+
+    // ----------------- Rendering -----------------
+
     public override void Render(DrawingContext context)
     {
         using (TimingLog.Start("TreeMapControl.Render"))
         {
             base.Render(context);
 
-            var primaryDepth = PrimaryBorderDepth;
-            var minSize = MinBorderSize;
-            var primaryBrush = PrimaryBorderBrush;
-            var secondaryBrush = SecondaryBorderBrush;
-            var primaryThickness = PrimaryBorderThickness;
-            var secondaryThickness = SecondaryBorderThickness;
-
-            var primaryPen = (primaryBrush != null && primaryThickness > 0)
-                ? new Pen(primaryBrush, primaryThickness)
-                : null;
-            var secondaryPen = (secondaryBrush != null && secondaryThickness > 0)
-                ? new Pen(secondaryBrush, secondaryThickness)
-                : null;
-
-            foreach (var item in _layout)
+            var bmp = _cacheBitmap;
+            if (bmp is not null)
             {
-                var rect = item.Rect;
-                if (rect.Width <= 0 || rect.Height <= 0)
-                    continue;
-
-                context.FillRectangle(item.Fill, rect);
-
-                if (rect.Width >= minSize && rect.Height >= minSize)
-                {
-                    var usePrimary = item.Depth <= primaryDepth;
-
-                    var pen = usePrimary ? primaryPen : secondaryPen;
-                    if (pen != null)
-                        context.DrawRectangle(pen, rect);
-                }
-
-                if (ShowLabels)
-                    DrawLabel(context, item.Node.Label, rect);
+                context.DrawImage(
+                    bmp,
+                    new Rect(0, 0, bmp.Size.Width, bmp.Size.Height),
+                    new Rect(0, 0, Bounds.Width, Bounds.Height));
             }
+
+            DrawSelectionOverlay(context);
         }
     }
 
-    // ----------------- Labels -----------------
-
-    private void DrawLabel(DrawingContext ctx, string text, Rect rect)
+    private void DrawSelectionOverlay(DrawingContext context)
     {
-        if (string.IsNullOrEmpty(text))
+        var selected = SelectedNode;
+        if (selected is null)
             return;
 
-        const double minWidth = 40;
-        const double minHeight = 16;
-
-        if (rect.Width < minWidth || rect.Height < minHeight)
+        if (!_rectByNode.TryGetValue(selected, out var rect))
             return;
 
-        var typeface = Typeface.Default;
-        const double fontSize = 11;
+        var t = SelectionBorderThickness;
+        if (t <= 0)
+            return;
+
+        var brush = SelectionBorderBrush;
+        if (brush is null)
+            return;
+
+        var pen = new Pen(brush, t);
+        var r = rect.Deflate(new Thickness(t / 2));
+
+        if (r is { Width: > 0, Height: > 0 })
+            context.DrawRectangle(pen, r);
+    }
+
+    private void RebuildCacheBitmapIfNeeded(Size arrangedSize)
+    {
+        var scaling = VisualRoot?.RenderScaling ?? 1.0;
+
+        // Pixel size (rounded) for current control size
+        var pxW = Math.Max(1, (int)Math.Ceiling(arrangedSize.Width * scaling));
+        var pxH = Math.Max(1, (int)Math.Ceiling(arrangedSize.Height * scaling));
+        var pixelSize = new PixelSize(pxW, pxH);
+
+        var needNew =
+            _cacheBitmap is null ||
+            _cacheDirty ||
+            Math.Abs(_cacheScaling - scaling) > 0.0001 ||
+            _cachePixelSize != pixelSize;
+
+        if (!needNew)
+            return;
+
+        _cacheBitmap?.Dispose();
+        _cacheBitmap = new RenderTargetBitmap(pixelSize);
+        _cachePixelSize = pixelSize;
+        _cacheScaling = scaling;
+
+        // Draw the treemap ONCE into the bitmap
+        using (var dc = _cacheBitmap.CreateDrawingContext(clear: true))
+        {
+            // Map pixels->DIPs
+            using (dc.PushTransform(Matrix.CreateScale(1.0 / scaling, 1.0 / scaling)))
+            {
+                DrawTreemapInto(dc);
+            }
+        }
+
+        _cacheDirty = false;
+        InvalidateVisual();
+    }
+
+    private void DrawTreemapInto(DrawingContext dc)
+    {
+        // Fills
+        for (var i = 0; i < _layout.Count; i++)
+        {
+            var li = _layout[i];
+            dc.FillRectangle(li.Fill, li.Rect);
+        }
+
+        // Borders
+        var minSize = _minBorderSizeCached;
+        var primaryDepth = _primaryBorderDepthCached;
+
+        IPen? primaryPen = null;
+        IPen? secondaryPen = null;
+
+        if (_primaryBorderEnabled && _primaryBorderThickness > 0)
+            primaryPen = new Pen(new SolidColorBrush(ColorFromArgb(_primaryBorderArgb)), _primaryBorderThickness);
+
+        if (_secondaryBorderEnabled && _secondaryBorderThickness > 0)
+            secondaryPen = new Pen(new SolidColorBrush(ColorFromArgb(_secondaryBorderArgb)), _secondaryBorderThickness);
+
+        for (var i = 0; i < _layout.Count; i++)
+        {
+            var li = _layout[i];
+            var r = li.Rect;
+
+            if (r.Width < minSize || r.Height < minSize)
+                continue;
+
+            var pen = (li.Depth <= primaryDepth) ? primaryPen : secondaryPen;
+            if (pen is not null)
+                dc.DrawRectangle(pen, r);
+        }
+
+        // Labels (leaf-only, centered, contrast-aware)
+        if (!ShowLabels)
+            return;
+
+        for (var i = 0; i < _layout.Count; i++)
+        {
+            var li = _layout[i];
+
+            if (!ShouldLabelNode(li.Node))
+                continue;
+
+            // Choose a label text. Prefer something short:
+            var label = li.Node.Element.Label;
+            if (string.IsNullOrWhiteSpace(label))
+                continue;
+
+            DrawCenteredLabel(dc, label, li.Rect, li.FillColor);
+        }
+    }
+
+
+    private static Color ColorFromArgb(uint argb)
+    {
+        var a = (byte)((argb >> 24) & 0xFF);
+        var r = (byte)((argb >> 16) & 0xFF);
+        var g = (byte)((argb >> 8) & 0xFF);
+        var b = (byte)(argb & 0xFF);
+        return Color.FromArgb(a, r, g, b);
+    }
+
+// ----------------- Labels -----------------
+
+    private const double LabelFontSize = 11;
+    private const double LabelPadding = 2;
+    private const double MinLabelWidth = 60;
+    private const double MinLabelHeight = 18;
+
+// Cache black/white brushes to avoid churn
+    private static readonly IBrush _labelBrushLight = Brushes.White;
+    private static readonly IBrush _labelBrushDark = Brushes.Black;
+
+    private static bool ShouldLabelNode(TreeMapNode<ITreeMapNodeElement> node)
+    {
+        // Strict: only leaves
+        return !node.HasChildren;
+    }
+
+    private static IBrush GetContrastBrush(Color background)
+    {
+        // Relative luminance (sRGB)
+        static double Linearize(byte c)
+        {
+            var s = c / 255.0;
+            return s <= 0.04045 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+
+        var r = Linearize(background.R);
+        var g = Linearize(background.G);
+        var b = Linearize(background.B);
+
+        var luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+        // Threshold tuned for “looks right” on mid greys
+        return luminance < 0.45 ? _labelBrushLight : _labelBrushDark;
+    }
+
+    private void DrawCenteredLabel(DrawingContext ctx, string text, Rect rect, Color bg)
+    {
+        // Fast reject before allocating FormattedText
+        if (rect.Width < MinLabelWidth || rect.Height < MinLabelHeight)
+            return;
+
+        var brush = GetContrastBrush(bg);
 
         var formatted = new FormattedText(
             text,
             CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
-            typeface,
-            fontSize,
-            Brushes.Black);
+            Typeface.Default,
+            LabelFontSize,
+            brush);
 
-        var origin = rect.TopLeft + new Vector(2, 2);
-        ctx.DrawText(formatted, origin);
+        // Fit check with padding
+        if (formatted.Width + 2 * LabelPadding > rect.Width ||
+            formatted.Height + 2 * LabelPadding > rect.Height)
+            return;
+
+        // Center in rect
+        var x = rect.X + (rect.Width - formatted.Width) / 2.0;
+        var y = rect.Y + (rect.Height - formatted.Height) / 2.0;
+
+        // Clamp a bit to avoid drawing exactly on edges
+        x = Math.Max(rect.X + LabelPadding, x);
+        y = Math.Max(rect.Y + LabelPadding, y);
+
+        ctx.DrawText(formatted, new Point(x, y));
     }
+
 
     // ----------------- Value aggregation -----------------
 
-    // recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
+// recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
     private double GetNodeValue(TreeMapNode<ITreeMapNodeElement> node)
     {
         if (_valuesArePreSummedCached)
@@ -537,8 +809,7 @@ public sealed class TreeMapControl : Control
         return sum;
     }
 
-
-    // ----------------- Colour handling -----------------
+// ----------------- Colour handling -----------------
 
     private Color ShadeColor(Color baseColor, int depthFromBase)
     {
@@ -590,234 +861,7 @@ public sealed class TreeMapControl : Control
         };
     }
 
-    /// <summary>
-    ///     Layout a node and squarify its children inside it.
-    /// </summary>
-    private void LayoutNode(
-        TreeMapNode<ITreeMapNodeElement> node,
-        Rect bounds,
-        int depth,
-        Color? inheritedBaseColor,
-        int baseDepth)
-    {
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return;
-
-        // Hard cap on number of rectangles to avoid runaway layout on huge repos.
-        if (_rectCount >= _maxRectanglesCached)
-            return;
-
-        // Determine colour origin for this subtree.
-        Color? baseColor;
-        int thisBaseDepth;
-        if (node.Fill is SolidColorBrush solid)
-        {
-            baseColor = solid.Color;
-            thisBaseDepth = depth;
-        }
-        else
-        {
-            baseColor = inheritedBaseColor;
-            thisBaseDepth = baseDepth;
-        }
-
-        // Effective fill for this node.
-        var fill = GetEffectiveBrush(depth, baseColor, thisBaseDepth);
-
-        _layout.Add(new LayoutItem
-        {
-            Rect = bounds,
-            Node = node,
-            Depth = depth,
-            Fill = fill
-        });
-        _rectCount++;
-
-        if (!node.HasChildren)
-            return;
-
-        // Only reserve margin if we expect to draw a border on this node.
-        var minSize = MinBorderSize;
-        var canDrawBorder = bounds.Width >= minSize && bounds.Height >= minSize;
-        var usePrimary = depth <= PrimaryBorderDepth;
-        var thickness = usePrimary ? PrimaryBorderThickness : SecondaryBorderThickness;
-        var margin = canDrawBorder && thickness > 0 ? thickness : 0.0;
-
-        var inner = bounds.Deflate(new Thickness(margin));
-        if (inner.Width <= 0 || inner.Height <= 0)
-            return;
-
-        var items = node.Children
-            .Select(c => new TreeItem { Node = c, Value = Math.Max(0, GetNodeValue(c)) })
-            .Where(i => i.Value > 0)
-            .ToList();
-
-        if (items.Count == 0)
-            return;
-
-        var total = items.Sum(i => i.Value);
-        if (total <= 0)
-            return;
-
-        var totalArea = inner.Width * inner.Height;
-        var scale = totalArea / total;
-
-        foreach (var item in items)
-            item.Area = item.Value * scale;
-
-        Squarify(items, inner, depth + 1, baseColor, thisBaseDepth);
-    }
-
-    private void Squarify(
-        List<TreeItem> items,
-        Rect rect,
-        int depth,
-        Color? baseColor,
-        int baseDepth)
-    {
-        if (items.Count == 0 || rect.Width <= 0 || rect.Height <= 0)
-            return;
-
-        SquarifyInternalIterative(items, rect, depth, baseColor, baseDepth);
-    }
-
-    private void SquarifyInternalIterative(
-        List<TreeItem> items,
-        Rect rect,
-        int depth,
-        Color? baseColor,
-        int baseDepth)
-    {
-        if (items.Count == 0 || rect.Width <= 0 || rect.Height <= 0)
-            return;
-
-        var index = 0;
-
-        while (index < items.Count && rect is { Width: > 0, Height: > 0 })
-        {
-            var row = new List<TreeItem> {
-                // Start row with first remaining item
-                items[index] };
-
-            index++;
-
-            var horizontal = rect.Width >= rect.Height;
-            var w = horizontal ? rect.Width : rect.Height;
-            var bestWorst = WorstAspect(row, w);
-
-            // Try to grow this row as long as aspect ratio improves
-            while (index < items.Count)
-            {
-                row.Add(items[index]);
-                var newWorst = WorstAspect(row, w);
-
-                if (newWorst <= bestWorst)
-                {
-                    bestWorst = newWorst;
-                    index++;
-                }
-                else
-                {
-                    // Undo last add; row is final
-                    row.RemoveAt(row.Count - 1);
-                    break;
-                }
-            }
-
-            if (row.Count == 0)
-                break;
-
-            var rowArea = row.Sum(i => i.Area);
-            if (rowArea <= 0)
-                break;
-
-            rect = LayoutRow(row, rowArea, rect, depth, baseColor, baseDepth);
-        }
-    }
-
-    private static double WorstAspect(List<TreeItem> row, double w)
-    {
-        if (row.Count == 0 || w <= 0)
-            return double.MaxValue;
-
-        double sum = 0;
-        double minA = double.PositiveInfinity;
-        double maxA = 0;
-
-        for (int i = 0; i < row.Count; i++)
-        {
-            var a = row[i].Area;
-            sum += a;
-            if (a < minA)
-                minA = a;
-            if (a > maxA)
-                maxA = a;
-        }
-
-        if (sum <= 0 || minA <= 0)
-            return double.MaxValue;
-
-        double s2 = sum * sum;
-        double w2 = w * w;
-
-        var r1 = (w2 * maxA) / s2;
-        var r2 = s2 / (w2 * minA);
-
-        return r1 > r2 ? r1 : r2;
-    }
-
-    private Rect LayoutRow(
-        IReadOnlyList<TreeItem> row,
-        double rowArea,
-        Rect bounds,
-        int depth,
-        Color? baseColor,
-        int baseDepth)
-    {
-        if (row.Count == 0 || bounds.Width <= 0 || bounds.Height <= 0 || rowArea <= 0)
-            return bounds;
-
-        var horizontal = bounds.Width >= bounds.Height;
-
-        if (horizontal)
-        {
-            var rowHeight = rowArea / bounds.Width;
-            var x = bounds.X;
-            var y = bounds.Y;
-
-            foreach (var item in row)
-            {
-                var itemWidth = item.Area / rowHeight;
-                var rect = new Rect(x, y, itemWidth, rowHeight);
-
-                LayoutNode(item.Node, rect, depth, baseColor, baseDepth);
-
-                x += itemWidth;
-            }
-
-            return new Rect(bounds.X, bounds.Y + rowHeight, bounds.Width, Math.Max(0, bounds.Height - rowHeight));
-        }
-        else
-        {
-            var rowWidth = rowArea / bounds.Height;
-            // var x = bounds.X;
-            var y = bounds.Y;
-
-            foreach (var item in row)
-            {
-                var itemHeight = item.Area / rowWidth;
-                var rect = new Rect(bounds.X, y, rowWidth, itemHeight);
-
-                LayoutNode(item.Node, rect, depth, baseColor, baseDepth);
-
-                y += itemHeight;
-            }
-
-            return new Rect(bounds.X + rowWidth, bounds.Y, Math.Max(0, bounds.Width - rowWidth), bounds.Height);
-        }
-    }
-
-    // ----------------- Tooltips -----------------
+// ----------------- Tooltips -----------------
 
     private ITreeMapNodeElement? _currentTooltipElement;
 
@@ -859,7 +903,6 @@ public sealed class TreeMapControl : Control
             var tip = element.ToolTipFactory();
             ToolTip.SetTip(this, tip);
         }
-
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
@@ -873,6 +916,26 @@ public sealed class TreeMapControl : Control
         }
     }
 
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+
+        _cacheBitmap?.Dispose();
+        _cacheBitmap = null;
+    }
+
+    protected override void OnMeasureInvalidated()
+    {
+        base.OnMeasureInvalidated();
+        _cacheDirty = true;
+    }
+
+    protected override void OnSizeChanged(SizeChangedEventArgs e)
+    {
+        base.OnSizeChanged(e);
+        _cacheDirty = true;
+    }
+
     private sealed class ExpandFrame
     {
         public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
@@ -882,7 +945,7 @@ public sealed class TreeMapControl : Control
         public required int BaseDepth { get; init; }
     }
 
-    // ----------------- Internal layout model -----------------
+// ----------------- Internal layout model -----------------
 
     private sealed class LayoutItem
     {
@@ -890,9 +953,10 @@ public sealed class TreeMapControl : Control
         public required TreeMapNode<ITreeMapNodeElement> Node { get; init; }
         public required int Depth { get; init; }
         public required IBrush Fill { get; init; }
+        public required Color FillColor { get; init; }
     }
 
-    // ----------------- Squarified treemap -----------------
+// ----------------- Squarified treemap -----------------
 
     private sealed class TreeItem
     {
@@ -906,43 +970,30 @@ public sealed class TreeMapControl : Control
         void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect);
     }
 
-    private readonly struct ChildRectConsumer : IRectConsumer
+    private readonly struct ChildRectConsumer(
+        TreeMapControl owner,
+        PriorityQueue<ExpandFrame, double> pq,
+        int childDepth,
+        Color? inheritedBaseColor,
+        int baseDepth)
+        : IRectConsumer
     {
-        private readonly TreeMapControl _owner;
-        private readonly PriorityQueue<ExpandFrame, double> _pq;
-        private readonly int _childDepth;
-        private readonly Color? _inheritedBaseColor;
-        private readonly int _baseDepth;
-
-        public ChildRectConsumer(
-            TreeMapControl owner,
-            PriorityQueue<ExpandFrame, double> pq,
-            int childDepth,
-            Color? inheritedBaseColor,
-            int baseDepth)
+        public void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect)
         {
-            _owner = owner;
-            _pq = pq;
-            _childDepth = childDepth;
-            _inheritedBaseColor = inheritedBaseColor;
-            _baseDepth = baseDepth;
-        }
-
-        public readonly void Consume(TreeMapNode<ITreeMapNodeElement> node, Rect rect)
-        {
-            if (_owner._rectCount >= _owner._maxRectanglesCached)
+            if (owner._rectCount >= owner._maxRectanglesCached)
                 return;
 
-            _owner.EmitRect(node, rect, _childDepth, _inheritedBaseColor, _baseDepth, out var childBaseColor, out var childBaseDepth);
+            owner.EmitRect(node, rect, childDepth, inheritedBaseColor, baseDepth,
+                out var childBaseColor, out var childBaseDepth);
 
             if (node.HasChildren)
             {
                 var area = rect.Width * rect.Height;
-                _pq.Enqueue(new ExpandFrame
+                pq.Enqueue(new ExpandFrame
                 {
                     Node = node,
                     Bounds = rect,
-                    Depth = _childDepth,
+                    Depth = childDepth,
                     BaseColor = childBaseColor,
                     BaseDepth = childBaseDepth
                 }, -area);
