@@ -237,11 +237,13 @@ public sealed class TreeMapControl : Control
     {
         (_primaryBorderEnabled, _primaryBorderArgb) = TryBrushToArgb(PrimaryBorderBrush);
         _primaryBorderThickness = (float)PrimaryBorderThickness;
-        if (_primaryBorderThickness <= 0) _primaryBorderEnabled = false;
+        if (_primaryBorderThickness <= 0)
+            _primaryBorderEnabled = false;
 
         (_secondaryBorderEnabled, _secondaryBorderArgb) = TryBrushToArgb(SecondaryBorderBrush);
         _secondaryBorderThickness = (float)SecondaryBorderThickness;
-        if (_secondaryBorderThickness <= 0) _secondaryBorderEnabled = false;
+        if (_secondaryBorderThickness <= 0)
+            _secondaryBorderEnabled = false;
 
         _cacheDirty = true;
         InvalidateVisual();
@@ -713,14 +715,14 @@ public sealed class TreeMapControl : Control
         return Color.FromArgb(a, r, g, b);
     }
 
-// ----------------- Labels -----------------
+    // ----------------- Labels -----------------
 
     private const double LabelFontSize = 11;
     private const double LabelPadding = 2;
     private const double MinLabelWidth = 60;
     private const double MinLabelHeight = 18;
 
-// Cache black/white brushes to avoid churn
+    // Cache black/white brushes to avoid churn
     private static readonly IBrush _labelBrushLight = Brushes.White;
     private static readonly IBrush _labelBrushDark = Brushes.Black;
 
@@ -784,7 +786,7 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Value aggregation -----------------
 
-// recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
+    // recursively aggregate value and store in _valueCache IF ValuesArePreSummed = false
     private double GetNodeValue(TreeMapNode<ITreeMapNodeElement> node)
     {
         if (_valuesArePreSummedCached)
@@ -809,7 +811,7 @@ public sealed class TreeMapControl : Control
         return sum;
     }
 
-// ----------------- Colour handling -----------------
+    // ----------------- Colour handling -----------------
 
     private Color ShadeColor(Color baseColor, int depthFromBase)
     {
@@ -861,7 +863,7 @@ public sealed class TreeMapControl : Control
         };
     }
 
-// ----------------- Tooltips -----------------
+    // ----------------- Tooltips -----------------
 
     private ITreeMapNodeElement? _currentTooltipElement;
 
@@ -945,7 +947,7 @@ public sealed class TreeMapControl : Control
         public required int BaseDepth { get; init; }
     }
 
-// ----------------- Internal layout model -----------------
+    // ----------------- Internal layout model -----------------
 
     private sealed class LayoutItem
     {
@@ -956,7 +958,7 @@ public sealed class TreeMapControl : Control
         public required Color FillColor { get; init; }
     }
 
-// ----------------- Squarified treemap -----------------
+    // ----------------- Squarified treemap -----------------
 
     private sealed class TreeItem
     {

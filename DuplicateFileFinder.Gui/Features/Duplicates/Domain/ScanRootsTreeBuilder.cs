@@ -315,5 +315,5 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
         while (i < list.Count && list[i].TotalBytes > node.TotalBytes)
             i++;
         list.Insert(i, node);
-        }
+    }
 }

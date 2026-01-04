@@ -79,7 +79,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
     {
         _builder = builder;
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
-        }
+    }
 
     public void Rebuild(RepoSnapshotView snapshot)
     {
@@ -176,10 +176,10 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
         => NavigateToDirHandleLazy(dirHandle);
 
     public void NavigateToFile(FileHandle fileHandle)
-        {
+    {
         if (_builder.TryGetParentDirHandle(fileHandle, out var parent))
             NavigateToDirHandleLazy(parent);
-        }
+    }
 
     /// <summary>
     /// Convenience for TreeMap: navigate to a directory by dirId.
