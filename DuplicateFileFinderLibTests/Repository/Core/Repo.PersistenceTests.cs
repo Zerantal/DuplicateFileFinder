@@ -31,8 +31,8 @@ public sealed class Repo_PersistenceTests
             Assert.NotNull(meta0);
             var runs0 = meta0.ScanRuns.Count;
 
-            // BeginScan causes MarkMetaDirty + PersistMetaIfDirtyAsync in BeginScanAsync
-            _ = await internalRepo.BeginScanAsync(
+            // BeginScan causes MarkMetaDirty + PersistMetaIfDirtyAsync in BeginNewScanAsync
+            _ = await internalRepo.BeginNewScanAsync(
                 rootPath: Path.Combine(repoDir, "root"),
                 options: new ScanOptions(StartFresh: true),
                 volumeInfo: null,
@@ -61,7 +61,7 @@ public sealed class Repo_PersistenceTests
             {
                 var internalRepo = (IRepoInternal)repo;
 
-                var ctx = await internalRepo.BeginScanAsync(
+                var ctx = await internalRepo.BeginNewScanAsync(
                     rootPath: Path.Combine(repoDir, "root"),
                     options: new ScanOptions(StartFresh: true),
                     volumeInfo: null,

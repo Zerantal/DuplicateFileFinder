@@ -15,6 +15,7 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
+
     // Public read-only views
     public IReadOnlyList<ScanRoot> ScanRootsView
     {
@@ -51,25 +52,21 @@ public sealed partial class Repo
         await Task.CompletedTask;
     }
 
-    public void Dispose()
-    {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
-    }
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
     public ScanRootSnapshotView? TryGetScanRootView(long scanRootId)
     {
         lock (_sync)
         {
-            if (!_scanRootSnapshots.TryGetValue(scanRootId, out var rootSnapshot))
-                return null;
-
-            return new ScanRootSnapshotView
-            {
-                ScanRootId = rootSnapshot.ScanRootId,
-                StringPool = rootSnapshot.StringPool,
-                Dirs = rootSnapshot.Dirs,
-                Files = rootSnapshot.Files
-            };
+            return !_scanRootSnapshots.TryGetValue(scanRootId, out var snap)
+                ? null
+                : new ScanRootSnapshotView
+                {
+                    ScanRootId = snap.ScanRootId,
+                    StringPool = snap.StringPool,
+                    Dirs = snap.Dirs,
+                    Files = snap.Files
+                };
         }
     }
 
@@ -77,24 +74,29 @@ public sealed partial class Repo
     {
         lock (_sync)
         {
-            var snapshots = new Dictionary<long, ScanRootSnapshotView>(_scanRootSnapshots.Count);
-            foreach (var (id, snap) in _scanRootSnapshots)
-            {
-                snapshots[id] = new ScanRootSnapshotView
-                {
-                    ScanRootId = snap.ScanRootId,
-                    StringPool = snap.StringPool,
-                    Dirs = snap.Dirs,
-                    Files = snap.Files
-                };
-            }
+            return GetRepoSnapshotView_NoLock();
+        }
+    }
 
-            return new RepoSnapshotView
+    private RepoSnapshotView GetRepoSnapshotView_NoLock()
+    {
+        var snapshots = new Dictionary<long, ScanRootSnapshotView>(_scanRootSnapshots.Count);
+        foreach (var (id, snap) in _scanRootSnapshots)
+        {
+            snapshots[id] = new ScanRootSnapshotView
             {
-                Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(snapshots),
-                ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(new Dictionary<long, ScanRoot>(_scanRoots))
+                ScanRootId = snap.ScanRootId,
+                StringPool = snap.StringPool,
+                Dirs = snap.Dirs,
+                Files = snap.Files
             };
         }
+
+        return new RepoSnapshotView
+        {
+            Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(snapshots),
+            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(new Dictionary<long, ScanRoot>(_scanRoots))
+        };
     }
 
     public async Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
@@ -123,7 +125,7 @@ public sealed partial class Repo
             _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
 
-            snapshotView = GetRepoSnapshotView();
+            snapshotView = GetRepoSnapshotView_NoLock();
         }
 
         // Persist outside lock; RepoStore is gated.
@@ -167,6 +169,7 @@ public sealed partial class Repo
 
             updatedScanRoot = scanRoot with { DisplayName = displayName };
             _scanRoots[scanRootId] = updatedScanRoot;
+
             generation = _meta.Generation;  // don't bump generation
             MarkMetaDirty_NoLock();
         }
@@ -180,14 +183,54 @@ public sealed partial class Repo
         });
     }
 
-    // -------- BeginScan (creates ScanRun + ScanSession) --------
+    // -------- Scan bootstrap (creates ScanRun + ScanSession) --------
 
-    public bool HasScanCheckpoint(long scanRootId)
+    public bool HasScanCheckpoint(long scanRootId) => RepoStore.HasScanCheckpoint(_repoPath, scanRootId);
+
+    /// <summary>
+    /// Folder-rescan support: Begin a scan for an existing scan root, and seed the session's mutation buffer
+    /// with the currently loaded snapshot so that unscanned parts of the tree remain present in the final snapshot.
+    ///
+    /// Requirements:
+    /// - options.StartFresh must be true (folder rescans force StartFresh; caller should warn user about checkpoint deletion)
+    /// - a snapshot must already be loaded in memory for this scan root (UI should only expose the action then)
+    /// </summary>
+    async Task<ScanContext> IRepoInternal.BeginSubtreeScanAsync(
+        long scanRootId,
+        ScanOptions options,
+        VolumeInfo? volumeInfo,
+        CancellationToken ct)
     {
-        return RepoStore.HasScanCheckpoint(_repoPath, scanRootId);
+        // TODO: I think we can set options.StartFresh to true and have BeginRescanAsync delete
+        // any existing checkpoints. This will mean we can forgo two checks below.
+        if (!options.StartFresh)
+            throw new InvalidOperationException("Subtree scans must be started fresh (StartFresh=true).");
+
+        // Begin rescan (this will delete checkpoints due to StartFresh=true).
+        var ctx = await ((IRepoInternal)this).BeginRescanAsync(scanRootId, options, volumeInfo, ct).ConfigureAwait(false);
+
+        // Subtree scan must not be resumed from a checkpoint.
+        if (ctx.Checkpoint is not null)
+            throw new InvalidOperationException("Subtree scan cannot resume from an existing checkpoint.");
+
+        // Seed from currently loaded snapshot (must exist for subtree scan).
+        ScanRootSnapshotV2 baseline;
+        lock (_sync)
+        {
+            if (!_scanRootSnapshots.TryGetValue(scanRootId, out baseline))
+                throw new InvalidOperationException("Cannot rescan a folder unless a snapshot is loaded for the scan root.");
+        }
+
+        // Import baseline snapshot into the session so final snapshot retains everything outside the scanned subtree.
+        if (ctx.Session is ScanSession session)
+            session.ImportPartialSnapshot(in baseline);
+        else
+            throw new InvalidOperationException($"Unexpected session type: {ctx.Session.GetType().FullName}");
+
+        return ctx;
     }
 
-    async Task<ScanContext> IRepoInternal.BeginScanAsync(
+    async Task<ScanContext> IRepoInternal.BeginNewScanAsync(
         string rootPath,
         ScanOptions options,
         VolumeInfo? volumeInfo,
@@ -198,75 +241,91 @@ public sealed partial class Repo
 
         var normalizedRootPath = PathUtils.NormalizePath(rootPath);
 
-        string relativeRootPath;
-        if (string.IsNullOrWhiteSpace(volumeInfo?.VolumePath))
-            relativeRootPath = normalizedRootPath;
-        else
-            relativeRootPath = PathUtils.NormalizePath(
-                Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
+        // Determine relative root path (stored in ScanRoot.RootPath when VolumePath is known).
+        var relativeRootPath = string.IsNullOrWhiteSpace(volumeInfo?.VolumePath)
+            ? normalizedRootPath
+            : PathUtils.NormalizePath(Path.GetRelativePath(volumeInfo.VolumePath, normalizedRootPath));
 
         ScanRoot scanRoot;
         ScanRun run;
         DirScanInput rootDirInput;
 
-        // ------------------------------
-        // Create ScanRoot + ScanRun
-        // ------------------------------
         lock (_sync)
         {
             scanRoot = FindOrCreateScanRoot_NoLock(volumeInfo, relativeRootPath);
-
-            // Ensure stable RootDirId
-            if (scanRoot.DirId <= 0)
-            {
-                scanRoot = scanRoot with { DirId = AllocateDirId_NoLock() };
-                _scanRoots[scanRoot.RootId] = scanRoot;
-            }
+            EnsureScanRootDirId_NoLock(ref scanRoot);
 
             var runId = AllocateRunId_NoLock();
+            run = CreateInProgressRun_NoLock(scanRoot.RootId, runId, normalizedRootPath, options);
 
-            run = new ScanRun
-            {
-                ScanRootId = scanRoot.RootId,
-                ScanSequence = runId,
-                RootPath = normalizedRootPath,
-                StartedAt = DateTimeOffset.UtcNow,
-                FinishedAt = null,
-                Status = ScanRunStatus.InProgress,
-                ErrorMessage = null,
-                HashPolicy = options.HashPolicy
-            };
-
-            _scanRuns.Add(run);
-            _scanRunIndex[runId] = run;
-            MarkMetaDirty_NoLock();
-
-            // Root directory "dummy" record (session will upsert it as Enumerated when observed)
             rootDirInput = new DirScanInput { DirId = scanRoot.DirId };
         }
 
+        return await BeginScanCoreAsync(scanRoot, run, rootDirInput, options, ct).ConfigureAwait(false);
+    }
+
+    async Task<ScanContext> IRepoInternal.BeginRescanAsync(
+        long scanRootId,
+        ScanOptions options,
+        VolumeInfo? volumeInfo,
+        CancellationToken ct)
+    {
+        ScanRoot scanRoot;
+        ScanRun run;
+        DirScanInput rootDirInput;
+
+        lock (_sync)
+        {
+            if (!_scanRoots.TryGetValue(scanRootId, out scanRoot!))
+                throw new KeyNotFoundException($"ScanRootId not found: {scanRootId}");
+
+            // Resolve to an absolute path for this scan run.
+            var resolvedRootPath = ResolveScanRootPath_NoLock(scanRoot);
+
+            ValidateVolumeIdentity_NoLock(scanRootId, scanRoot, volumeInfo);
+
+            EnsureScanRootDirId_NoLock(ref scanRoot);
+
+            // Best-effort metadata refresh (no need for volumeInfo, but apply it when present).
+            scanRoot = UpdateScanRootMeta_NoLock(scanRoot, volumeInfo);
+
+            var runId = AllocateRunId_NoLock();
+            run = CreateInProgressRun_NoLock(scanRoot.RootId, runId, resolvedRootPath, options);
+
+            rootDirInput = new DirScanInput { DirId = scanRoot.DirId };
+        }
+
+        return await BeginScanCoreAsync(scanRoot, run, rootDirInput, options, ct).ConfigureAwait(false);
+    }
+
+    private async Task<ScanContext> BeginScanCoreAsync(
+        ScanRoot scanRoot,
+        ScanRun run,
+        DirScanInput rootDirInput,
+        ScanOptions options,
+        CancellationToken ct)
+    {
+        // Persist meta outside lock (scans show up in ScanRunsView quickly).
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
 
-        // ------------------------------
         // Checkpoint handling (outside lock)
-        // ------------------------------
-        ScanCheckpoint[] checkpoints = [];
-
+        ScanCheckpoint[] checkpoints;
         if (options.StartFresh)
-            // Explicit restart clears checkpoint
-            await RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRoot.RootId, ct)
-                .ConfigureAwait(false);
+        {
+            await RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRoot.RootId, ct).ConfigureAwait(false);
+            checkpoints = [];
+        }
         else
-            checkpoints = await RepoStore.LoadScanCheckpointsAsync(
-                _repoPath, scanRoot.RootId, ct).ConfigureAwait(false);
+        {
+            checkpoints = await RepoStore.LoadScanCheckpointsAsync(_repoPath, scanRoot.RootId, ct).ConfigureAwait(false);
+        }
 
-        // ------------------------------
-        // Create session + import checkpoint
-        // ------------------------------
+        // Create session + import checkpoint(s)
         var session = new ScanSession(this, run, rootDirInput);
 
         if (checkpoints.Length != 0)
-            // Sanity check + import oldest -> newest
+        {
+            // Import oldest -> newest
             foreach (var cp in checkpoints)
             {
                 if (cp.ScanRootId != scanRoot.RootId)
@@ -274,15 +333,99 @@ public sealed partial class Repo
 
                 session.ImportPartialSnapshot(cp.PartialSnapshot);
             }
+        }
 
         return new ScanContext
         {
             Session = session,
             ScanRoot = scanRoot,
             Run = run,
-            Checkpoint = checkpoints.Length == 0 ? null : checkpoints[^1], // last checkpoint or null
+            Checkpoint = checkpoints.Length == 0 ? null : checkpoints[^1],
             Options = options
         };
+    }
+
+    private static void ValidateVolumeIdentity_NoLock(long scanRootId, ScanRoot scanRoot, VolumeInfo? volumeInfo)
+    {
+        // If we can probe a volume id and the scan root already has one, validate it.
+        if (!string.IsNullOrWhiteSpace(scanRoot.VolumeId) &&
+            !string.IsNullOrWhiteSpace(volumeInfo?.VolumeId) &&
+            !string.Equals(scanRoot.VolumeId, volumeInfo.VolumeId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Mounted volume does not match ScanRootId {scanRootId}. Expected VolumeId '{scanRoot.VolumeId}', got '{volumeInfo.VolumeId}'.");
+        }
+    }
+
+    private void EnsureScanRootDirId_NoLock(ref ScanRoot scanRoot)
+    {
+        if (scanRoot.DirId > 0)
+            return;
+
+        scanRoot = scanRoot with { DirId = AllocateDirId_NoLock() };
+        _scanRoots[scanRoot.RootId] = scanRoot;
+        MarkMetaDirty_NoLock();
+    }
+
+    private ScanRoot UpdateScanRootMeta_NoLock(ScanRoot scanRoot, VolumeInfo? volumeInfo)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var updated = scanRoot with
+        {
+            IsDeleted = false,
+            DeletedAtUtc = null,
+            LastScannedAt = now,
+
+            VolumeId = volumeInfo?.VolumeId ?? scanRoot.VolumeId,
+            VolumePath = volumeInfo?.VolumePath ?? scanRoot.VolumePath,
+            VolumeLabel = volumeInfo?.Label ?? scanRoot.VolumeLabel,
+            IsRotational = volumeInfo?.IsRotational ?? scanRoot.IsRotational,
+            FileSystemType = volumeInfo?.FileSystemType ?? scanRoot.FileSystemType,
+            DevicePath = volumeInfo?.DevicePath ?? scanRoot.DevicePath,
+            DeviceModel = volumeInfo?.DeviceModel ?? scanRoot.DeviceModel
+        };
+
+        if (!ReferenceEquals(updated, scanRoot))
+        {
+            _scanRoots[updated.RootId] = updated;
+            MarkMetaDirty_NoLock();
+        }
+
+        return updated;
+    }
+
+    private ScanRun CreateInProgressRun_NoLock(long scanRootId, long runId, string rootPath, ScanOptions options)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var run = new ScanRun
+        {
+            ScanRootId = scanRootId,
+            ScanSequence = runId,
+            RootPath = rootPath,
+            StartedAt = now,
+            FinishedAt = null,
+            Status = ScanRunStatus.InProgress,
+            ErrorMessage = null,
+            HashPolicy = options.HashPolicy
+        };
+
+        _scanRuns.Add(run);
+        _scanRunIndex[runId] = run;
+
+        MarkMetaDirty_NoLock();
+        return run;
+    }
+
+    private static string ResolveScanRootPath_NoLock(ScanRoot scanRoot)
+    {
+        var rootPath = scanRoot.RootPath;
+
+        if (!string.IsNullOrWhiteSpace(scanRoot.VolumePath) && !Path.IsPathRooted(rootPath))
+            rootPath = Path.Combine(scanRoot.VolumePath!, rootPath);
+
+        return PathUtils.NormalizePath(rootPath);
     }
 
     public static async Task<Repo> OpenAsync(string repoPath, CancellationToken ct = default)

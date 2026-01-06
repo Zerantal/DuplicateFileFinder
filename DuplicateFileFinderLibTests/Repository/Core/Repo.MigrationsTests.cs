@@ -105,7 +105,7 @@ public sealed class Repo_MigrationsTests
             {
                 var internalRepo = (IRepoInternal)repo;
 
-                _ = await internalRepo.BeginScanAsync(
+                _ = await internalRepo.BeginNewScanAsync(
                     rootPath: Path.Combine(repoDir, "root"),
                     options: new ScanOptions(StartFresh: true),
                     volumeInfo: null,

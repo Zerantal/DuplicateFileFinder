@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,7 +36,7 @@ internal sealed class CapturingRepo : IRepoInternal
         return Task.CompletedTask;
     }
 
-    Task<ScanContext> IRepoInternal.BeginScanAsync(string rootPath, ScanOptions options,
+    Task<ScanContext> IRepoInternal.BeginNewScanAsync(string rootPath, ScanOptions options,
         VolumeInfo? volumeInfo, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
@@ -64,6 +65,68 @@ internal sealed class CapturingRepo : IRepoInternal
             Options = options
         });
     }
+
+    Task<ScanContext> IRepoInternal.BeginRescanAsync(long scanRootId, ScanOptions options, VolumeInfo? volumeInfo,
+        CancellationToken ct)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        LastSession = new CapturingScanSession();
+
+        var rootPath = BeginScanRoots.LastOrDefault("");
+
+        return Task.FromResult(new ScanContext
+        {
+            Session = LastSession,
+            ScanRoot = new ScanRoot
+            {
+                RootId = scanRootId,
+                RootPath = rootPath,
+                DirId = AllocateDirId(),
+                CreatedAt = default
+            },
+            Run = new ScanRun
+            {
+                ScanSequence = AllocateRunId(),
+                ScanRootId = scanRootId,
+                RootPath = rootPath,
+                StartedAt = default,
+                Status = ScanRunStatus.InProgress
+            },
+            Options = options
+        });
+    }
+
+    public Task<ScanContext> BeginSubtreeScanAsync(long scanRootId, ScanOptions options,
+        VolumeInfo? volumeInfo = null,
+        CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        LastSession = new CapturingScanSession();
+
+        var rootPath = BeginScanRoots.LastOrDefault("");
+
+        return Task.FromResult(new ScanContext
+        {
+            Session = LastSession,
+            ScanRoot = new ScanRoot
+            {
+                RootId = scanRootId,
+                RootPath = rootPath,
+                DirId = AllocateDirId(),
+                CreatedAt = default
+            },
+            Run = new ScanRun
+            {
+                ScanSequence = AllocateRunId(),
+                ScanRootId = scanRootId,
+                RootPath = rootPath,
+                StartedAt = default,
+                Status = ScanRunStatus.InProgress
+            },
+            Options = options
+        });
+    }
+
 
     // ---- Unused IRepo members in these tests ----
     public void Dispose()
@@ -101,20 +164,11 @@ internal sealed class CapturingRepo : IRepoInternal
         return Task.CompletedTask;
     }
 
-    public long AllocateRunId()
-    {
-        return NextRunId++;
-    }
+    public long AllocateRunId() => NextRunId++;
 
-    public long AllocateDirId()
-    {
-        return NextDirId++;
-    }
+    public long AllocateDirId() => NextDirId++;
 
-    public long AllocateFileId()
-    {
-        return NextFileId++;
-    }
+    public long AllocateFileId() => NextFileId++;
 
     Task IRepoInternal.MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct)
     {
@@ -144,8 +198,5 @@ internal sealed class CapturingRepo : IRepoInternal
     }
 
 
-    public int GetMethodCount(string methodName)
-    {
-        return _methodCounter.GetMethodCallCount(methodName);
-    }
+    public int GetMethodCount(string methodName) => _methodCounter.GetMethodCallCount(methodName);
 }

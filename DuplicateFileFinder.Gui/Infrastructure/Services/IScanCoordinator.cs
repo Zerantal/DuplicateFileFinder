@@ -1,12 +1,13 @@
 // Gui/Services/IScanCoordinator.cs
 
 using DuplicateFileFinderLib.Core;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
-public sealed class ScanCompletedEventArgs(string path, bool cancelled, Exception? error) : EventArgs
+public sealed class ScanCompletedEventArgs(object arg, bool cancelled, Exception? error) : EventArgs
 {
-    public string Path { get; } = path;
+    public object Arg { get; } = arg;
     public bool Cancelled { get; } = cancelled;
     public Exception? Error { get; } = error;
 }
@@ -17,15 +18,19 @@ public interface IScanCoordinator
     public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
 
-    public Task RunScanWithDialogAsync(
-        string rootPath,
-        CancellationToken cancellationToken = default);
+    public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken = default);
 
+    public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rescans a specific directory within a scan root (including the root itself).
+    /// Implementations should force StartFresh and warn the user if existing checkpoints are discarded.
+    /// </summary>
+    public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken = default);
 
     public Task RemoveScanRoot(long scanRootId);
 
     public void CancelScan();
 
     Task SetScanRootDisplayName(long scanRootId, string? displayName);
-
 }

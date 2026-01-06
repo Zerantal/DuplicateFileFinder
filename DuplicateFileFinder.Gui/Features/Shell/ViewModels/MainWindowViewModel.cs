@@ -84,7 +84,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _log.Info("Initialising scan of {path}", path);
         IsScanning = true;
 
-        await _scanCoordinator.RunScanWithDialogAsync(path);
+        await _scanCoordinator.RunScanNewLocationWithDialogAsync(path);
     }
 
     public static async Task<MainWindowViewModel?> CreateMainWindowAsync(string repoDir)

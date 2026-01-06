@@ -2,7 +2,6 @@
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
@@ -24,6 +23,7 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly TreeMapController _treeMap;
 
     public ScanRootsTreeViewModel ScanRootsTree { get; }
+    public TreeMapActionsViewModel TreeMapActions { get; }
 
     public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
     {
@@ -42,25 +42,14 @@ public partial class DuplicatesViewModel : ObservableObject
         };
 
         // Treemap
-        _treeMap = new TreeMapController(host)
-        {
-            Options = new TreeMapBuildOptions
-            {
-                MaxDepth = 8
-            }
-        };
+        _treeMap = new TreeMapController(host) { Options = new TreeMapBuildOptions { MaxDepth = 8 } };
         _treeMap.PropertyChanged += (_, e) =>
         {
-            switch (e.PropertyName)
-            {
-                case nameof(TreeMapController.Root):
-                    OnPropertyChanged(nameof(DirectoryTreeMapRoot));
-                    break;
-                case nameof(TreeMapController.SelectedNode):
-                    OnTreeMapSelectionChanged();
-                    break;
-            }
+            if (e.PropertyName == nameof(TreeMapController.SelectedNode))
+                OnTreeMapSelectionChanged();
         };
+
+        TreeMapActions = new TreeMapActionsViewModel(scanner);
 
         _duplicates = new DuplicatesController(host, hashIndexService);
         _duplicates.PropertyChanged += (_, e) =>
@@ -107,7 +96,6 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
 
-
     public DuplicateSetRow? SelectedSet
     {
         get => _duplicates.SelectedSet;
@@ -128,8 +116,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
 
-    // Expose treemap for binding
-    public TreeMapNode<ITreeMapNodeElement>? DirectoryTreeMapRoot => _treeMap.Root;
+    // Expose treemap controller for binding
     public TreeMapController TreeMapController => _treeMap;
 
     public bool IsTreeMapMetricBytes
@@ -221,6 +208,6 @@ public partial class DuplicatesViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(FilteredSets));
-        OnPropertyChanged(nameof(DirectoryTreeMapRoot));
     }
+
 }

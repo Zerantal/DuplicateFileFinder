@@ -11,6 +11,12 @@ namespace DuplicateFileFinderLib.Repository.Core;
 /// </summary>
 public sealed partial class Repo : IRepoInternal
 {
+    // NOTE ON THREAD-SAFETY:
+    // - All access to _scanRootSnapshots/_scanRoots/_scanRuns is guarded by _sync.
+    // - Snapshots stored in _scanRootSnapshots MUST be treated as immutable after insertion.
+    //   (Dirs/Files arrays and StringPool must never be mutated.) Consumers may safely hold
+    //   references returned by TryGetScanRootView/GetRepoSnapshotView.
+
     private const int RepoSchemaVersion = 6;
 
     private readonly string _repoPath;
@@ -21,7 +27,7 @@ public sealed partial class Repo : IRepoInternal
     private List<ScanRun> _scanRuns = new();
     private Dictionary<long, ScanRoot> _scanRoots = new();
 
-    private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run 
+    private readonly Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run
 
     private readonly object _sync = new();
 

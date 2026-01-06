@@ -14,27 +14,31 @@
   mc:Ignorable="d"
   x:DataType="viewModels:DuplicatesViewModel">
 
-  <Grid RowDefinitions="Auto,*">
+  <Grid RowDefinitions="1*,Auto,2*">
 
-    <!-- TOP: ScanRootsTreeView (max 1/3 height) -->
+    <!-- TOP: ScanRootsTreeView (1/3 by default) -->
     <Grid Grid.Row="0"
           Name="ScanRootsHost">
 
       <ScrollViewer
         VerticalScrollBarVisibility="Auto"
-        HorizontalScrollBarVisibility="Disabled"
-        MaxHeight="{Binding Bounds.Height,
-                                RelativeSource={RelativeSource AncestorType=UserControl},
-                                Converter={StaticResource OneThirdConverter}}">
-
+        HorizontalScrollBarVisibility="Disabled">
         <scanRoots:ScanRootsTreeView
           DataContext="{Binding ScanRootsTree}" />
-
       </ScrollViewer>
     </Grid>
 
+    <!-- Divider -->
+    <GridSplitter Grid.Row="1"
+                  Height="6"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  ResizeDirection="Rows"
+                  ResizeBehavior="PreviousAndNext"
+                  Background="{DynamicResource ThemeControlMidBrush}" />
+
     <!-- tabbed pane (Duplicates / Tree Map), spans both right rows -->
-    <TabControl Grid.Row="1">
+    <TabControl Grid.Row="2">
 
       <!-- Tab 1: existing duplicates view -->
       <TabItem Header="Duplicates">
@@ -170,14 +174,21 @@
 
           <!-- Treemap -->
           <Grid Margin="0,6,0,0">
-
             <treeMap:TreeMapControl x:Name="TreeMap"
-                                    Root="{Binding DirectoryTreeMapRoot}"
+                                    Root="{Binding TreeMapController.Root}"
                                     PrimaryBorderDepth="2"
                                     ValuesArePreSummed="True"
                                     MaxRectangles="150000"
                                     SelectedNode="{Binding TreeMapController.SelectedNode, Mode=TwoWay}"
-                                    ShadeLevels="{Binding MaxDepth}" />
+                                    CurrentNodeUnderPointer="{Binding TreeMapController.HoveringOverNode, Mode=OneWayToSource}"
+                                    ShadeLevels="{Binding MaxDepth}">
+              <treeMap:TreeMapControl.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="Rescan folder"
+                            Command="{Binding TreeMapActions.RescanFolderCommand}" />
+                </ContextMenu>
+              </treeMap:TreeMapControl.ContextMenu>
+            </treeMap:TreeMapControl>
 
           </Grid>
 

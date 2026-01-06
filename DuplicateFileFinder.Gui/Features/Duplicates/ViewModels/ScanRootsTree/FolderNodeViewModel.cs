@@ -32,32 +32,21 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     // Dummy child used to show the expand arrow before children are loaded.
     private static readonly FolderNodeViewModel _dummyChild =
-        new(0, string.Empty, string.Empty, null, null, isDummy: true);
+        new(new DirHandle(), string.Empty, string.Empty, null, null, isDummy: true);
 
     public FolderNodeViewModel(
-        long dirId,
+        DirHandle dir,
         string name,
         string fullPath,
         IScanCoordinator scanCoordinator,
         IDialogService dialogs,
         long scanRootId = -1)
-        : this(dirId, name, fullPath, scanCoordinator, dialogs, isDummy: false, scanRootId: scanRootId)
-    {
-    }
-
-    // Back-compat constructor (existing call sites)
-    public FolderNodeViewModel(
-        long dirId,
-        string name,
-        string fullPath,
-        IScanCoordinator scanCoordinator,
-        long scanRootId = -1)
-        : this(dirId, name, fullPath, scanCoordinator, dialogs: null, isDummy: false, scanRootId: scanRootId)
+        : this(dir, name, fullPath, scanCoordinator, dialogs, isDummy: false, scanRootId: scanRootId)
     {
     }
 
     private FolderNodeViewModel(
-        long dirId,
+        DirHandle dir,
         string name,
         string fullPath,
         IScanCoordinator? scanCoordinator,
@@ -65,7 +54,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         bool isDummy,
         long scanRootId = -1)
     {
-        DirId = dirId;
+        Dir = dir;
         _name = name;
         _fullPath = fullPath;
         _scanCoordinator = scanCoordinator;
@@ -74,7 +63,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         _isDummy = isDummy;
     }
 
-    public long DirId { get; }
+    public DirHandle Dir { get; }
 
     public string Name
     {
@@ -224,16 +213,29 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     // ---- Existing commands ----
 
     [RelayCommand]
-    private async Task FullRescanAsync()
+    private async Task RescanLocationAsync()
+    {
+        if ( !IsScanRoot || _isDummy || _scanCoordinator is null)
+            return;
+
+        await _scanCoordinator.RunRescanLocationWithDialogAsync(_scanRootId);
+    }
+
+    [RelayCommand]
+    private async Task RescanFolderAsync()
     {
         if (_isDummy || _scanCoordinator is null)
             return;
 
-        await _scanCoordinator.RunScanWithDialogAsync(FullPath);
+        var handle =  Dir;
+        if (!handle.IsValid)
+            return;
+
+        await _scanCoordinator.RunFolderRescanWithDialogAsync(handle);
     }
 
     [RelayCommand]
-    private async Task RemoveRootAsync()
+    private async Task RemoveLocationAsync()
     {
         if (_isDummy || ScanRootId < 0 || _scanCoordinator is null)
             return;

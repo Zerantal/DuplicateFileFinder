@@ -170,7 +170,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
             throw new InvalidOperationException("Rebuild must be called first.");
 
         var node = new FolderNodeViewModel(
-            dirId: _snapshot.GetDirRecord(rootHandle).DirId,
+            rootHandle,
             name: label,
             fullPath: fullPath,
             scanCoordinator: _scanner,
@@ -211,7 +211,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
         var fullPath = Path.Combine(parentPath, name);
 
         var node = new FolderNodeViewModel(
-            dirId: _snapshot.GetDirRecord(dirHandle).DirId,
+            dir: dirHandle,
             name: name,
             fullPath: fullPath,
             scanCoordinator: _scanner,
@@ -245,13 +245,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
 
         node.ClearChildren();
 
-        if (!_mainIndex.TryGetDir(node.DirId, out var parentHandle))
-            return;
-
         // For percent calculation, every node uses the scan-root total bytes
         var scanRootTotal = node.ScanRootTotalBytes;
 
-        var childHandles = _treeIndex.GetChildDirs(parentHandle);
+        var childHandles = _treeIndex.GetChildDirs(node.Dir);
         foreach (var childHandle in childHandles)
         {
             var childRec = _snapshot.GetDirRecord(childHandle);
