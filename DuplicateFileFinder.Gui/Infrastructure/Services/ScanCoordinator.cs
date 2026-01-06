@@ -20,7 +20,7 @@ public sealed class ScanCoordinator(
     IDialogService dialogService)
     : IScanCoordinator
 {
-    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
     private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
@@ -45,9 +45,9 @@ public sealed class ScanCoordinator(
             arg: rootPath,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(rootPath, progress, ct),
-            logStart: () => _log.Info("Starting scan of {root}", rootPath),
-            logCancel: () => _log.Info("Scan cancelled for {root}", rootPath),
-            logFail: ex => _log.Error(ex, "Scan failed for {root}", rootPath));
+            logStart: () => Log.Info("Starting scan of {root}", rootPath),
+            logCancel: () => Log.Info("Scan cancelled for {root}", rootPath),
+            logFail: ex => Log.Error(ex, "Scan failed for {root}", rootPath));
     }
 
     public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken = default)
@@ -59,9 +59,9 @@ public sealed class ScanCoordinator(
             arg: scanRootId,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(scanRootId, progress, ct),
-            logStart: () => _log.Info("Starting rescan of location {root}", scanRootId),
-            logCancel: () => _log.Info("Location rescan cancelled for {root}", scanRootId),
-            logFail: ex => _log.Error(ex, "Location rescan failed for {root}", scanRootId));
+            logStart: () => Log.Info("Starting rescan of location {root}", scanRootId),
+            logCancel: () => Log.Info("Location rescan cancelled for {root}", scanRootId),
+            logFail: ex => Log.Error(ex, "Location rescan failed for {root}", scanRootId));
     }
 
     public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken = default)
@@ -73,9 +73,9 @@ public sealed class ScanCoordinator(
             arg: startDir,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(startDir, progress, ct),
-            logStart: () => _log.Info("Starting folder rescan of {dir}", startDir),
-            logCancel: () => _log.Info("Folder rescan cancelled for {dir}", startDir),
-            logFail: ex => _log.Error(ex, "Folder rescan failed for {dir}", startDir));
+            logStart: () => Log.Info("Starting folder rescan of {dir}", startDir),
+            logCancel: () => Log.Info("Folder rescan cancelled for {dir}", startDir),
+            logFail: ex => Log.Error(ex, "Folder rescan failed for {dir}", startDir));
     }
 
     private async Task RunScanWithDialogCoreAsync(

@@ -31,7 +31,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     private long _scanRootTotalBytes;
 
     // Dummy child used to show the expand arrow before children are loaded.
-    private static readonly FolderNodeViewModel _dummyChild =
+    private static readonly FolderNodeViewModel s_dummyChild =
         new(new DirHandle(), string.Empty, string.Empty, null, null, isDummy: true);
 
     public FolderNodeViewModel(
@@ -133,11 +133,11 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     internal void AddDummyChild()
     {
         Children.Clear();
-        Children.Add(_dummyChild);
+        Children.Add(s_dummyChild);
     }
 
     internal bool HasDummyChild =>
-        Children.Count == 1 && ReferenceEquals(Children[0], _dummyChild);
+        Children.Count == 1 && ReferenceEquals(Children[0], s_dummyChild);
 
     public long ScanRootId
     {

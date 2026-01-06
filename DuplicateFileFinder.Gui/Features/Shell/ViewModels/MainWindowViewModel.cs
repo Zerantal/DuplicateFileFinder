@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
 using DuplicateFileFinderLib.Repository.Core;
@@ -18,9 +19,9 @@ namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    private readonly IRepoHost? _repoHost;
+    private readonly IRepoHost _repoHost;
 
-    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
     private readonly IDialogService _dialogService;
 
@@ -62,6 +63,18 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool CanStartScan => !IsScanning && !(_scanCoordinator is { IsScanning: true });
 
+    public bool IsDebugBuild
+    {
+        get
+        {
+#if DEBUG
+            return true;
+#else
+        return false;
+#endif
+        }
+    }
+
     // ---------------- Commands ----------------
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
@@ -74,6 +87,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         await StartScan(path);
     }
 
+    [RelayCommand]
+    private async Task DumpRepoTreeAsync()
+    {
+        var path = await RepoTreeDumper.DumpAsync(_repoHost, CancellationToken.None);
+
+        await _dialogService.ShowInfoAsync("Tree dumped",$"Repo trees dumped: {path}");
+    }
+
     // ---------------- Scan orchestration ----------------
 
     private async Task StartScan(string path)
@@ -81,7 +102,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (IsScanning || _scanCoordinator.IsScanning)
             return;
 
-        _log.Info("Initialising scan of {path}", path);
+        Log.Info("Initialising scan of {path}", path);
         IsScanning = true;
 
         await _scanCoordinator.RunScanNewLocationWithDialogAsync(path);
@@ -110,9 +131,5 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         return mainWindowVm;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_repoHost != null)
-            await _repoHost.DisposeAsync();
-    }
+    public async ValueTask DisposeAsync() => await _repoHost.DisposeAsync();
 }

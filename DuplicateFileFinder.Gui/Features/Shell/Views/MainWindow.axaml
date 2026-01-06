@@ -12,7 +12,7 @@
     xmlns:viewModels="clr-namespace:DuplicateFileFinder.Gui.Features.Shell.ViewModels"
     xmlns:models1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
     xmlns:views1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views">
-    
+
     <Window.Resources>
 
         <!-- Cell templates -->
@@ -39,17 +39,19 @@
                        TextAlignment="Right" />
         </DataTemplate>
     </Window.Resources>
-    
+
     <!-- ONE root: DockPanel; last child fills the remaining space -->
     <DockPanel Margin="8" LastChildFill="True">
-        
+
         <!-- Menu bar at the top -->
         <Menu DockPanel.Dock="Top">
-            <!-- <MenuItem Header="_Repository"> -->
-            <!--      -->
-            <!-- </MenuItem> -->
+            <MenuItem Header="_Debug"
+                      IsVisible="{Binding IsDebugBuild}">
+                <MenuItem Header="Dump repo tree"
+                          Command="{Binding DumpRepoTreeCommand}" />
+            </MenuItem>
         </Menu>
-        
+
         <!-- Simple toolbar row -->
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
             <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
@@ -71,9 +73,8 @@
         </Grid>
 
         <!-- Main content -->
-        <views1:DuplicatesView DataContext="{Binding Duplicates}"/>
+        <views1:DuplicatesView DataContext="{Binding Duplicates}" />
     </DockPanel>
-        
-        
-        
+
+
 </Window>

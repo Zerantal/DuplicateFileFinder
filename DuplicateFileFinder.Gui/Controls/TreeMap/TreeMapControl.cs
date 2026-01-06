@@ -739,8 +739,8 @@ public sealed class TreeMapControl : Control
     private const double MinLabelHeight = 18;
 
     // Cache black/white brushes to avoid churn
-    private static readonly IBrush _labelBrushLight = Brushes.White;
-    private static readonly IBrush _labelBrushDark = Brushes.Black;
+    private static readonly IBrush s_labelBrushLight = Brushes.White;
+    private static readonly IBrush s_labelBrushDark = Brushes.Black;
 
     private static bool ShouldLabelNode(TreeMapNode<ITreeMapNodeElement> node)
     {
@@ -764,7 +764,7 @@ public sealed class TreeMapControl : Control
         var luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
         // Threshold tuned for “looks right” on mid greys
-        return luminance < 0.45 ? _labelBrushLight : _labelBrushDark;
+        return luminance < 0.45 ? s_labelBrushLight : s_labelBrushDark;
     }
 
     private void DrawCenteredLabel(DrawingContext ctx, string text, Rect rect, Color bg)
