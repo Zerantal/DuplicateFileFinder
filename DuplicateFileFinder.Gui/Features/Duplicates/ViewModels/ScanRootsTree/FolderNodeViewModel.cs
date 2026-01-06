@@ -215,7 +215,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     [RelayCommand]
     private async Task RescanLocationAsync()
     {
-        if ( !IsScanRoot || _isDummy || _scanCoordinator is null)
+        if (!IsScanRoot || _isDummy || _scanCoordinator is null)
             return;
 
         await _scanCoordinator.RunRescanLocationWithDialogAsync(_scanRootId);
@@ -227,7 +227,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         if (_isDummy || _scanCoordinator is null)
             return;
 
-        var handle =  Dir;
+        var handle = Dir;
         if (!handle.IsValid)
             return;
 

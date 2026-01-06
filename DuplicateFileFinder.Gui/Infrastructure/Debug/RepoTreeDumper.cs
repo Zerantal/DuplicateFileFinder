@@ -1,8 +1,8 @@
 using System.Text;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-using DuplicateFileFinderLib.Repository.Core.Models;
 
 namespace DuplicateFileFinder.Gui.Infrastructure.Debug;
 

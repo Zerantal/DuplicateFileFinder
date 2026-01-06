@@ -92,7 +92,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         var path = await RepoTreeDumper.DumpAsync(_repoHost, CancellationToken.None);
 
-        await _dialogService.ShowInfoAsync("Tree dumped",$"Repo trees dumped: {path}");
+        await _dialogService.ShowInfoAsync("Tree dumped", $"Repo trees dumped: {path}");
     }
 
     // ---------------- Scan orchestration ----------------
