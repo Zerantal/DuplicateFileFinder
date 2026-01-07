@@ -49,8 +49,10 @@
       <Menu DockPanel.Dock="Top">
         <MenuItem Header="_Debug"
                   IsVisible="{Binding IsDebugBuild}">
-          <MenuItem Header="Dump repo tree"
-                    Command="{Binding DumpRepoTreeCommand}" />
+          <MenuItem Header="Dump repo trees (all)"
+                    Command="{Binding DumpAllRepoTreesCommand}" />
+          <MenuItem Header="Dump repo trees (live)"
+                    Command="{Binding DumpLiveRepoTreesCommand}" />
         </MenuItem>
       </Menu>
 

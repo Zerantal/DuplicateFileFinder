@@ -40,15 +40,19 @@ public static class RepoTreeDumper
         }
     }
 
-    public static async Task<string> DumpAsync(IRepoHost host, CancellationToken ct = default)
+    public static async Task<string> DumpAsync(IRepoHost host, bool dumpLiveTreesOnly, CancellationToken ct = default)
     {
         var outputPath = GetNextDumpPath();
-        await DumpAsync(host, outputPath, ct);
+        await DumpAsync(host, outputPath, dumpLiveTreesOnly, ct);
         return outputPath;
     }
 
 
-    public static async Task<string> DumpAsync(IRepoHost host, string outputPath, CancellationToken ct = default)
+    public static async Task<string> DumpAsync(
+        IRepoHost host,
+        string outputPath,
+        bool dumpLiveTreesOnly,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -62,6 +66,7 @@ public static class RepoTreeDumper
 
         // Get scan roots (stable order)
         var roots = host.Repo.ScanRootsView
+            .Where(r => !dumpLiveTreesOnly || !r.IsDeleted)
             .OrderBy(r => r.RootId)
             .ToArray();
 
@@ -75,7 +80,7 @@ public static class RepoTreeDumper
             {
                 ct.ThrowIfCancellationRequested();
 
-                sb.AppendLine($"ScanRoot {root.RootId}: {root.RootPath}");
+                sb.AppendLine($"ScanRoot {root.RootId}: {root.RootPath}{(root.IsDeleted ? " (deleted)" : "")}");
 
                 var view = host.Repo.TryGetScanRootView(root.RootId);
                 if (view is null)
@@ -278,6 +283,9 @@ public static class RepoTreeDumper
 
     private static string SafeDirName(ScanRootSnapshotView view, DirRecordV2 d)
     {
+        if (d.ParentDirId < 0)
+            return "(root)";
+
         if (d.NameStrIdx < 0)
             return $"(dir {d.DirId})";
         var s = view.StringPool.GetString(d.NameStrIdx);

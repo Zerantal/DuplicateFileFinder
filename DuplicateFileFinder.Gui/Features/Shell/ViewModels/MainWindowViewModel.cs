@@ -101,9 +101,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     [RelayCommand]
-    private async Task DumpRepoTreeAsync()
+    private async Task DumpAllRepoTreesAsync()
     {
-        var path = await RepoTreeDumper.DumpAsync(_repoHost, CancellationToken.None);
+        var path = await RepoTreeDumper.DumpAsync(_repoHost, false, CancellationToken.None);
+
+        _toasts.Show($"Repo tree dumped: {path}.", ToastKind.Success);
+    }
+
+    [RelayCommand]
+    private async Task DumpLiveRepoTreesAsync()
+    {
+        var path = await RepoTreeDumper.DumpAsync(_repoHost, true, CancellationToken.None);
 
         _toasts.Show($"Repo tree dumped: {path}.", ToastKind.Success);
     }
