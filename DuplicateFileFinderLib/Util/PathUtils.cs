@@ -19,8 +19,14 @@ public static class PathUtils
     /// <returns>Normalized absolute-like path string with consistent separators.</returns>
     public static string NormalizePath(string path, bool forceTrailingSlash = false)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (path is null)
             throw new ArgumentNullException(nameof(path));
+
+        if (path.Length == 0)
+            return forceTrailingSlash ? "/" : "";
+
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path cannot be whitespace.", nameof(path));
 
         bool isWindows = OperatingSystem.IsWindows();
         ReadOnlySpan<char> span = path.AsSpan();
