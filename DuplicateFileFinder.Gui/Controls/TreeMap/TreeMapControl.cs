@@ -45,6 +45,9 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Styled properties -----------------
 
+    public static readonly StyledProperty<ITreeMapNodeElement?> CurrentNodeUnderPointerProperty =
+        AvaloniaProperty.Register<TreeMapControl, ITreeMapNodeElement?>(nameof(CurrentNodeUnderPointer));
+
     public static readonly StyledProperty<TreeMapNode<ITreeMapNodeElement>?> RootProperty =
         AvaloniaProperty.Register<TreeMapControl, TreeMapNode<ITreeMapNodeElement>?>(nameof(Root));
 
@@ -129,6 +132,12 @@ public sealed class TreeMapControl : Control
     }
 
     // -------- CLR wrappers --------
+
+    public ITreeMapNodeElement? CurrentNodeUnderPointer
+    {
+        get => GetValue(CurrentNodeUnderPointerProperty);
+        private set => SetValue(CurrentNodeUnderPointerProperty, value);
+    }
 
     public TreeMapNode<ITreeMapNodeElement>? Root
     {
@@ -532,6 +541,22 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Click / hit test -----------------
 
+    TreeMapNode<ITreeMapNodeElement>? HitTestNode(Point position)
+    {
+        TreeMapNode<ITreeMapNodeElement>? hit = null;
+        for (var i = _layout.Count - 1; i >= 0; i--)
+        {
+            var item = _layout[i];
+            if (item.Rect.Contains(position))
+            {
+                hit = item.Node;
+                break;
+            }
+        }
+
+        return hit;
+    }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         using (TimingLog.Start("TreeMapControl.OnPointerPressed"))
@@ -543,17 +568,7 @@ public sealed class TreeMapControl : Control
 
             var p = e.GetPosition(this);
 
-            TreeMapNode<ITreeMapNodeElement>? hit = null;
-            for (var i = _layout.Count - 1; i >= 0; i--)
-            {
-                var item = _layout[i];
-                if (item.Rect.Contains(p))
-                {
-                    hit = item.Node;
-                    break;
-                }
-            }
-
+            var hit = HitTestNode(p);
             if (hit is null)
                 return;
 
@@ -562,11 +577,12 @@ public sealed class TreeMapControl : Control
                 SelectedNode = hit;
                 e.Handled = true;
             }
+
+            // remove tooltip and re-arm it.
+            _currentNodeUnderPointer = null;
+            ToolTip.SetTip(this, null);
         }
     }
-
-    public bool TryGetRect(TreeMapNode<ITreeMapNodeElement> node, out Rect rect)
-        => _rectByNode.TryGetValue(node, out rect);
 
     // ----------------- Rendering -----------------
 
@@ -723,8 +739,8 @@ public sealed class TreeMapControl : Control
     private const double MinLabelHeight = 18;
 
     // Cache black/white brushes to avoid churn
-    private static readonly IBrush _labelBrushLight = Brushes.White;
-    private static readonly IBrush _labelBrushDark = Brushes.Black;
+    private static readonly IBrush s_labelBrushLight = Brushes.White;
+    private static readonly IBrush s_labelBrushDark = Brushes.Black;
 
     private static bool ShouldLabelNode(TreeMapNode<ITreeMapNodeElement> node)
     {
@@ -748,7 +764,7 @@ public sealed class TreeMapControl : Control
         var luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
         // Threshold tuned for “looks right” on mid greys
-        return luminance < 0.45 ? _labelBrushLight : _labelBrushDark;
+        return luminance < 0.45 ? s_labelBrushLight : s_labelBrushDark;
     }
 
     private void DrawCenteredLabel(DrawingContext ctx, string text, Rect rect, Color bg)
@@ -865,7 +881,7 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Tooltips -----------------
 
-    private ITreeMapNodeElement? _currentTooltipElement;
+    private ITreeMapNodeElement? _currentNodeUnderPointer;
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
@@ -875,34 +891,26 @@ public sealed class TreeMapControl : Control
             return;
 
         var p = e.GetPosition(this);
-        ITreeMapNodeElement? element = null;
 
-        // Iterate from back so visually “topmost” items win.
-        for (var i = _layout.Count - 1; i >= 0; i--)
-        {
-            var item = _layout[i];
-            if (item.Rect.Contains(p))
-            {
-                element = item.Node.Element;
-                break;
-            }
-        }
+        var hit = HitTestNode(p);
 
-        if (element is null)
+        if (hit is null)
         {
-            if (_currentTooltipElement is not null)
+            if (_currentNodeUnderPointer is not null)
             {
-                _currentTooltipElement = null;
+                _currentNodeUnderPointer = null;
                 ToolTip.SetTip(this, null);
             }
             return;
         }
 
-        if (!ReferenceEquals(_currentTooltipElement, element))
-        {
-            _currentTooltipElement = element;
+        CurrentNodeUnderPointer = hit.Element;
 
-            var tip = element.ToolTipFactory();
+        if (!ReferenceEquals(_currentNodeUnderPointer, hit.Element))
+        {
+            _currentNodeUnderPointer = hit.Element;
+
+            var tip = hit.Element.ToolTipFactory();
             ToolTip.SetTip(this, tip);
         }
     }
@@ -911,11 +919,13 @@ public sealed class TreeMapControl : Control
     {
         base.OnPointerExited(e);
 
-        if (_currentTooltipElement is not null)
+        if (_currentNodeUnderPointer is not null)
         {
-            _currentTooltipElement = null;
+            _currentNodeUnderPointer = null;
             ToolTip.SetTip(this, null);
         }
+
+        CurrentNodeUnderPointer = null;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)

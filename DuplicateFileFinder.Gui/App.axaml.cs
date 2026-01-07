@@ -16,9 +16,18 @@ namespace DuplicateFileFinder.Gui;
 
 public partial class App : Application
 {
+    public static readonly string AppDir;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+    }
+
+    static App()
+    {
+        var appName = "DuplicateFileFinder";
+        AppDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            appName);
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -59,10 +68,7 @@ public partial class App : Application
             splashVm.Message = "Opening repository…";
             splashVm.SubMessage = "Please wait while we load data and run integrity checks.";
 
-            var appName = "DuplicateFileFinder";
-            var appDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                appName);
-            var repoDir = Path.Combine(appDir, "repo");
+            var repoDir = Path.Combine(AppDir, "repo");
 
             mainVm = await MainWindowViewModel.CreateMainWindowAsync(repoDir);
             if (mainVm == null)

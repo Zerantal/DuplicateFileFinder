@@ -15,8 +15,23 @@ internal interface IRepoInternal : IRepo
     Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken = default);
     Task CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct = default);
     Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default);
-    Task<ScanContext> BeginScanAsync(
+
+    Task<ScanContext> BeginNewScanAsync(
         string rootPath,
+        ScanOptions options,
+        VolumeInfo? volumeInfo = null,
+        CancellationToken ct = default);
+
+    Task<ScanContext> BeginRescanAsync(
+        long scanRootId,
+        ScanOptions options,
+        VolumeInfo? volumeInfo = null,
+        CancellationToken ct = default);
+
+    // NEW: subtree scan (folder rescan) entrypoint.
+    // Must be StartFresh=true and requires a loaded snapshot for the root.
+    Task<ScanContext> BeginSubtreeScanAsync(
+        long scanRootId,
         ScanOptions options,
         VolumeInfo? volumeInfo = null,
         CancellationToken ct = default);

@@ -1,79 +1,86 @@
 <Window
-    xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    x:Class="DuplicateFileFinder.Gui.Features.Shell.Views.MainWindow"
-    x:DataType="viewModels:MainWindowViewModel"
-    Width="1000"
-    Height="600"
-    WindowState="Normal"
-    Title="Duplicate File Finder"
-    mc:Ignorable="mc"
-    xmlns:viewModels="clr-namespace:DuplicateFileFinder.Gui.Features.Shell.ViewModels"
-    xmlns:models1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
-    xmlns:views1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views">
-    
-    <Window.Resources>
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  x:Class="DuplicateFileFinder.Gui.Features.Shell.Views.MainWindow"
+  x:DataType="shellViews:MainWindowViewModel"
+  Width="1000"
+  Height="600"
+  WindowState="Normal"
+  Title="Duplicate File Finder"
+  mc:Ignorable="mc"
+  xmlns:shellViews="clr-namespace:DuplicateFileFinder.Gui.Features.Shell.ViewModels"
+  xmlns:duplicatesModels="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
+  xmlns:duplicatesViews="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views"
+  xmlns:toastViews="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Toasts.Views">
 
-        <!-- Cell templates -->
-        <DataTemplate x:Key="CellFileName" x:DataType="models1:DuplicateFileModel">
-            <TextBlock Text="{Binding FileName}"
-                       TextTrimming="CharacterEllipsis"
-                       TextWrapping="NoWrap"
-                       ToolTip.Tip="{Binding FileName}" />
-        </DataTemplate>
+  <Window.Resources>
 
-        <DataTemplate x:Key="CellFileSize" x:DataType="models1:DuplicateFileModel">
-            <TextBlock TextAlignment="Right"
-                       HorizontalAlignment="Right"
-                       Text="{Binding FileSize, Converter={StaticResource BytesToHuman}}" />
-        </DataTemplate>
+    <!-- Cell templates -->
+    <DataTemplate x:Key="CellFileName" x:DataType="duplicatesModels:DuplicateFileModel">
+      <TextBlock Text="{Binding FileName}"
+                 TextTrimming="CharacterEllipsis"
+                 TextWrapping="NoWrap"
+                 ToolTip.Tip="{Binding FileName}" />
+    </DataTemplate>
 
-        <DataTemplate x:Key="CellCreationDate" x:DataType="models1:DuplicateFileModel">
-            <TextBlock Text="{Binding CreationDate, StringFormat=\{0:yyyy-MM-dd HH:mm\}}"
-                       TextWrapping="NoWrap" />
-        </DataTemplate>
+    <DataTemplate x:Key="CellFileSize" x:DataType="duplicatesModels:DuplicateFileModel">
+      <TextBlock TextAlignment="Right"
+                 HorizontalAlignment="Right"
+                 Text="{Binding FileSize, Converter={StaticResource BytesToHuman}}" />
+    </DataTemplate>
 
-        <DataTemplate x:Key="CellFileGroup" x:DataType="models1:DuplicateFileModel">
-            <TextBlock Text="{Binding FileGroup}"
-                       TextAlignment="Right" />
-        </DataTemplate>
-    </Window.Resources>
-    
-    <!-- ONE root: DockPanel; last child fills the remaining space -->
+    <DataTemplate x:Key="CellCreationDate" x:DataType="duplicatesModels:DuplicateFileModel">
+      <TextBlock Text="{Binding CreationDate, StringFormat=\{0:yyyy-MM-dd HH:mm\}}"
+                 TextWrapping="NoWrap" />
+    </DataTemplate>
+
+    <DataTemplate x:Key="CellFileGroup" x:DataType="duplicatesModels:DuplicateFileModel">
+      <TextBlock Text="{Binding FileGroup}"
+                 TextAlignment="Right" />
+    </DataTemplate>
+  </Window.Resources>
+
+  <Grid>
+    <!-- DockPanel; fills the remaining space -->
     <DockPanel Margin="8" LastChildFill="True">
-        
-        <!-- Menu bar at the top -->
-        <Menu DockPanel.Dock="Top">
-            <!-- <MenuItem Header="_Repository"> -->
-            <!--      -->
-            <!-- </MenuItem> -->
-        </Menu>
-        
-        <!-- Simple toolbar row -->
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
-            <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
+
+      <!-- Menu bar at the top -->
+      <Menu DockPanel.Dock="Top">
+        <MenuItem Header="_Debug"
+                  IsVisible="{Binding IsDebugBuild}">
+          <MenuItem Header="Dump repo trees (all)"
+                    Command="{Binding DumpAllRepoTreesCommand}" />
+          <MenuItem Header="Dump repo trees (live)"
+                    Command="{Binding DumpLiveRepoTreesCommand}" />
+        </MenuItem>
+      </Menu>
+
+      <!-- Simple toolbar row -->
+      <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
+        <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
+      </StackPanel>
+
+      <!-- Status area -->
+      <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto, *" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
+        <!-- Metrics + operation -->
+        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
+          <TextBlock Text="Files scanned:" />
+          <TextBlock Text="{Binding Duplicates.FilesScanned, StringFormat='{}{0:N0}'}" />
+
+          <TextBlock Text="Duplicates:" Margin="12,0,0,0" />
+          <TextBlock Text="{Binding Duplicates.DuplicatesFound, StringFormat='{}{0:N0}'}" />
+
+          <TextBlock Text="Space wasted:" Margin="12,0,0,0" />
+          <TextBlock Text="{Binding Duplicates.WastedBytes, Converter={StaticResource BytesToHuman}}" />
         </StackPanel>
+      </Grid>
 
-        <!-- Status area -->
-        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto, *" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
-            <!-- Metrics + operation -->
-            <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
-                <TextBlock Text="Files scanned:" />
-                <TextBlock Text="{Binding Duplicates.FilesScanned, StringFormat='{}{0:N0}'}" />
-
-                <TextBlock Text="Duplicates:" Margin="12,0,0,0" />
-                <TextBlock Text="{Binding Duplicates.DuplicatesFound, StringFormat='{}{0:N0}'}" />
-
-                <TextBlock Text="Space wasted:" Margin="12,0,0,0" />
-                <TextBlock Text="{Binding Duplicates.WastedBytes, Converter={StaticResource BytesToHuman}}" />
-            </StackPanel>
-        </Grid>
-
-        <!-- Main content -->
-        <views1:DuplicatesView DataContext="{Binding Duplicates}"/>
+      <!-- Main content -->
+      <duplicatesViews:DuplicatesView DataContext="{Binding Duplicates}" />
     </DockPanel>
-        
-        
-        
+
+    <!-- Overlay: Toasts -->
+    <toastViews:ToastHost DataContext="{Binding ToastHost}" />
+  </Grid>
 </Window>

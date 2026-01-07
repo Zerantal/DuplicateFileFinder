@@ -457,4 +457,75 @@ public sealed class FullScanOperationE2ETests
             return map.ToDictionary(kvp => PathUtils.NormalizePath(kvp.Key), kvp => kvp.Value, StringComparer.Ordinal);
         }
     }
+
+    [Fact]
+    public async Task FolderRescan_DoesNotMarkDeletionsOutsideSubtree()
+    {
+        var repoDir = _tempFsFixture.Dir("repo_folder_rescan");
+        var root = _tempFsFixture.Dir("root_folder_rescan");
+
+        var subDir = Directory.CreateDirectory(Path.Combine(root, "sub")).FullName;
+        var otherDir = Directory.CreateDirectory(Path.Combine(root, "other")).FullName;
+
+        var subFile = Path.Combine(subDir, "keep.txt");
+        var otherFile = Path.Combine(otherDir, "delete.txt");
+        await File.WriteAllTextAsync(subFile, "v1\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(otherFile, "v1\n", TestContext.Current.CancellationToken);
+
+        await using var host = await RepoHost.OpenAsync(repoDir, TestContext.Current.CancellationToken);
+
+        var fs = new FileEnumerator();
+        var hashingRunner = new HashingRunner<FileHashToken>(new ChecksumPipelineMD5());
+        var op = new FullScanOperation(host, fs, hashingRunner, volumeInfoProvider: null);
+
+        // Baseline full scan
+        await op.ExecuteAsync(
+            root,
+            new ScanOptions(StartFresh: true, HashPolicy: HashPolicyMode.Default),
+            progress: null,
+            ct: CancellationToken.None);
+
+        var run1 = host.Repo.ScanRunsView.Last();
+        Assert.Equal(ScanRunStatus.Completed, run1.Status);
+
+        var snap1 = host.Repo.TryGetScanRootView(run1.ScanRootId);
+        Assert.NotNull(snap1);
+
+        // Get DirHandle for "sub" directory
+        var subIdx = snap1.Dirs
+            .Select((d, i) => new { d, i })
+            .First(x => x.d.ParentDirId >= 0 && snap1.StringPool.GetString(x.d.NameStrIdx) == "sub").i;
+        var subHandle = new DuplicateFileFinderLib.Repository.Plugins.Models.DirHandle(run1.ScanRootId, subIdx);
+
+        // Delete a file outside the subtree and mutate inside subtree
+        File.Delete(otherFile);
+        await File.WriteAllTextAsync(subFile, "v2\n", TestContext.Current.CancellationToken);
+
+        // Subtree rescan only
+        await op.ExecuteAsync(
+            subHandle,
+            new ScanOptions(HashPolicy: HashPolicyMode.Default),
+            progress: null,
+            ct: CancellationToken.None);
+
+        var run2 = host.Repo.ScanRunsView.Last();
+        Assert.Equal(ScanRunStatus.Completed, run2.Status);
+
+        var snap2 = host.Repo.TryGetScanRootView(run2.ScanRootId);
+        Assert.NotNull(snap2);
+
+        var map2 = SnapshotHelpers.BuildFileMap(snap2);
+
+        // File deleted outside subtree should NOT be marked deleted because its parent wasn't enumerated.
+        var relOther = PathUtils.NormalizePath(Path.Combine("other", "delete.txt"));
+        Assert.True(map2.TryGetValue(relOther, out var otherRec));
+        Assert.NotEqual(ScanEntryStatus.Deleted, otherRec.Status);
+
+        // File inside subtree should have updated hash (it was rehashed due to change)
+        var relSub = PathUtils.NormalizePath(Path.Combine("sub", "keep.txt"));
+        Assert.True(map2.TryGetValue(relSub, out var subRec));
+        Assert.True(subRec.Hash.IsComputed);
+        Assert.Equal(Md5HashKey(subFile), subRec.Hash);
+    }
+
 }

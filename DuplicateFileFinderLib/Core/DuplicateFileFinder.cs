@@ -7,6 +7,7 @@ using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.IO.Platforms;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinderLib.Core;
 
@@ -43,19 +44,26 @@ public sealed class DuplicateFileFinder
         _fullScan = new FullScanOperation(host, fs, hashingRunner, volumeInfoProvider);
     }
 
-    internal DuplicateFileFinder(IRepoHost host, bool throttleProgress)
-        : this(host)
-    {
+    internal DuplicateFileFinder(IRepoHost host, bool throttleProgress) : this(host) =>
         _throttleProgress = throttleProgress;
-    }
 
     public Task FullScanAsync(
         string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
-        CancellationToken ct = default)
-    {
-        return _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
-    }
+        CancellationToken ct = default) =>
+        _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
+
+    public Task FullScanAsync(
+        long scanRootId,
+        IProgress<DuplicateFileFinderProgressReport>? progress = null,
+        CancellationToken ct = default) =>
+        _fullScan.ExecuteAsync(scanRootId, ThrottledProgress(progress), ct);
+
+    public Task FullScanAsync(
+        DirHandle startDir,
+        IProgress<DuplicateFileFinderProgressReport>? progress = null,
+        CancellationToken ct = default) =>
+        _fullScan.ExecuteAsync(startDir, ThrottledProgress(progress), ct);
 
     // helper
     private IProgress<DuplicateFileFinderProgressReport>? ThrottledProgress(

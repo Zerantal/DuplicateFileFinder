@@ -31,7 +31,7 @@ csharp_new_line_before_finally = true
 csharp_new_line_before_members_in_object_initializers = true
 csharp_new_line_before_members_in_anonymous_types = true
 
-csharp_preserve_single_line_statements = false
+csharp_preserve_single_line_statements = true
 csharp_preserve_single_line_blocks = true
 
 # Spacing
@@ -70,6 +70,19 @@ dotnet_naming_symbols.constants.required_modifiers = const
 
 dotnet_naming_style.pascal_case.capitalization = pascal_case
 
+# Define symbol group for private static fields
+dotnet_naming_symbols.private_static_fields.applicable_kinds = field
+dotnet_naming_symbols.private_static_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_fields.required_modifiers = static
+
+# Define naming style with 's_' prefix and camelCase
+dotnet_naming_style.s_camel_case_style.required_prefix = s_
+dotnet_naming_style.s_camel_case_style.capitalization = camel_case
+
+# Apply the rule
+dotnet_naming_rule.private_static_fields_should_be_s_camel_case.symbols = private_static_fields
+dotnet_naming_rule.private_static_fields_should_be_s_camel_case.style = s_camel_case_style
+dotnet_naming_rule.private_static_fields_should_be_s_camel_case.severity = suggestion
 
 
 # ------------------------------------------------------------

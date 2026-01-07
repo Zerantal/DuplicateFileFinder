@@ -12,7 +12,11 @@ internal sealed class ScanFrontier
 
     public int Count => _stack.Count;
 
-    public static ScanFrontier Create(string rootPath, DirCursor rootCursor, ScanCheckpoint? checkpoint)
+    public static ScanFrontier Create(
+        string rootPath,
+        DirCursor rootCursor,
+        ScanCheckpoint? checkpoint,
+        PendingDir? startDir = null)
     {
         var f = new ScanFrontier();
 
@@ -24,8 +28,8 @@ internal sealed class ScanFrontier
         }
         else
         {
-            // Fresh scan starts at root
-            f._stack.Push(new PendingDir(rootCursor.DirId, rootPath));
+            // Fresh scan starts at root or a specified subtree
+            f._stack.Push(startDir ?? new PendingDir(rootCursor.DirId, rootPath));
         }
 
         return f;

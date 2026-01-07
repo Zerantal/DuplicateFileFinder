@@ -18,7 +18,7 @@ namespace DuplicateFileFinderLibTests.Repository.Core;
 public sealed class Repo_ScanLifecycleTests
 {
     [Fact]
-    public async Task BeginScanAsync_CreatesScanRootAndRun_PersistsMeta()
+    public async Task BeginNewScanAsync_CreatesScanRootAndRun_PersistsMeta()
     {
         var repoDir = CreateTempDir();
         try
@@ -26,7 +26,7 @@ public sealed class Repo_ScanLifecycleTests
             await using var repo = await Repo.OpenAsync(repoDir, CancellationToken.None);
             var internalRepo = (IRepoInternal)repo;
 
-            var ctx = await internalRepo.BeginScanAsync(
+            var ctx = await internalRepo.BeginNewScanAsync(
                 rootPath: Path.Combine(repoDir, "root"),
                 options: new ScanOptions(StartFresh: true),
                 volumeInfo: null,
@@ -61,7 +61,7 @@ public sealed class Repo_ScanLifecycleTests
             repo.RegisterEventSinkWithBootstrap(sink);
             sink.Drain(); // ignore bootstrap
 
-            var ctx = await internalRepo.BeginScanAsync(
+            var ctx = await internalRepo.BeginNewScanAsync(
                 rootPath: Path.Combine(repoDir, "root"),
                 options: new ScanOptions(StartFresh: true),
                 volumeInfo: null,
@@ -99,7 +99,7 @@ public sealed class Repo_ScanLifecycleTests
             repo.RegisterEventSinkWithBootstrap(sink);
             sink.Drain();
 
-            var ctx = await internalRepo.BeginScanAsync(
+            var ctx = await internalRepo.BeginNewScanAsync(
                 rootPath: Path.Combine(repoDir, "root"),
                 options: new ScanOptions(StartFresh: true),
                 volumeInfo: null,
