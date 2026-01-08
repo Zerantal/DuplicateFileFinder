@@ -157,6 +157,12 @@ internal sealed class CapturingRepo : IRepoInternal
         throw new NotSupportedException();
     }
 
+    public bool HasScanCheckpoint(long scanRootId)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return false;
+    }
+
     public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();

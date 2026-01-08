@@ -4,8 +4,8 @@ using Avalonia.Threading;
 
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 using NLog;
 

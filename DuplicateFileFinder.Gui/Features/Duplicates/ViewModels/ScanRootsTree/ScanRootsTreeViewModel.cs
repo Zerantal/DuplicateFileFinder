@@ -7,7 +7,6 @@ using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
@@ -21,57 +20,21 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     public ObservableCollection<FolderNodeViewModel> Roots { get; } = [];
 
-    private FolderNodeViewModel? _selectedNode;
-
-    public FolderNodeViewModel? SelectedNode
-    {
-        get => _selectedNode;
-        set
-        {
-            if (ReferenceEquals(_selectedNode, value))
-                return;
-
-            _selectedNode = value;
-            OnPropertyChanged();
-            SelectedPath = _selectedNode?.FullPath;
-        }
-    }
+    // ---- Selection ----
 
     [ObservableProperty]
-    private string? _selectedPath;
+    [NotifyPropertyChangedFor(nameof(SelectedPath))]
+    private FolderNodeViewModel? _selectedNode;
+
+    public string? SelectedPath => SelectedNode?.FullPath;
 
     // ---- Sorting ----
 
+    [ObservableProperty]
     private ScanRootsSortColumn _sortColumn = ScanRootsSortColumn.Size;
+
+    [ObservableProperty]
     private bool _sortDescending = true;
-
-    public ScanRootsSortColumn SortColumn
-    {
-        get => _sortColumn;
-        private set
-        {
-            if (_sortColumn == value)
-                return;
-
-            _sortColumn = value;
-            OnPropertyChanged();
-            OnSortHeaderChanged();
-        }
-    }
-
-    public bool SortDescending
-    {
-        get => _sortDescending;
-        private set
-        {
-            if (_sortDescending == value)
-                return;
-
-            _sortDescending = value;
-            OnPropertyChanged();
-            OnSortHeaderChanged();
-        }
-    }
 
     public ICommand SortByCommand { get; }
 
@@ -80,6 +43,11 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
         _builder = builder;
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
     }
+
+    // ReSharper disable once UnusedParameterInPartialMethod
+    partial void OnSortColumnChanged(ScanRootsSortColumn value) => OnSortHeaderChanged();
+    // ReSharper disable once UnusedParameterInPartialMethod
+    partial void OnSortDescendingChanged(bool value) => OnSortHeaderChanged();
 
     public void Rebuild(RepoSnapshotView snapshot)
     {
@@ -122,16 +90,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
         if (nodes.Count <= 1)
             return;
 
-        Comparison<FolderNodeViewModel> cmp = SortColumn switch
-        {
-            ScanRootsSortColumn.Name => (a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name),
-            ScanRootsSortColumn.Size => (a, b) => a.TotalBytes.CompareTo(b.TotalBytes),
-            ScanRootsSortColumn.Items => (a, b) => a.ItemCount.CompareTo(b.ItemCount),
-            ScanRootsSortColumn.Files => (a, b) => a.FileCount.CompareTo(b.FileCount),
-            ScanRootsSortColumn.DupFiles => (a, b) => a.DuplicateFiles.CompareTo(b.DuplicateFiles),
-            ScanRootsSortColumn.DupBytes => (a, b) => a.DuplicateBytes.CompareTo(b.DuplicateBytes),
-            _ => (_, _) => 0
-        };
+        var cmp = GetComparison();
 
         var list = nodes.ToList();
         list.Sort(cmp);
@@ -143,15 +102,24 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
             nodes.Add(n);
     }
 
+    private Comparison<FolderNodeViewModel> GetComparison()
+    {
+        return SortColumn switch
+        {
+            ScanRootsSortColumn.Name => static (a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name),
+            ScanRootsSortColumn.Size => static (a, b) => a.TotalBytes.CompareTo(b.TotalBytes),
+            ScanRootsSortColumn.Items => static (a, b) => a.ItemCount.CompareTo(b.ItemCount),
+            ScanRootsSortColumn.Files => static (a, b) => a.FileCount.CompareTo(b.FileCount),
+            ScanRootsSortColumn.DupFiles => static (a, b) => a.DuplicateFiles.CompareTo(b.DuplicateFiles),
+            ScanRootsSortColumn.DupBytes => static (a, b) => a.DuplicateBytes.CompareTo(b.DuplicateBytes),
+            _ => static (_, _) => 0
+        };
+    }
+
     // ---- Sort indicators ----
 
     private string ArrowFor(ScanRootsSortColumn column)
-    {
-        if (SortColumn != column)
-            return string.Empty;
-
-        return SortDescending ? " ▼" : " ▲";
-    }
+        => SortColumn != column ? string.Empty : (SortDescending ? " ▼" : " ▲");
 
     public string NameArrow => ArrowFor(ScanRootsSortColumn.Name);
     public string SizeArrow => ArrowFor(ScanRootsSortColumn.Size);
@@ -172,22 +140,12 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     // ---- Navigation (lazy-safe) ----
 
-    public void NavigateToDir(DirHandle dirHandle)
-        => NavigateToDirHandleLazy(dirHandle);
+    public void NavigateToDir(DirHandle dirHandle) => NavigateToDirHandleLazy(dirHandle);
 
     public void NavigateToFile(FileHandle fileHandle)
     {
         if (_builder.TryGetParentDirHandle(fileHandle, out var parent))
             NavigateToDirHandleLazy(parent);
-    }
-
-    /// <summary>
-    /// Convenience for TreeMap: navigate to a directory by dirId.
-    /// </summary>
-    public void NavigateToDirId(long dirId)
-    {
-        if (_builder.TryGetDirHandle(dirId, out var handle))
-            NavigateToDirHandleLazy(handle);
     }
 
     private void NavigateToDirHandleLazy(DirHandle target)

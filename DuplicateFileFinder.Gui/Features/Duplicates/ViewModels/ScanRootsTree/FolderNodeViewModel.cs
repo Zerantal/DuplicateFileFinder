@@ -7,107 +7,42 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
-public sealed partial class FolderNodeViewModel : ObservableObject
+public sealed partial class FolderNodeViewModel(
+    DirHandle dir,
+    string name,
+    string fullPath,
+    IScanCoordinator? scanCoordinator,
+    IDialogService? dialogs,
+    long scanRootId,
+    bool isDummy = false)
+    : ObservableObject
 {
-    private readonly IScanCoordinator? _scanCoordinator;
-    private readonly IDialogService? _dialogs;
-    private readonly bool _isDummy;
-
-    private string _fullPath;
-    private string _name;
-    private long _scanRootId = -1;
-
-    // Aggregate stats (from TreeIndexStats)
-    private long _totalBytes;
-    private int _fileCount;
-    private int _dirCount;
-    private long _duplicateFiles;
-    private long _duplicateBytes;
-    private double _percentOfScanRoot;
-    private long _scanRootTotalBytes;
-
     // Dummy child used to show the expand arrow before children are loaded.
-    private static readonly FolderNodeViewModel s_dummyChild =
-        new(new DirHandle(), string.Empty, string.Empty, null, null, isDummy: true);
+    private static readonly FolderNodeViewModel s_dummyChild = new(
+        DirHandle.Invalid,
+        "Loading...",
+        "",
+        null,
+        null,
+        -1,
+        true);
 
-    public FolderNodeViewModel(
-        DirHandle dir,
-        string name,
-        string fullPath,
-        IScanCoordinator scanCoordinator,
-        IDialogService dialogs,
-        long scanRootId = -1)
-        : this(dir, name, fullPath, scanCoordinator, dialogs, isDummy: false, scanRootId: scanRootId)
-    {
-    }
-
-    private FolderNodeViewModel(
-        DirHandle dir,
-        string name,
-        string fullPath,
-        IScanCoordinator? scanCoordinator,
-        IDialogService? dialogs,
-        bool isDummy,
-        long scanRootId = -1)
-    {
-        Dir = dir;
-        _name = name;
-        _fullPath = fullPath;
-        _scanCoordinator = scanCoordinator;
-        _dialogs = dialogs;
-        ScanRootId = scanRootId;
-        _isDummy = isDummy;
-    }
-
-    public DirHandle Dir { get; }
-
-    public string Name
-    {
-        get => _name;
-        set
-        {
-            if (value == _name)
-                return;
-            _name = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(DisplayName));
-        }
-    }
-
-    public string FullPath
-    {
-        get => _fullPath;
-        set
-        {
-            if (value == _fullPath)
-                return;
-            _fullPath = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(DisplayName));
-        }
-    }
-
-    public bool ShowFullPath
-    {
-        get;
-        set
-        {
-            if (SetProperty(ref field, value))
-                OnPropertyChanged(nameof(DisplayName));
-        }
-    }
+    public DirHandle Dir { get; } = dir;
 
     public FolderNodeViewModel? Parent { get; set; }
-
-    public string DisplayName => ShowFullPath ? FullPath : Name;
 
     public ObservableCollection<FolderNodeViewModel> Children { get; } = new();
 
     public bool IsScanRoot => Parent == null;
+
+    public long ScanRootId { get; } = scanRootId;
+
+    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; init; }
 
     // A callback that the owning viewmodel can set to remove this node
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
@@ -115,85 +50,77 @@ public sealed partial class FolderNodeViewModel : ObservableObject
     // Called after updating scan root metadata so the owner can rebuild the tree labels
     public Action? OnRootLabelRefreshRequested { get; set; }
 
-    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; init; }
+    // ----- UI state -----
 
-    public bool IsExpanded
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string _name = name;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string _fullPath = fullPath;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string? _statusTag;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RescanOrResumeHeader))]
+    private bool _hasCheckpoint;
+
+    [ObservableProperty]
+    private bool _isAvailable = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private bool _showFullPath;
+
+    [ObservableProperty]
+    private bool _isExpanded;
+
+    partial void OnIsExpandedChanged(bool value)
     {
-        get;
-        set
-        {
-            if (!SetProperty(ref field, value))
-                return;
+        if (value)
+            EnsureChildrenLoaded?.Invoke(this);
+    }
 
-            if (field)
-                EnsureChildrenLoaded?.Invoke(this);
+    public string DisplayName
+    {
+        get
+        {
+            var baseText = ShowFullPath ? FullPath : Name;
+            return string.IsNullOrWhiteSpace(StatusTag) ? baseText : $"{baseText} {StatusTag}";
         }
     }
 
-    internal void AddDummyChild()
-    {
-        Children.Clear();
-        Children.Add(s_dummyChild);
-    }
+    public string RescanOrResumeHeader => HasCheckpoint ? "Resume scan" : "Rescan location";
 
-    internal bool HasDummyChild =>
-        Children.Count == 1 && ReferenceEquals(Children[0], s_dummyChild);
+    // ----- Aggregate stats -----
 
-    public long ScanRootId
-    {
-        get => _scanRootId;
-        set => _scanRootId = value;
-    }
+    [ObservableProperty]
+    private long _totalBytes;
 
-    internal void ClearChildren() => Children.Clear();
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ItemCount))]
+    private int _fileCount;
 
-    // ---- Aggregate stats bindings (TreeIndexStats) ----
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ItemCount))]
+    private int _dirCount;
 
-    public long TotalBytes
-    {
-        get => _totalBytes;
-        private set => SetProperty(ref _totalBytes, value);
-    }
+    [ObservableProperty]
+    private long _duplicateFiles;
 
-    public int FileCount
-    {
-        get => _fileCount;
-        private set => SetProperty(ref _fileCount, value);
-    }
+    [ObservableProperty]
+    private long _duplicateBytes;
 
-    public int DirCount
-    {
-        get => _dirCount;
-        private set => SetProperty(ref _dirCount, value);
-    }
+    [ObservableProperty]
+    private double _percentOfScanRoot;
+
+    [ObservableProperty]
+    private long _scanRootTotalBytes;
 
     public int ItemCount => FileCount + DirCount;
-
-    public long DuplicateFiles
-    {
-        get => _duplicateFiles;
-        private set => SetProperty(ref _duplicateFiles, value);
-    }
-
-    public long DuplicateBytes
-    {
-        get => _duplicateBytes;
-        private set => SetProperty(ref _duplicateBytes, value);
-    }
-
-    /// <summary>Percent of the scan-root total (WinDirStat-like “Subtree %”).</summary>
-    public double PercentOfScanRoot
-    {
-        get => _percentOfScanRoot;
-        private set => SetProperty(ref _percentOfScanRoot, value);
-    }
-
-    /// <summary>Total bytes of the scan root this node belongs to (used to compute PercentOfScanRoot).</summary>
-    public long ScanRootTotalBytes
-    {
-        get => _scanRootTotalBytes;
-        private set => SetProperty(ref _scanRootTotalBytes, value);
-    }
 
     public void ApplyAggregateStats(DirAggregateStats stats, long scanRootTotalBytes)
     {
@@ -204,85 +131,82 @@ public sealed partial class FolderNodeViewModel : ObservableObject
         DuplicateBytes = stats.DuplicateBytes;
 
         ScanRootTotalBytes = scanRootTotalBytes <= 0 ? 0 : scanRootTotalBytes;
-        PercentOfScanRoot =
-            ScanRootTotalBytes <= 0 ? 0.0 : TotalBytes * 100.0 / ScanRootTotalBytes;
-
-        OnPropertyChanged(nameof(ItemCount));
+        PercentOfScanRoot = ScanRootTotalBytes <= 0 ? 0.0 : TotalBytes * 100.0 / ScanRootTotalBytes;
     }
 
-    // ---- Existing commands ----
+    // ----- Dummy children helpers -----
+
+    internal bool HasDummyChild =>
+        Children.Count == 1 && ReferenceEquals(Children[0], s_dummyChild);
+
+    internal void AddDummyChild()
+    {
+        Children.Clear();
+        Children.Add(s_dummyChild);
+    }
+
+    internal void ClearChildren() => Children.Clear();
+
+    // ----- Commands -----
 
     [RelayCommand]
     private async Task RescanLocationAsync()
     {
-        if (!IsScanRoot || _isDummy || _scanCoordinator is null)
+        if (!IsScanRoot || isDummy || scanCoordinator is null)
             return;
 
-        await _scanCoordinator.RunRescanLocationWithDialogAsync(_scanRootId);
+        // will resume a scan if there's a checkpoint
+        await scanCoordinator.RunRescanLocationWithDialogAsync(ScanRootId);
     }
 
     [RelayCommand]
     private async Task RescanFolderAsync()
     {
-        if (_isDummy || _scanCoordinator is null)
+        if (isDummy || scanCoordinator is null)
             return;
 
-        var handle = Dir;
-        if (!handle.IsValid)
+        if (!Dir.IsValid)
             return;
 
-        await _scanCoordinator.RunFolderRescanWithDialogAsync(handle);
+        await scanCoordinator.RunFolderRescanWithDialogAsync(Dir);
     }
 
     [RelayCommand]
     private async Task RemoveLocationAsync()
     {
-        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null)
+        if (!IsScanRoot || isDummy || scanCoordinator is null || dialogs is null)
             return;
 
-        if (!IsScanRoot)
+        var ok = await (dialogs?.ShowConfirmationAsync(
+            "Remove scan root",
+            "Remove this scan root from the repository?",
+            "Remove") ?? Task.FromResult(false));
+
+        if (!ok)
             return;
 
-        await _scanCoordinator.RemoveScanRoot(ScanRootId);
+        await scanCoordinator.RemoveScanRoot(ScanRootId);
         OnRootRemoved?.Invoke(this);
     }
 
     [RelayCommand]
     private async Task SetDisplayNameAsync()
     {
-        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null || _dialogs is null)
+        if (!IsScanRoot || isDummy || scanCoordinator is null || dialogs is null)
             return;
 
-        if (!IsScanRoot)
-            return;
-
-        var input = await _dialogs.ShowTextInputAsync(
-            title: "Set display name",
-            message: "Enter a display name for this scan root (blank = clear).",
-            initialText: null);
+        var input = await dialogs.ShowTextInputAsync(
+            "Set display name",
+            "Enter a display name for this scan root (blank = clear).",
+            Name);
 
         if (input is null)
-            return; // cancelled
-
-        var trimmed = input.Trim();
-        var newName = trimmed.Length == 0 ? null : trimmed;
-
-        await _scanCoordinator.SetScanRootDisplayName(ScanRootId, newName);
-        OnRootLabelRefreshRequested?.Invoke();
-    }
-
-    [RelayCommand]
-    private async Task ClearDisplayNameAsync()
-    {
-        if (_isDummy || ScanRootId < 0 || _scanCoordinator is null)
             return;
 
-        if (!IsScanRoot)
-            return;
+        var normalized = string.IsNullOrWhiteSpace(input) ? null : input;
 
-        await _scanCoordinator.SetScanRootDisplayName(ScanRootId, null);
+        await scanCoordinator.SetScanRootDisplayName(ScanRootId, normalized);
+
         OnRootLabelRefreshRequested?.Invoke();
     }
-
-    public override string ToString() => FullPath;
 }

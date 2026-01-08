@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 

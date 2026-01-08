@@ -2,7 +2,6 @@ using System.Text.Json;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace RepoCompareTool;
@@ -246,7 +245,7 @@ public static class SemanticRepoComparer
             mapA.TryGetValue(path, out var a);
             mapB.TryGetValue(path, out var b);
 
-            if (a.Equals(default(FileRecordV2)) && b.Equals(default(FileRecordV2)))
+            if (a.Equals(default) && b.Equals(default))
                 continue;
 
             var aPresent = mapA.ContainsKey(path);

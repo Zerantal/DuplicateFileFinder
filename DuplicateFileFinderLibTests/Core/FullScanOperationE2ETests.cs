@@ -495,7 +495,7 @@ public sealed class FullScanOperationE2ETests
         var subIdx = snap1.Dirs
             .Select((d, i) => new { d, i })
             .First(x => x.d.ParentDirId >= 0 && snap1.StringPool.GetString(x.d.NameStrIdx) == "sub").i;
-        var subHandle = new DuplicateFileFinderLib.Repository.Plugins.Models.DirHandle(run1.ScanRootId, subIdx);
+        var subHandle = new DirHandle(run1.ScanRootId, subIdx);
 
         // Delete a file outside the subtree and mutate inside subtree
         File.Delete(otherFile);

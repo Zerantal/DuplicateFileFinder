@@ -3,7 +3,6 @@ using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 using DuplicateFileFinderLib.Util;
 
@@ -40,6 +39,7 @@ internal sealed class FullScanOperation(
         CancellationToken ct) =>
         ExecuteAsync(startDir, new ScanOptions(), progress, ct);
 
+    // New location scan
     public async Task ExecuteAsync(
         string rootPath,
         ScanOptions options,
@@ -51,10 +51,21 @@ internal sealed class FullScanOperation(
         var vInfo = TryGetVolumeInfo(rootPath);
         ConfigureHashingRunner(vInfo);
 
-        var ctx = await _repo.BeginNewScanAsync(rootPath, options, vInfo, ct).ConfigureAwait(false);
+        ScanContext ctx;
+        using (PhaseScope.Begin(ScanPhase.Preparing))
+        using (TimingLog.StartPhase(ScanPhase.Preparing))
+        {
+            DuplicateFileFinderHelpers.Report(
+                progress,
+                ScanPhase.Preparing,
+                $"Preparing location scan for {rootPath}...",
+                indeterminate: true);
+            ctx = await _repo.BeginNewScanAsync(rootPath, options, vInfo, ct).ConfigureAwait(false);
+        }
         await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
     }
 
+    // Location re-scanning
     private async Task ExecuteAsync(
         long scanRootId,
         ScanOptions options,
@@ -70,10 +81,21 @@ internal sealed class FullScanOperation(
         var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
-        var ctx = await _repo.BeginRescanAsync(scanRootId, options, vInfo, ct).ConfigureAwait(false);
+        ScanContext ctx;
+        using (PhaseScope.Begin(ScanPhase.Preparing))
+        using (TimingLog.StartPhase(ScanPhase.Preparing))
+        {
+            DuplicateFileFinderHelpers.Report(
+                progress,
+                ScanPhase.Preparing,
+                $"Preparing location re-scan for {probePath}...",
+                indeterminate: true);
+            ctx = await _repo.BeginRescanAsync(scanRootId, options, vInfo, ct).ConfigureAwait(false);
+        }
         await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
     }
 
+    // Folder re-scanning
     public async Task ExecuteAsync(
         DirHandle startDir,
         ScanOptions options,
@@ -98,7 +120,17 @@ internal sealed class FullScanOperation(
         var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
-        var ctx = await _repo.BeginSubtreeScanAsync(startDir.ScanRootId, options, vInfo, ct).ConfigureAwait(false);
+        ScanContext ctx;
+        using (PhaseScope.Begin(ScanPhase.Preparing))
+        using (TimingLog.StartPhase(ScanPhase.Preparing))
+        {
+            DuplicateFileFinderHelpers.Report(
+                progress,
+                ScanPhase.Preparing,
+                $"Preparing folder re-scan for {probePath}...",
+                indeterminate: true);
+            ctx = await _repo.BeginSubtreeScanAsync(startDir.ScanRootId, options, vInfo, ct).ConfigureAwait(false);
+        }
 
         // Compute the starting directory path from the loaded snapshot.
         var (dirId, fullPath) = ResolveStartDir(ctx.Run.RootPath, snap, startDir.Index);
