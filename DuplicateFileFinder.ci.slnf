@@ -1,13 +1,14 @@
 {
-  "solution": {
-    "path": "DuplicateFileFinder.sln",
-    "projects": [
-      "DuplicateFileFinder.Gui\\DuplicateFileFinder.Gui.csproj",
-      "DuplicateFileFinderLib\\DuplicateFileFinderLib.csproj",
-      "DuplicateFileFinderLibTests\\DuplicateFileFinderLibTests.csproj",
-      "RepoCompareTool\\RepoCompareTool.csproj",
-      "RepoRepair\\RepoRepair.csproj"
-    ]
-  }
+    "solution": {
+        "path": "DuplicateFileFinder.sln",
+        "projects": [
+            "DuplicateFileFinder.Gui\\DuplicateFileFinder.Gui.csproj",
+            "DuplicateFileFinder.GuiTests\\DuplicateFileFinder.GuiTests.csproj",
+            "DuplicateFileFinderLib\\DuplicateFileFinderLib.csproj",
+            "DuplicateFileFinderLibTests\\DuplicateFileFinderLibTests.csproj",
+            "RepoCompareTool\\RepoCompareTool.csproj",
+            "RepoRepair\\RepoRepair.csproj"
+        ]
+    }
 }
 
