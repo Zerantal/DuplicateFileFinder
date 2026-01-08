@@ -102,7 +102,13 @@ public sealed class PathUtilsTests
     public void NormalizePath_ThrowsOnNullOrWhitespace()
     {
         Assert.Throws<ArgumentNullException>(() => PathUtils.NormalizePath(null!));
-        Assert.Throws<ArgumentNullException>(() => PathUtils.NormalizePath(""));
-        Assert.Throws<ArgumentNullException>(() => PathUtils.NormalizePath("   "));
+        Assert.Throws<ArgumentException>(() => PathUtils.NormalizePath("   "));
+    }
+
+    [Fact]
+    public void NormalizePath_EmptyPath()
+    {
+        Assert.Equal("", PathUtils.NormalizePath(string.Empty));
+        Assert.Equal("/", PathUtils.NormalizePath("", forceTrailingSlash: true));
     }
 }

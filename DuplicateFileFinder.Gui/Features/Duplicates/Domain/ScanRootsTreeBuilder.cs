@@ -1,3 +1,5 @@
+// DuplicateFileFinder.Gui/Features/Duplicates/Domain/ScanRootsTreeBuilder.cs
+
 using System.Collections.ObjectModel;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
@@ -6,7 +8,7 @@ using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
@@ -50,17 +52,35 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
 
         foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
         {
-            if (!_mainIndex.TryGetDir(scanRoot.DirId, out var rootHandle))
-                continue;
-
-            var rootRec = snapshot.GetDirRecord(rootHandle);
-            if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
-                continue;
-
             var scanRootFullPath = GetScanRootFullPath(scanRoot.DirId);
             var label = GetScanRootLabel(scanRoot.DirId);
 
-            var rootNode = CreateRootNode(rootHandle, label, scanRootFullPath, roots, scanRoot.RootId);
+            // Derive status tag from checkpoint or last run
+            var hasCheckpoint = _repo.HasScanCheckpoint(scanRoot.RootId);
+            var lastRun = _repo.ScanRunsView
+                .Where(r => r.ScanRootId == scanRoot.RootId)
+                .OrderByDescending(r => r.ScanSequence)
+                .FirstOrDefault();
+            var statusTag = GetStatusTag(hasCheckpoint, lastRun);
+
+            if (!string.IsNullOrWhiteSpace(statusTag))
+                label = $"{label} {statusTag}";
+
+            var rootNode = CreateRootNode(
+                scanRoot.DirId,
+                label,
+                scanRootFullPath,
+                roots,
+                scanRoot.RootId,
+                hasCheckpoint,
+                out var rootHandle);
+
+            // If we don't have a resolvable handle (or it isn't usable in snapshot), it's a placeholder.
+            if (!rootHandle.IsValid)
+            {
+                InsertSortedBySizeDesc(roots, rootNode);
+                continue;
+            }
 
             // Stats for root from index
             var rootStats = _treeIndex.GetDirStats(rootHandle);
@@ -82,7 +102,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
 
     public bool TryGetParentDirHandle(FileHandle fileHandle, out DirHandle parentDirHandle)
     {
-        parentDirHandle = default;
+        parentDirHandle = DirHandle.Invalid;
 
         if (_snapshot is null)
             return false;
@@ -115,7 +135,6 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
             if (_scanRootByDirId.ContainsKey(curDirId))
                 break;
 
-            // NOTE: assumes DirRecord has ParentDirId. If yours differs, adjust here.
             var parentDirId = curRec.ParentDirId;
             if (parentDirId <= 0)
                 return false;
@@ -160,14 +179,33 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
     }
 
     private FolderNodeViewModel CreateRootNode(
-        DirHandle rootHandle,
+        long rootDirId,
         string label,
         string fullPath,
         ObservableCollection<FolderNodeViewModel> roots,
-        long scanRootId)
+        long scanRootId,
+        bool hasCheckpoint,
+        out DirHandle rootHandle)
     {
         if (_snapshot is null)
             throw new InvalidOperationException("Rebuild must be called first.");
+
+        rootHandle = DirHandle.Invalid;
+
+        // Try to resolve the root dir into the current main index.
+        if (!_mainIndex.TryGetDir(rootDirId, out var handle))
+        {
+            return CreatePlaceholderRootNode(label, fullPath, roots, scanRootId, hasCheckpoint);
+        }
+
+        // If the snapshot record is absent/deleted, treat it as placeholder so it still shows.
+        var rootRec = _snapshot.GetDirRecord(handle);
+        if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
+        {
+            return CreatePlaceholderRootNode(label, fullPath, roots, scanRootId, hasCheckpoint);
+        }
+
+        rootHandle = handle;
 
         var node = new FolderNodeViewModel(
             rootHandle,
@@ -193,6 +231,35 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
         };
 
         return node;
+    }
+
+    private FolderNodeViewModel CreatePlaceholderRootNode(
+        string label,
+        string fullPath,
+        ObservableCollection<FolderNodeViewModel> roots,
+        long scanRootId,
+        bool hasCheckpoint)
+    {
+        var placeholder = new FolderNodeViewModel(
+            dir: DirHandle.Invalid,
+            name: label,
+            fullPath: fullPath,
+            scanCoordinator: _scanner,
+            dialogs: _dialogs,
+            scanRootId: scanRootId)
+        {
+            HasCheckpoint = hasCheckpoint,
+            Parent = null,
+            ShowFullPath = false,
+            OnRootRemoved = n => roots.Remove(n),
+            OnRootLabelRefreshRequested = () =>
+            {
+                var snap = _repo.GetRepoSnapshotView();
+                Rebuild(snap, roots);
+            }
+        };
+
+        return placeholder;
     }
 
     private FolderNodeViewModel GetOrCreateNode(
@@ -304,6 +371,20 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
         }
 
         return rootDirId.ToString();
+    }
+
+    private static string? GetStatusTag(bool hasCheckpoint, ScanRun? lastRun)
+    {
+        if (hasCheckpoint)
+            return "[INCOMPLETE]";
+
+        return lastRun?.Status switch
+        {
+            ScanRunStatus.InProgress => "[IN PROGRESS]",
+            ScanRunStatus.Failed => "[FAILED]",
+            ScanRunStatus.Cancelled => "[CANCELLED]",
+            _ => null
+        };
     }
 
     private static void InsertSortedBySizeDesc(ObservableCollection<FolderNodeViewModel> list, FolderNodeViewModel node)

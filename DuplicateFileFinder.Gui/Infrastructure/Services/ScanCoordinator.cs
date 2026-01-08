@@ -4,8 +4,8 @@ using Avalonia.Threading;
 
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 using NLog;
 
@@ -20,7 +20,7 @@ public sealed class ScanCoordinator(
     IDialogService dialogService)
     : IScanCoordinator
 {
-    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
     private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
@@ -45,9 +45,9 @@ public sealed class ScanCoordinator(
             arg: rootPath,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(rootPath, progress, ct),
-            logStart: () => Log.Info("Starting scan of {root}", rootPath),
-            logCancel: () => Log.Info("Scan cancelled for {root}", rootPath),
-            logFail: ex => Log.Error(ex, "Scan failed for {root}", rootPath));
+            logStart: () => s_log.Info("Starting scan of {root}", rootPath),
+            logCancel: () => s_log.Info("Scan cancelled for {root}", rootPath),
+            logFail: ex => s_log.Error(ex, "Scan failed for {root}", rootPath));
     }
 
     public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken = default)
@@ -59,9 +59,9 @@ public sealed class ScanCoordinator(
             arg: scanRootId,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(scanRootId, progress, ct),
-            logStart: () => Log.Info("Starting rescan of location {root}", scanRootId),
-            logCancel: () => Log.Info("Location rescan cancelled for {root}", scanRootId),
-            logFail: ex => Log.Error(ex, "Location rescan failed for {root}", scanRootId));
+            logStart: () => s_log.Info("Starting rescan of location {root}", scanRootId),
+            logCancel: () => s_log.Info("Location rescan cancelled for {root}", scanRootId),
+            logFail: ex => s_log.Error(ex, "Location rescan failed for {root}", scanRootId));
     }
 
     public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken = default)
@@ -73,9 +73,9 @@ public sealed class ScanCoordinator(
             arg: startDir,
             cancellationToken,
             runAsync: (progress, ct) => _finder.FullScanAsync(startDir, progress, ct),
-            logStart: () => Log.Info("Starting folder rescan of {dir}", startDir),
-            logCancel: () => Log.Info("Folder rescan cancelled for {dir}", startDir),
-            logFail: ex => Log.Error(ex, "Folder rescan failed for {dir}", startDir));
+            logStart: () => s_log.Info("Starting folder rescan of {dir}", startDir),
+            logCancel: () => s_log.Info("Folder rescan cancelled for {dir}", startDir),
+            logFail: ex => s_log.Error(ex, "Folder rescan failed for {dir}", startDir));
     }
 
     private async Task RunScanWithDialogCoreAsync(
@@ -89,8 +89,8 @@ public sealed class ScanCoordinator(
         // Ensure we run the UI bits on UI thread exactly once.
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                RunScanWithDialogCoreAsync(arg, cancellationToken, runAsync, logStart, logCancel, logFail));
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+                await RunScanWithDialogCoreAsync(arg, cancellationToken, runAsync, logStart, logCancel, logFail));
             return;
         }
 
@@ -100,8 +100,7 @@ public sealed class ScanCoordinator(
         IsScanning = true;
         logStart();
 
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _cts = cts;
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var progressVm = new ScanProgressViewModel(this);
         var dialog = new ScanProgressWindow { DataContext = progressVm };
@@ -121,16 +120,18 @@ public sealed class ScanCoordinator(
         Exception? error = null;
         var cancelled = false;
 
+        var token = _cts.Token;
         try
         {
+
             // Off-UI execution
             await Task.Run(async () =>
             {
                 try
                 {
-                    await runAsync(progress, cancellationToken).ConfigureAwait(false);
+                    await runAsync(progress, token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     cancelled = true;
                     logCancel();
@@ -140,7 +141,7 @@ public sealed class ScanCoordinator(
                     error = ex;
                     logFail(ex);
                 }
-            }, cancellationToken).ConfigureAwait(false);
+            }, token).ConfigureAwait(false);
         }
         finally
         {
@@ -164,13 +165,13 @@ public sealed class ScanCoordinator(
             // Ensure the dialog has actually finished closing
             try { await dialogTask; } catch { /* ignore dialog close errors */ }
 
-            cts.Dispose();
-            if (ReferenceEquals(_cts, cts))
-                _cts = null;
+            var cts = _cts;
+            _cts = null;
+            cts?.Dispose();
         }
 
         if (error is not null) throw error;
-        if (cancelled) throw new OperationCanceledException();
+        if (cancelled) throw new OperationCanceledException(token);
     }
 
     public Task RemoveScanRoot(long scanRootId)
@@ -182,9 +183,7 @@ public sealed class ScanCoordinator(
             return;
 
         var cts = _cts;
-        if (cts is null)
-            return;
 
-        try { cts.Cancel(); } catch { /* best-effort */ }
+        try { cts?.Cancel(); } catch { /* best-effort */ }
     }
 }

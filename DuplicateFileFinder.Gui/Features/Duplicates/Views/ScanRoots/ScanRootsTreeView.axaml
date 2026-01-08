@@ -147,20 +147,17 @@
 
             <Grid.ContextMenu>
               <ContextMenu>
-                <MenuItem Header="Rescan Location"
+                <MenuItem Header="{Binding RescanOrResumeHeader}"
                           Command="{Binding RescanLocationCommand}"
                           IsVisible="{Binding IsScanRoot}"/>
                 <MenuItem Header="Rescan folder"
                           Command="{Binding RescanFolderCommand}"
                           IsVisible="{Binding !IsScanRoot }"/>
                 <MenuItem Header="Remove location"
-                          Command="{Binding RemoveLocationCommand}"
-                          IsVisible="{Binding IsScanRoot}" />
-                <MenuItem Header="Set display name..."
+                                                        Command="{Binding RemoveLocationCommand}"
+                                                        IsVisible="{Binding IsScanRoot}" />
+              <MenuItem Header="Set display name"
                           Command="{Binding SetDisplayNameCommand}"
-                          IsVisible="{Binding IsScanRoot}" />
-                <MenuItem Header="Clear display name"
-                          Command="{Binding ClearDisplayNameCommand}"
                           IsVisible="{Binding IsScanRoot}" />
               </ContextMenu>
             </Grid.ContextMenu>

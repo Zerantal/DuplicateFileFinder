@@ -1,4 +1,3 @@
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinderLib.Repository.Core.Models;

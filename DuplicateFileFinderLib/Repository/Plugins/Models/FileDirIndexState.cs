@@ -1,3 +1,5 @@
+using DuplicateFileFinderLib.Repository.Core.Models;
+
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;

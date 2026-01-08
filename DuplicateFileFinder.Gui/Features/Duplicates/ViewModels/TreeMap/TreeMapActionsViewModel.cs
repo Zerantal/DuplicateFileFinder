@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
-using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Core.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 

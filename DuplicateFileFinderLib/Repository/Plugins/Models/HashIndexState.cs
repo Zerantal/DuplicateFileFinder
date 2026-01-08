@@ -1,5 +1,6 @@
 // DuplicateFileFinderLib/Repository/Plugins/Models/HashIndexState.cs
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using MemoryPack;

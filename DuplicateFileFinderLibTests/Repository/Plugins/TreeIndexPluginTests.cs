@@ -5,8 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 using DuplicateFileFinderLibTests.TestUtils;
 

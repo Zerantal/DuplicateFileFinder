@@ -45,4 +45,5 @@ public interface IRepo : IDisposable, IAsyncDisposable
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }
     ScanRootSnapshotView? TryGetScanRootView(long scanRootId);
     public RepoSnapshotView GetRepoSnapshotView();
+    public bool HasScanCheckpoint(long scanRootId);
 }
