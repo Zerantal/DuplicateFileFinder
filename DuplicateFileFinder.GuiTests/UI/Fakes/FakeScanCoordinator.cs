@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 

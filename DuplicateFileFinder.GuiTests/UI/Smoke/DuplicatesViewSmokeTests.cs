@@ -2,9 +2,10 @@ using System.Threading.Tasks;
 
 using Avalonia.Controls;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.GuiTests.Ui.Fakes;
+
 using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Ui.Smoke;

@@ -2,8 +2,10 @@ using System.Threading.Tasks;
 
 using Avalonia.Controls;
 using Avalonia.Threading;
+
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts.Views;
+
 using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Ui.Smoke;

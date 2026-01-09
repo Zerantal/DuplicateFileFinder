@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
+
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
 namespace DuplicateFileFinder.GuiTests.Ui.Fakes;

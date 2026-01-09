@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 
 using DuplicateFileFinder.Gui.Features.Shell.Views;
+
 using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Ui.Smoke;
