@@ -37,4 +37,17 @@
         <AvaloniaResource Include="Assets\**\*.*"/>
     </ItemGroup>
 
+    <ItemGroup>
+      <Compile Update="Features\Splash\Views\SplashWindow.axaml.cs">
+        <DependentUpon>SplashWindow.axaml</DependentUpon>
+        <SubType>Code</SubType>
+      </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Reference Include="xunit.v3.core">
+        <HintPath>..\..\..\.nuget\packages\xunit.v3.extensibility.core\3.2.1\lib\netstandard2.0\xunit.v3.core.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+
 </Project>

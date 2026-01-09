@@ -70,7 +70,7 @@ public sealed class BytesToHumanConverter : IValueConverter
         var bytesDouble = number * factor;
 
         if (double.IsNaN(bytesDouble) || double.IsInfinity(bytesDouble) ||
-            bytesDouble < 0 || bytesDouble > long.MaxValue)
+            bytesDouble < long.MinValue || bytesDouble > long.MaxValue)
             return AvaloniaProperty.UnsetValue;
 
         var bytes = (long)Math.Round(bytesDouble);
