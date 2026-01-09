@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 
-namespace DuplicateFileFinder.Gui.Features.Scanning.Views;
+namespace DuplicateFileFinder.Gui.Features.Splash.Views;
 
 public partial class SplashWindow : Window
 {

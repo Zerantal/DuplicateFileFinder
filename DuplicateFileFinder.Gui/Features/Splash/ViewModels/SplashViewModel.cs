@@ -1,8 +1,6 @@
-// ViewModels/SplashViewModel.cs
-
 using ReactiveUI;
 
-namespace DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
+namespace DuplicateFileFinder.Gui.Features.Splash.ViewModels;
 
 public sealed class SplashViewModel : ReactiveObject
 {

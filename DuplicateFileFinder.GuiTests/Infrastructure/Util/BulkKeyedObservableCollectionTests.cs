@@ -2,7 +2,6 @@ using System;
 using System.Collections.Specialized;
 
 using DuplicateFileFinder.Gui.Infrastructure.Util;
-using DuplicateFileFinder.GuiTests.TestUtils;
 
 using Xunit;
 

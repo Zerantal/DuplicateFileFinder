@@ -4,9 +4,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 
-using DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
-using DuplicateFileFinder.Gui.Features.Scanning.Views;
 using DuplicateFileFinder.Gui.Features.Shell.Views;
+using DuplicateFileFinder.Gui.Features.Splash.ViewModels;
+using DuplicateFileFinder.Gui.Features.Splash.Views;
 
 using NLog;
 

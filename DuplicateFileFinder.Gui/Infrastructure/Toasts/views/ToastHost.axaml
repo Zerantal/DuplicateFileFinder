@@ -6,7 +6,8 @@
     xmlns:toasts="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Toasts">
 
     <!-- Overlay in top-right -->
-    <ItemsControl ItemsSource="{Binding Items}"
+    <ItemsControl x:Name="ToastItems"
+                  ItemsSource="{Binding Items}"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Top"
                   Margin="12"

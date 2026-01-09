@@ -2,6 +2,15 @@
   "version": 1,
   "dependencies": {
     "net10.0": {
+      "Avalonia.Headless": {
+        "type": "Direct",
+        "requested": "[11.3.10, )",
+        "resolved": "11.3.10",
+        "contentHash": "r3LGdpc/H176pDg3JnnvJBa100s7yF+vYB2mj1ueveuAw3W1slpBHjBKe+psHVK3SKyxxpX4utM30kOi2NcT7A==",
+        "dependencies": {
+          "Avalonia": "11.3.10"
+        }
+      },
       "coverlet.collector": {
         "type": "Direct",
         "requested": "[6.*, )",
@@ -35,11 +44,11 @@
       },
       "Avalonia": {
         "type": "Transitive",
-        "resolved": "11.3.6",
-        "contentHash": "h8V6Cmklaak2h+WVp5gcsprwmrCLQylfNmIQnOQyiETzOazKGmFhlcf+K9zoupxfkhOQXsbSJpb/elyCkrjlig==",
+        "resolved": "11.3.10",
+        "contentHash": "fAZmy1oOzQzBlg0Mm8QawA2439LmXHmX7hHEucfvGmAfibCUtQ0wgedl4b3XRd4Y8pH50kAlsg5DPG7ARtGa2A==",
         "dependencies": {
-          "Avalonia.BuildServices": "0.0.31",
-          "Avalonia.Remote.Protocol": "11.3.6",
+          "Avalonia.BuildServices": "11.3.2",
+          "Avalonia.Remote.Protocol": "11.3.10",
           "MicroCom.Runtime": "0.11.0"
         }
       },
@@ -50,8 +59,8 @@
       },
       "Avalonia.BuildServices": {
         "type": "Transitive",
-        "resolved": "0.0.31",
-        "contentHash": "KmCN6Hc+45q4OnF10ge450yVUvWuxU6bdQiyKqiSvrHKpahNrEdk0kG6Ip6GHk2SKOCttGQuA206JVdkldEENg=="
+        "resolved": "11.3.2",
+        "contentHash": "qHDToxto1e3hci5YqbG9n0Ty8mlp3zBUN5wT66wKqaDVzXyQ0do3EnRILd4Ke9jpvsktaPpgE0YjEk7hornryQ=="
       },
       "Avalonia.Controls.ColorPicker": {
         "type": "Transitive",
@@ -127,8 +136,8 @@
       },
       "Avalonia.Remote.Protocol": {
         "type": "Transitive",
-        "resolved": "11.3.6",
-        "contentHash": "i1lW1ZA5Ghe19kbPiC2pMq48P/9CcOWi8hFj0Y8UZr/czCQok3YJRwU5z8vKsJ5xsMvzpPf+GO/6Qu9Dy2yLvg=="
+        "resolved": "11.3.10",
+        "contentHash": "DyNUbh9IfH+AL3KKob8p4IPZk7BvDMIB3ub13gJTrICfaMQiU7QsE0U05rfNFKJEdMmK0MBTL/Y+8BnaLVrDPw=="
       },
       "Avalonia.Skia": {
         "type": "Transitive",

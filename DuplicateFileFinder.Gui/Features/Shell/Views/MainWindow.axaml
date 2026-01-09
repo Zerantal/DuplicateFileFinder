@@ -46,7 +46,7 @@
     <DockPanel Margin="8" LastChildFill="True">
 
       <!-- Menu bar at the top -->
-      <Menu DockPanel.Dock="Top">
+      <Menu x:Name="MainMenu" DockPanel.Dock="Top">
         <MenuItem Header="_Debug"
                   IsVisible="{Binding IsDebugBuild}">
           <MenuItem Header="Dump repo trees (all)"
@@ -58,7 +58,9 @@
 
       <!-- Simple toolbar row -->
       <StackPanel Orientation="Horizontal" DockPanel.Dock="Top" Spacing="8" Margin="0,6,0,6">
-        <Button Content="Scan Location" Command="{Binding ScanLocationCommand}" />
+        <Button x:Name="ScanLocationButton"
+                Content="Scan Location"
+                Command="{Binding ScanLocationCommand}" />
       </StackPanel>
 
       <!-- Status area -->
@@ -77,10 +79,12 @@
       </Grid>
 
       <!-- Main content -->
-      <duplicatesViews:DuplicatesView DataContext="{Binding Duplicates}" />
+      <duplicatesViews:DuplicatesView x:Name="DuplicatesView"
+                                      DataContext="{Binding Duplicates}" />
     </DockPanel>
 
     <!-- Overlay: Toasts -->
-    <toastViews:ToastHost DataContext="{Binding ToastHost}" />
+    <toastViews:ToastHost x:Name="ToastHost"
+                          DataContext="{Binding ToastHost}" />
   </Grid>
 </Window>

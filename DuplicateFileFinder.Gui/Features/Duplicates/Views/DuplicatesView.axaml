@@ -18,12 +18,13 @@
 
     <!-- TOP: ScanRootsTreeView (1/3 by default) -->
     <Grid Grid.Row="0"
-          Name="ScanRootsHost">
+          x:Name="ScanRootsHost">
 
       <ScrollViewer
         VerticalScrollBarVisibility="Auto"
         HorizontalScrollBarVisibility="Disabled">
         <scanRoots:ScanRootsTreeView
+          x:Name="ScanRootsTree"
           DataContext="{Binding ScanRootsTree}" />
       </ScrollViewer>
     </Grid>
@@ -38,7 +39,7 @@
                   Background="{DynamicResource ThemeControlMidBrush}" />
 
     <!-- tabbed pane (Duplicates / Tree Map), spans both right rows -->
-    <TabControl Grid.Row="2">
+    <TabControl Grid.Row="2" x:Name="MainTabs">
 
       <!-- Tab 1: existing duplicates view -->
       <TabItem Header="Duplicates">
@@ -74,7 +75,8 @@
               <ScrollViewer HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto"
                             FontFamily="monospace">
-                <ItemsRepeater ItemsSource="{Binding FilteredSets}">
+                <ItemsRepeater x:Name="DuplicateSetsRepeater"
+                               ItemsSource="{Binding FilteredSets}">
                   <ItemsRepeater.Layout>
                     <StackLayout Orientation="Vertical"
                                  DisableVirtualization="False" />
@@ -122,7 +124,8 @@
           </Border>
 
           <!-- RIGHT (bottom): files in selected set -->
-          <dgrid:DataGrid Grid.Row="1"
+          <dgrid:DataGrid x:Name="DuplicateFilesGrid"
+                          Grid.Row="1"
                           ItemsSource="{Binding SelectedItems}"
                           IsReadOnly="True"
                           AutoGenerateColumns="False"
