@@ -73,6 +73,15 @@
           "Avalonia": "11.3.6"
         }
       },
+      "Castle.Core": {
+        "type": "Direct",
+        "requested": "[5.2.1, )",
+        "resolved": "5.2.1",
+        "contentHash": "wHARzQA695jwwKreOzNsq54KiGqKP38tv8hi8e2FXDEC/sA6BtrX90tVPDkOfVu13PbEzr00TCV8coikl+D1Iw==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "6.0.0"
+        }
+      },
       "CommunityToolkit.Mvvm": {
         "type": "Direct",
         "requested": "[8.*, )",
@@ -334,6 +343,11 @@
         "type": "Transitive",
         "resolved": "9.0.11",
         "contentHash": "3dQXQ1w7LjiaTD9eJaEGB8cpMcpsayE3aRNoKWslhca8tLLJAUnEJe7tS4rzwn1LFxSm26hgiWuBF+Ll3FmBxw=="
+      },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "lcyUiXTsETK2ALsZrX+nWuHSIQeazhqPphLfaRxzdGaG93+0kELqpgEHtwWOlQe7+jSFnKwaCAgL4kjeZCQJnw=="
       },
       "System.Management": {
         "type": "Transitive",

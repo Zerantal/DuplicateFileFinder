@@ -163,6 +163,18 @@ internal sealed class CapturingRepo : IRepoInternal
         return false;
     }
 
+    public Task<DeleteResult> DeleteFileAsync(FileHandle file, CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return Task.FromResult(new DeleteResult());
+    }
+
+    public Task<DeleteResult> DeleteDirAsync(DirHandle dir, CancellationToken ct = default)
+    {
+        _methodCounter.IncrementMethodCalCount();
+        return Task.FromResult(new DeleteResult());
+    }
+
     public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();

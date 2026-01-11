@@ -127,11 +127,23 @@
           <dgrid:DataGrid x:Name="DuplicateFilesGrid"
                           Grid.Row="1"
                           ItemsSource="{Binding SelectedItems}"
+                          SelectedItem="{Binding SelectedDuplicateFile, Mode=TwoWay}"
                           IsReadOnly="True"
                           AutoGenerateColumns="False"
                           HeadersVisibility="Column"
                           Margin="0,6,0,0"
                           FontFamily="monospace">
+            <dgrid:DataGrid.KeyBindings>
+              <KeyBinding Gesture="Delete"
+                          Command="{Binding DeleteSelectedDuplicateFileCommand}" />
+            </dgrid:DataGrid.KeyBindings>
+
+            <dgrid:DataGrid.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Delete"
+                          Command="{Binding DeleteSelectedDuplicateFileCommand}" />
+              </ContextMenu>
+            </dgrid:DataGrid.ContextMenu>
             <dgrid:DataGrid.Columns>
               <dgrid:DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
               <dgrid:DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*" />
@@ -183,16 +195,25 @@
                                     ValuesArePreSummed="True"
                                     MaxRectangles="150000"
                                     SelectedNode="{Binding TreeMapController.SelectedNode, Mode=TwoWay}"
-                                    CurrentNodeUnderPointer="{Binding TreeMapController.HoveringOverNode, Mode=OneWayToSource}"
                                     ShadeLevels="{Binding MaxDepth}">
+
+              <treeMap:TreeMapControl.KeyBindings>
+                <KeyBinding Gesture="Delete"
+                            Command="{Binding TreeMapActions.DeleteSelectedCommand}"/>
+              </treeMap:TreeMapControl.KeyBindings>
+
               <treeMap:TreeMapControl.ContextMenu>
                 <ContextMenu>
                   <MenuItem Header="Rescan folder"
-                            Command="{Binding TreeMapActions.RescanFolderCommand}" />
+                            Command="{Binding TreeMapActions.RescanSelectedFolderCommand}"
+                            IsVisible="{Binding TreeMapActions.IsContextDir}" />
+
+                  <MenuItem Header="Delete"
+                            Command="{Binding TreeMapActions.DeleteSelectedCommand}"
+                            IsVisible="{Binding TreeMapActions.HasContextTarget}" />
                 </ContextMenu>
               </treeMap:TreeMapControl.ContextMenu>
             </treeMap:TreeMapControl>
-
           </Grid>
 
         </DockPanel>

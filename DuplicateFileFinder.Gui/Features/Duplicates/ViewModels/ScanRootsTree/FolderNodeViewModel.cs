@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
@@ -18,8 +19,11 @@ public sealed partial class FolderNodeViewModel(
     string fullPath,
     IScanCoordinator? scanCoordinator,
     IDialogService? dialogs,
+    IFileSystemDeleteService? deleter,
+    IRepo? repo,
     long scanRootId,
-    bool isDummy = false)
+    bool isDummy = false
+    )
     : ObservableObject
 {
     // Dummy child used to show the expand arrow before children are loaded.
@@ -27,6 +31,8 @@ public sealed partial class FolderNodeViewModel(
         DirHandle.Invalid,
         "Loading...",
         "",
+        null,
+        null,
         null,
         null,
         -1,
@@ -208,5 +214,38 @@ public sealed partial class FolderNodeViewModel(
         await scanCoordinator.SetScanRootDisplayName(ScanRootId, normalized);
 
         OnRootLabelRefreshRequested?.Invoke();
+    }
+
+    public bool CanDeleteFromDisk => !IsScanRoot && !isDummy;
+
+    [RelayCommand(CanExecute = nameof(CanDeleteFromDisk))]
+    private async Task DeleteFromDiskAsync()
+    {
+        if (IsScanRoot || isDummy || dialogs is null || deleter is null || scanCoordinator is null || repo is null)
+            return;
+
+        var ok = await dialogs.ShowConfirmationAsync(
+            "Delete folder",
+            $"Delete this folder from disk?\n\n{FullPath}",
+            okText: "Delete",
+            cancelText: "Cancel");
+
+        if (!ok)
+            return;
+
+        var (deleted, err) = await deleter.DeleteDirectoryAsync(FullPath, recursive: true);
+        if (!deleted)
+        {
+            await dialogs.ShowErrorAsync("Delete failed", err ?? "Unknown error.");
+            return;
+        }
+
+        var result = await repo.DeleteDirAsync(Dir);
+        if (!result.Success)
+        {
+            await dialogs.ShowErrorAsync(
+                "Delete error",
+                $"Deleting entry from repository failed: {result.Error}");
+        }
     }
 }

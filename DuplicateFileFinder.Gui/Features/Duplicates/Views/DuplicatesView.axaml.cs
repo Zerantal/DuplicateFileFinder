@@ -25,22 +25,21 @@ public partial class DuplicatesView : UserControl
                 if (DataContext is not DuplicatesViewModel vm)
                     return;
 
-                var element = treeMap.CurrentNodeUnderPointer;
-
-                if (element is DirTreeMapElement dirElem)
+                var element = treeMap.SelectedNode?.Element;
+                if (element is DirTreeMapElement or FileTreeMapElement)
                 {
-                    vm.TreeMapActions.HoverFolder = dirElem.Dir;
+                    vm.TreeMapActions.ContextTarget = element;
                     return;
                 }
 
-                vm.TreeMapActions.HoverFolder = default;
-                e.Cancel = true; // prevents empty transparent popup
+                vm.TreeMapActions.ContextTarget = null;
+                e.Cancel = true;
             };
 
             cm.Closed += (_, _) =>
             {
                 if (DataContext is DuplicatesViewModel vm)
-                    vm.TreeMapActions.HoverFolder = default;
+                    vm.TreeMapActions.ContextTarget = null;
             };
         }
     }

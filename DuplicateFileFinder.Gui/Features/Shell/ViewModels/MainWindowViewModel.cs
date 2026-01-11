@@ -47,7 +47,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ToastHost = toastHost ?? throw new ArgumentNullException(nameof(toastHost));
         _toasts = toasts ?? throw new ArgumentNullException(nameof(toasts));
 
-        Duplicates = new DuplicatesViewModel(host, scanCoordinator, dialogService);
+        var deleter = new FileSystemDeleteService();
+        Duplicates = new DuplicatesViewModel(host, scanCoordinator, dialogService, deleter);
 
         _scanCoordinator.ScanCompleted += (_, e) =>
         {

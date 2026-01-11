@@ -188,6 +188,14 @@
           "Avalonia.Skia": "11.3.6"
         }
       },
+      "Castle.Core": {
+        "type": "Transitive",
+        "resolved": "5.2.1",
+        "contentHash": "wHARzQA695jwwKreOzNsq54KiGqKP38tv8hi8e2FXDEC/sA6BtrX90tVPDkOfVu13PbEzr00TCV8coikl+D1Iw==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "6.0.0"
+        }
+      },
       "CommunityToolkit.Mvvm": {
         "type": "Transitive",
         "resolved": "8.4.0",
@@ -433,6 +441,11 @@
         "resolved": "9.0.11",
         "contentHash": "3dQXQ1w7LjiaTD9eJaEGB8cpMcpsayE3aRNoKWslhca8tLLJAUnEJe7tS4rzwn1LFxSm26hgiWuBF+Ll3FmBxw=="
       },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "6.0.0",
+        "contentHash": "lcyUiXTsETK2ALsZrX+nWuHSIQeazhqPphLfaRxzdGaG93+0kELqpgEHtwWOlQe7+jSFnKwaCAgL4kjeZCQJnw=="
+      },
       "System.Management": {
         "type": "Transitive",
         "resolved": "9.0.11",
@@ -528,6 +541,7 @@
           "Avalonia.Diagnostics": "[11.3.6, )",
           "Avalonia.Fonts.Inter": "[11.3.6, )",
           "Avalonia.Themes.Fluent": "[11.3.6, )",
+          "Castle.Core": "[5.2.1, )",
           "CommunityToolkit.Mvvm": "[8.*, )",
           "DuplicateFileFinderLib": "[1.0.0, )",
           "JetBrains.Annotations": "[2025.2.2, )",

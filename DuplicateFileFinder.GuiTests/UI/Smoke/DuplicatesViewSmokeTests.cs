@@ -4,7 +4,7 @@ using Avalonia.Controls;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
-using DuplicateFileFinder.GuiTests.Ui.Fakes;
+using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using Xunit;
 
@@ -18,11 +18,13 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
     {
         await ui.RunOnUiThreadAsync(() =>
         {
-            var host = new FakeRepoHost();
+            var repo = new FakeRepo([]);
+            var host = new FakeRepoHost(repo);
             var scan = new FakeScanCoordinator();
             var dialogs = new FakeDialogService();
+            var deleter = new FakeFileSystemDeleteService();
 
-            var vm = new DuplicatesViewModel(host, scan, dialogs);
+            var vm = new DuplicatesViewModel(host, scan, dialogs, deleter);
 
             var view = new DuplicatesView
             {

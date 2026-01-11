@@ -4,7 +4,7 @@ using Avalonia.Controls;
 
 using DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
-using DuplicateFileFinder.GuiTests.Ui.Fakes;
+using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using DuplicateFileFinderLib.Core;
 

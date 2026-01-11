@@ -1,6 +1,7 @@
 // ViewModels/DuplicatesViewModel.cs
 
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
@@ -13,6 +14,7 @@ using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
@@ -22,18 +24,30 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
 
+    private readonly IFileDirReadModel _fileDirIndex;
+    private readonly IDialogService _dialogs;
+    private readonly IFileSystemDeleteService _deleter;
+
+
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
 
-    public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
+    public DuplicatesViewModel(
+        IRepoHost host,
+        IScanCoordinator scanner,
+        IDialogService dialogService,
+        IFileSystemDeleteService deleter)
     {
         ArgumentNullException.ThrowIfNull(host);
 
+        _fileDirIndex = host.FileDirIndex;
+        _dialogs = dialogService;
+        _deleter = deleter;
         _repo = host.Repo;
         var hashIndexService = host.HashIndex;
 
         // folder view
-        var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService);
+        var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService, deleter);
         ScanRootsTree = new ScanRootsTreeViewModel(treeBuilder);
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
@@ -49,7 +63,7 @@ public partial class DuplicatesViewModel : ObservableObject
                 OnTreeMapSelectionChanged();
         };
 
-        TreeMapActions = new TreeMapActionsViewModel(scanner);
+        TreeMapActions = new TreeMapActionsViewModel(host, scanner, dialogService, deleter);
 
         _duplicates = new DuplicatesController(host, hashIndexService);
         _duplicates.PropertyChanged += (_, e) =>
@@ -210,4 +224,65 @@ public partial class DuplicatesViewModel : ObservableObject
         OnPropertyChanged(nameof(FilteredSets));
     }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
+    private FileItem? _selectedDuplicateFile;
+
+    private bool CanDeleteSelectedDuplicateFile() => SelectedDuplicateFile is not null;
+
+    [RelayCommand(CanExecute = nameof(CanDeleteSelectedDuplicateFile))]
+    private Task DeleteSelectedDuplicateFileAsync()
+        => DeleteDuplicateFileAsync(SelectedDuplicateFile);
+
+    private async Task DeleteDuplicateFileAsync(FileItem? item)
+    {
+        if (item is null)
+            return;
+
+        var fullPath = item.Value.FullPath;
+        if (string.IsNullOrWhiteSpace(fullPath))
+            return;
+
+        // Confirm
+        var ok = await _dialogs.ShowConfirmationAsync(
+            title: "Delete file",
+            message: $"Delete this file from disk?\n\n{fullPath}",
+            okText: "Delete",
+            cancelText: "Cancel");
+
+        if (!ok)
+            return;
+
+        // Delete from disk first
+        var (deleted, deleteErr) = await _deleter.DeleteFileAsync(fullPath);
+        if (!deleted)
+        {
+            await _dialogs.ShowErrorAsync(
+                title: "Delete failed",
+                message: deleteErr ?? "Unknown error.");
+            return;
+        }
+
+        // Now delete from repo using an opaque handle resolved via the index.
+        if (!_fileDirIndex.TryGetFile(item.Value.Id, out var fileHandle))
+        {
+            await _dialogs.ShowErrorAsync(
+                title: "Delete error",
+                message: "Deleted file from disk, but could not resolve the file handle in the index. " +
+                         "The repository may still show the file until the next rescan/rebuild.");
+            return;
+        }
+
+        var repoResult = await _repo.DeleteFileAsync(fileHandle);
+        if (!repoResult.Success)
+        {
+            await _dialogs.ShowErrorAsync(
+                title: "Delete error",
+                message: $"Deleted file from disk, but deleting entry from repository failed: {repoResult.Error}");
+            return;
+        }
+
+        if (Equals(SelectedDuplicateFile, item))
+            SelectedDuplicateFile = null;
+    }
 }

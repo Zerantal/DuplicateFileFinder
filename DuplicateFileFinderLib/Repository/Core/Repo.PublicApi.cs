@@ -467,4 +467,164 @@ public sealed partial class Repo
 
         return repo;
     }
+
+    public async Task<DeleteResult> DeleteFileAsync(FileHandle file, CancellationToken ct = default)
+    {
+        if (!file.IsValid)
+            return DeleteResult.Fail(_meta.Generation, file.ScanRootId, "Invalid file handle.");
+
+        // Snapshot copy-out under lock (avoid mutating in-place)
+        ScanRootSnapshotV2 snap;
+        lock (_sync)
+        {
+            if (!_scanRootSnapshots.TryGetValue(file.ScanRootId, out snap))
+                return DeleteResult.Fail(_meta.Generation, file.ScanRootId, "Scan root snapshot not loaded.");
+
+            if ((uint)file.Index >= (uint)snap.Files.Length)
+                return DeleteResult.Fail(_meta.Generation, file.ScanRootId, "File handle index out of range.");
+        }
+
+        // Idempotent: already deleted/none => succeed, no-op
+        var existing = snap.Files[file.Index];
+        if (existing.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+            return DeleteResult.Ok(_meta.Generation, file.ScanRootId, deletedFiles: 0, deletedDirs: 0);
+
+        // Clone files array and mark deleted
+        var newFiles = (FileRecordV2[])snap.Files.Clone();
+        newFiles[file.Index] = existing with { Status = ScanEntryStatus.Deleted };
+
+        var updated = snap with { Files = newFiles };
+
+        // Commit + publish ScanRootSnapshotCommittedEvent (full rebuild)
+        await CommitScanRootSnapshotV2Async(updated, ct).ConfigureAwait(false);
+
+        long gen;
+        lock (_sync) gen = _meta.Generation;
+
+        return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
+    }
+
+    public async Task<DeleteResult> DeleteDirAsync(DirHandle dir, CancellationToken ct = default)
+    {
+        if (!dir.IsValid)
+            return DeleteResult.Fail(_meta.Generation, dir.ScanRootId, "Invalid dir handle.");
+
+        ScanRootSnapshotV2 snap;
+        lock (_sync)
+        {
+            if (!_scanRootSnapshots.TryGetValue(dir.ScanRootId, out snap))
+                return DeleteResult.Fail(_meta.Generation, dir.ScanRootId, "Scan root snapshot not loaded.");
+
+            if ((uint)dir.Index >= (uint)snap.Dirs.Length)
+                return DeleteResult.Fail(_meta.Generation, dir.ScanRootId, "Dir handle index out of range.");
+        }
+
+        var rootRec = snap.Dirs[dir.Index];
+        if (rootRec.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+            return DeleteResult.Ok(_meta.Generation, dir.ScanRootId, deletedFiles: 0, deletedDirs: 0);
+
+        // Compute subtree dirIds (including root)
+        var subtreeDirIds = CollectDirSubtreeIds(snap.Dirs, rootRec.DirId, ct);
+
+        // Clone arrays and mark deleted
+        var newDirs = (DirRecordV2[])snap.Dirs.Clone();
+        var newFiles = (FileRecordV2[])snap.Files.Clone();
+
+        int deletedDirs = 0;
+        int deletedFiles = 0;
+
+        // Mark dirs
+        // We must scan array because we only have dirId set; snapshot is "array-of-records"
+        for (int i = 0; i < newDirs.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var d = newDirs[i];
+            if (d.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                continue;
+
+            if (!subtreeDirIds.Contains(d.DirId))
+                continue;
+
+            newDirs[i] = d with { Status = ScanEntryStatus.Deleted };
+            deletedDirs++;
+        }
+
+        // Mark files whose DirId is in subtree
+        for (int i = 0; i < newFiles.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var f = newFiles[i];
+            if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                continue;
+
+            if (!subtreeDirIds.Contains(f.DirId))
+                continue;
+
+            newFiles[i] = f with { Status = ScanEntryStatus.Deleted };
+            deletedFiles++;
+        }
+
+        var updated = snap with { Dirs = newDirs, Files = newFiles };
+
+        await CommitScanRootSnapshotV2Async(updated, ct).ConfigureAwait(false);
+
+        long gen;
+        lock (_sync) gen = _meta.Generation;
+
+        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles, deletedDirs);
+    }
+
+    private static HashSet<long> CollectDirSubtreeIds(DirRecordV2[] dirs, long rootDirId, CancellationToken ct)
+    {
+        // Build parentDirId -> children dirIds adjacency from live dirs
+        var children = new Dictionary<long, List<long>>(capacity: Math.Max(16, dirs.Length / 4));
+
+        for (int i = 0; i < dirs.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var d = dirs[i];
+            if (d.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                continue;
+
+            // ParentDirId == -1 means root sentinel
+            if (d.ParentDirId < 0)
+                continue;
+
+            if (!children.TryGetValue(d.ParentDirId, out var list))
+            {
+                list = new List<long>(4);
+                children[d.ParentDirId] = list;
+            }
+
+            list.Add(d.DirId);
+        }
+
+        // BFS
+        var visited = new HashSet<long>();
+        var q = new Queue<long>();
+
+        visited.Add(rootDirId);
+        q.Enqueue(rootDirId);
+
+        while (q.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var cur = q.Dequeue();
+            if (!children.TryGetValue(cur, out var kids))
+                continue;
+
+            for (int i = 0; i < kids.Count; i++)
+            {
+                var child = kids[i];
+                if (visited.Add(child))
+                    q.Enqueue(child);
+            }
+        }
+
+        return visited;
+    }
 }

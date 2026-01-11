@@ -13,10 +13,14 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 
 /// <summary>
-/// Builds a scan-root directory tree (WinDirStat-like), with aggregate stats pulled from TreeIndex stats.
+/// Builds a scan-root directory tree, with aggregate stats pulled from TreeIndex stats.
 /// Supports lazy materialization and navigation by ancestry expansion.
 /// </summary>
-public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
+public sealed class ScanRootsTreeBuilder(
+    IRepoHost host,
+    IScanCoordinator scanner,
+    IDialogService dialogService,
+    IFileSystemDeleteService deleter)
 {
     private readonly Dictionary<DirHandle, FolderNodeViewModel> _nodesByDirHandle = new();
 
@@ -25,6 +29,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
     private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
     private readonly IScanCoordinator _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
     private readonly IDialogService _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+    private readonly IFileSystemDeleteService _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
 
     private RepoSnapshotView? _snapshot;
 
@@ -213,6 +218,8 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
             fullPath: fullPath,
             scanCoordinator: _scanner,
             dialogs: _dialogs,
+            deleter: _deleter,
+            repo: _repo,
             scanRootId: scanRootId)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded
@@ -246,6 +253,8 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
             fullPath: fullPath,
             scanCoordinator: _scanner,
             dialogs: _dialogs,
+            deleter: _deleter,
+            repo: _repo,
             scanRootId: scanRootId)
         {
             HasCheckpoint = hasCheckpoint,
@@ -283,6 +292,8 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host, IScanCoordinator scanne
             fullPath: fullPath,
             scanCoordinator: _scanner,
             dialogs: _dialogs,
+            deleter: _deleter,
+            repo: _repo,
             scanRootId: scanRootId)
         {
             EnsureChildrenLoaded = EnsureChildrenLoaded

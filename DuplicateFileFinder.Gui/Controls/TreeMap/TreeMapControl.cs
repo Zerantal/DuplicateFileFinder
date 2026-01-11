@@ -45,9 +45,6 @@ public sealed class TreeMapControl : Control
 
     // ----------------- Styled properties -----------------
 
-    public static readonly StyledProperty<ITreeMapNodeElement?> CurrentNodeUnderPointerProperty =
-        AvaloniaProperty.Register<TreeMapControl, ITreeMapNodeElement?>(nameof(CurrentNodeUnderPointer));
-
     public static readonly StyledProperty<TreeMapNode<ITreeMapNodeElement>?> RootProperty =
         AvaloniaProperty.Register<TreeMapControl, TreeMapNode<ITreeMapNodeElement>?>(nameof(Root));
 
@@ -132,12 +129,6 @@ public sealed class TreeMapControl : Control
     }
 
     // -------- CLR wrappers --------
-
-    public ITreeMapNodeElement? CurrentNodeUnderPointer
-    {
-        get => GetValue(CurrentNodeUnderPointerProperty);
-        private set => SetValue(CurrentNodeUnderPointerProperty, value);
-    }
 
     public TreeMapNode<ITreeMapNodeElement>? Root
     {
@@ -567,16 +558,25 @@ public sealed class TreeMapControl : Control
                 return;
 
             var p = e.GetPosition(this);
-
             var hit = HitTestNode(p);
             if (hit is null)
                 return;
 
+            var props = e.GetCurrentPoint(this).Properties;
+            var isRight = props.IsRightButtonPressed;
+            var isLeft = props.IsLeftButtonPressed;
+
+            // Only react to primary buttons
+            if (!isLeft && !isRight)
+                return;
+
+            // Select the hit node before any context menu opens.
             if (!ReferenceEquals(SelectedNode, hit))
-            {
                 SelectedNode = hit;
+
+            // If right-click: do NOT mark handled, so context menu can open normally.
+            if (isLeft)
                 e.Handled = true;
-            }
 
             // remove tooltip and re-arm it.
             _currentNodeUnderPointer = null;
@@ -904,8 +904,6 @@ public sealed class TreeMapControl : Control
             return;
         }
 
-        CurrentNodeUnderPointer = hit.Element;
-
         if (!ReferenceEquals(_currentNodeUnderPointer, hit.Element))
         {
             _currentNodeUnderPointer = hit.Element;
@@ -924,8 +922,6 @@ public sealed class TreeMapControl : Control
             _currentNodeUnderPointer = null;
             ToolTip.SetTip(this, null);
         }
-
-        CurrentNodeUnderPointer = null;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
