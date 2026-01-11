@@ -77,7 +77,7 @@ public sealed class TreeMapActionsViewModelTests
         var deleter = new FakeFileSystemDeleteService();
 
         var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter)
-            { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42) };
+        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42) };
 
         await vm.RescanSelectedFolderCommand.ExecuteAsync(null);
 

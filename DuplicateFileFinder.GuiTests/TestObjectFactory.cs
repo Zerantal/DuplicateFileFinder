@@ -30,7 +30,8 @@ internal static class TestObjectFactory
             dialogs,
             deleter,
             repo,
-            scanRootId) { EnsureChildrenLoaded = ensureChildrenLoaded, Parent = parent };
+            scanRootId)
+        { EnsureChildrenLoaded = ensureChildrenLoaded, Parent = parent };
 
         return node;
     }

@@ -179,9 +179,11 @@ public sealed class FolderNodeViewModelTests
             null,
             null,
             null,
-            1) {
+            1)
+        {
             // Non-root: set parent
-            Parent = new FolderNodeViewModel(DirHandle.Invalid, "P", "/p", scanner, null, null, null, 1) };
+            Parent = new FolderNodeViewModel(DirHandle.Invalid, "P", "/p", scanner, null, null, null, 1)
+        };
 
         await node.RescanFolderCommand.ExecuteAsync(null);
 
@@ -375,7 +377,8 @@ public sealed class FolderNodeViewModelTests
             new FakeFileSystemDeleteService(),
             new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]),
             1,
-            true) { Parent = scanRoot };
+            true)
+        { Parent = scanRoot };
 
         Assert.False(dummy.IsScanRoot);
         Assert.False(dummy.CanDeleteFromDisk);

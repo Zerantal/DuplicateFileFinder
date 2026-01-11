@@ -37,7 +37,7 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
     {
         public IReadOnlyList<(long size, IReadOnlyList<FileHandle> list)>
             GetDuplicateGroups(int minDuplicates = 2, long minSize = 1) =>
-            new  List<(long size, IReadOnlyList<FileHandle> list)>();
+            new List<(long size, IReadOnlyList<FileHandle> list)>();
 
         public int TotalDuplicateFileCount { get; }
         public long TotalSpaceTakenByDuplicates { get; }
