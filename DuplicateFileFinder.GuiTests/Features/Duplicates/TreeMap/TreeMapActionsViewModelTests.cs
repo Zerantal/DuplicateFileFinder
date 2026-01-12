@@ -1,4 +1,4 @@
-// DuplicateFileFinder.GuiTests/Features/Duplicates/TreeMap/TreeMapActionsViewModelTests.cs
+// DuplicateFileFinder.GuiTests/Features/Controller/TreeMap/TreeMapActionsViewModelTests.cs
 using System;
 using System.Linq;
 using System.Threading.Tasks;

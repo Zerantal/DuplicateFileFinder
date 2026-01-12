@@ -11,6 +11,7 @@
   xmlns:models1="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
   xmlns:viewModels="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels"
   xmlns:scanRoots="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots"
+  xmlns:dupPane="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups"
   mc:Ignorable="d"
   x:DataType="viewModels:DuplicatesViewModel">
 
@@ -42,121 +43,8 @@
     <TabControl Grid.Row="2" x:Name="MainTabs">
 
       <!-- Tab 1: existing duplicates view -->
-      <TabItem Header="Duplicates">
-        <Grid RowDefinitions="2*,*">
-
-          <!-- RIGHT (top): duplicate sets (VIRTUALIZED via ItemsRepeater) -->
-          <Border Grid.Row="0"
-                  BorderBrush="Gray"
-                  BorderThickness="1">
-            <DockPanel>
-
-              <!-- Header row -->
-              <Border DockPanel.Dock="Top" Background="#333" Padding="4">
-                <Grid ColumnDefinitions="2*,80,140">
-                  <TextBlock Text="Name"
-                             Grid.Column="0"
-                             FontWeight="Bold"
-                             Foreground="White" />
-                  <TextBlock Text="Files"
-                             Grid.Column="1"
-                             FontWeight="Bold"
-                             HorizontalAlignment="Right"
-                             Foreground="White" />
-                  <TextBlock Text="Total Size"
-                             Grid.Column="2"
-                             FontWeight="Bold"
-                             HorizontalAlignment="Right"
-                             Foreground="White" />
-                </Grid>
-              </Border>
-
-              <!-- Virtualized rows -->
-              <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                            VerticalScrollBarVisibility="Auto"
-                            FontFamily="monospace">
-                <ItemsRepeater x:Name="DuplicateSetsRepeater"
-                               ItemsSource="{Binding FilteredSets}">
-                  <ItemsRepeater.Layout>
-                    <StackLayout Orientation="Vertical"
-                                 DisableVirtualization="False" />
-                  </ItemsRepeater.Layout>
-
-                  <ItemsRepeater.ItemTemplate>
-                    <DataTemplate x:DataType="models1:DuplicateSetRow" x:CompileBindings="True">
-                      <controls:SelectableBorder Padding="4,0"
-                                                 BorderBrush="#444"
-                                                 BorderThickness="0,0,0,1"
-                                                 IsSelected="{Binding IsSelected}"
-                                                 PointerPressed="OnDuplicateSetPointerPressed">
-
-                        <controls:SelectableBorder.Styles>
-                          <!-- default background -->
-                          <Style Selector="controls|SelectableBorder">
-                            <Setter Property="Background" Value="Transparent" />
-                          </Style>
-
-                          <!-- highlighted when selected -->
-                          <Style Selector="controls|SelectableBorder[IsSelected=True]">
-                            <Setter Property="Background" Value="#3D6FB3" />
-                          </Style>
-                        </controls:SelectableBorder.Styles>
-
-                        <Grid ColumnDefinitions="2*,80,140"
-                              Margin="0,0,16,0">
-                          <TextBlock Grid.Column="0"
-                                     Text="{Binding RepresentativeName}"
-                                     TextTrimming="CharacterEllipsis" />
-                          <TextBlock Grid.Column="1"
-                                     Text="{Binding Count}"
-                                     HorizontalAlignment="Right" />
-                          <TextBlock Grid.Column="2"
-                                     Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}"
-                                     HorizontalAlignment="Right" />
-                        </Grid>
-                      </controls:SelectableBorder>
-                    </DataTemplate>
-                  </ItemsRepeater.ItemTemplate>
-                </ItemsRepeater>
-              </ScrollViewer>
-
-            </DockPanel>
-          </Border>
-
-          <!-- RIGHT (bottom): files in selected set -->
-          <dgrid:DataGrid x:Name="DuplicateFilesGrid"
-                          Grid.Row="1"
-                          ItemsSource="{Binding SelectedItems}"
-                          SelectedItem="{Binding SelectedDuplicateFile, Mode=TwoWay}"
-                          IsReadOnly="True"
-                          AutoGenerateColumns="False"
-                          HeadersVisibility="Column"
-                          Margin="0,6,0,0"
-                          FontFamily="monospace">
-            <dgrid:DataGrid.KeyBindings>
-              <KeyBinding Gesture="Delete"
-                          Command="{Binding DeleteSelectedDuplicateFileCommand}" />
-            </dgrid:DataGrid.KeyBindings>
-
-            <dgrid:DataGrid.ContextMenu>
-              <ContextMenu>
-                <MenuItem Header="Delete"
-                          Command="{Binding DeleteSelectedDuplicateFileCommand}" />
-              </ContextMenu>
-            </dgrid:DataGrid.ContextMenu>
-            <dgrid:DataGrid.Columns>
-              <dgrid:DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-              <dgrid:DataGridTextColumn Header="Path" Binding="{Binding FullPath}" Width="3*" />
-              <dgrid:DataGridTextColumn Header="Size"
-                                        Binding="{Binding Size, Converter={StaticResource BytesToHuman}}"
-                                        Width="120" />
-              <dgrid:DataGridTextColumn Header="Modified"
-                                        Binding="{Binding Modified, StringFormat=g}"
-                                        Width="180" />
-            </dgrid:DataGrid.Columns>
-          </dgrid:DataGrid>
-
-        </Grid>
+      <TabItem Header="Controller">
+        <dupPane:DuplicateGroupsView DataContext="{Binding DuplicateGroups}" />
       </TabItem>
 
       <!-- Tab 2: TreeMap view (file-size based) -->

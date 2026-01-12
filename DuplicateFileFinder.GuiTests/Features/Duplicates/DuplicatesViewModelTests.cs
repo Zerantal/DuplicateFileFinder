@@ -1,4 +1,4 @@
-// DuplicateFileFinder.GuiTests/Features/Duplicates/DuplicatesViewModelTests.cs
+// DuplicateFileFinder.GuiTests/Features/Controller/DuplicatesViewModelTests.cs
 
 using System;
 using System.Threading.Tasks;

@@ -1,10 +1,15 @@
 // DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
+using System.Collections.ObjectModel;
+using System.Globalization;
+
 using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
@@ -14,13 +19,18 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 
 using NLog;
 
+using DuplicatesController = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups.DuplicatesController;
 using DuplicatesViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicatesViewModel;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 
+public sealed record StatusItem(string Key, string Value);
+
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IRepoHost _repoHost;
+
+    public ObservableCollection<StatusItem> StatusItems { get; } = new();
 
     private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
@@ -31,6 +41,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
     private bool _isScanning;
+
 
     public ToastHostViewModel ToastHost { get; }
 
@@ -49,6 +60,16 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         var deleter = new FileSystemDeleteService();
         Duplicates = new DuplicatesViewModel(host, scanCoordinator, dialogService, deleter);
+        Duplicates.DuplicateGroups.Controller.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(DuplicatesController.FilesScanned) ||
+                e.PropertyName is nameof(DuplicatesController.DuplicatesFound) ||
+                e.PropertyName is nameof(DuplicatesController.WastedBytes))
+            {
+                UpdateStatusItems();
+            }
+        };
+        UpdateStatusItems();
 
         _scanCoordinator.ScanCompleted += (_, e) =>
         {
@@ -71,6 +92,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             else
                 Dispatcher.UIThread.InvokeAsync(() => Duplicates.LoadFromRepo());
         };
+    }
+
+    private void UpdateStatusItems()
+    {
+        var c = Duplicates.DuplicateGroups.Controller;
+
+        var filesScanned = c.FilesScanned.ToString("N0");
+        var duplicatesFound = c.DuplicatesFound.ToString("N0");
+        var wastedBytes = c.WastedBytes;
+        var wastedBytesFormatted = (string?)BytesToHumanConverter.Instance.Convert(
+                wastedBytes, typeof(string), null, CultureInfo.CurrentUICulture) ?? $"{(long)wastedBytes:n0} bytes";
+
+        StatusItems.Add(new StatusItem("Files scanned", filesScanned));
+        StatusItems.Add(new StatusItem("Duplicates", duplicatesFound));
+        StatusItems.Add(new StatusItem("Space wasted", wastedBytesFormatted));
     }
 
     public DuplicatesViewModel Duplicates { get; set; }

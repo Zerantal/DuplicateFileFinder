@@ -43,20 +43,4 @@ public partial class DuplicatesView : UserControl
             };
         }
     }
-
-    [UsedImplicitly]
-    private void OnDuplicateSetPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is not DuplicatesViewModel vm)
-            return;
-
-        if (sender is not Control c)
-            return;
-
-        if (c.DataContext is not DuplicateSetRow row)
-            return;
-
-        vm.SelectedSet = row;
-    }
-
 }

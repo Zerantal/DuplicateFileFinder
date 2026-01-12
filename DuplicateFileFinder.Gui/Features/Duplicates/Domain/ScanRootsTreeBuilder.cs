@@ -1,4 +1,4 @@
-// DuplicateFileFinder.Gui/Features/Duplicates/Domain/ScanRootsTreeBuilder.cs
+// DuplicateFileFinder.Gui/Features/Controller/Domain/ScanRootsTreeBuilder.cs
 
 using System.Collections.ObjectModel;
 

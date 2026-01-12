@@ -1,4 +1,4 @@
-// DuplicateFileFinder.GuiTests/Features/Duplicates/ScanRootsTree/FolderNodeViewModelTests.cs
+// DuplicateFileFinder.GuiTests/Features/Controller/ScanRootsTree/FolderNodeViewModelTests.cs
 
 using System;
 using System.Threading.Tasks;

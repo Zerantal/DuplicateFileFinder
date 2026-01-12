@@ -10,36 +10,8 @@
   Title="Duplicate File Finder"
   mc:Ignorable="mc"
   xmlns:shellViews="clr-namespace:DuplicateFileFinder.Gui.Features.Shell.ViewModels"
-  xmlns:duplicatesModels="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
   xmlns:duplicatesViews="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views"
   xmlns:toastViews="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Toasts.Views">
-
-  <Window.Resources>
-
-    <!-- Cell templates -->
-    <DataTemplate x:Key="CellFileName" x:DataType="duplicatesModels:DuplicateFileModel">
-      <TextBlock Text="{Binding FileName}"
-                 TextTrimming="CharacterEllipsis"
-                 TextWrapping="NoWrap"
-                 ToolTip.Tip="{Binding FileName}" />
-    </DataTemplate>
-
-    <DataTemplate x:Key="CellFileSize" x:DataType="duplicatesModels:DuplicateFileModel">
-      <TextBlock TextAlignment="Right"
-                 HorizontalAlignment="Right"
-                 Text="{Binding FileSize, Converter={StaticResource BytesToHuman}}" />
-    </DataTemplate>
-
-    <DataTemplate x:Key="CellCreationDate" x:DataType="duplicatesModels:DuplicateFileModel">
-      <TextBlock Text="{Binding CreationDate, StringFormat=\{0:yyyy-MM-dd HH:mm\}}"
-                 TextWrapping="NoWrap" />
-    </DataTemplate>
-
-    <DataTemplate x:Key="CellFileGroup" x:DataType="duplicatesModels:DuplicateFileModel">
-      <TextBlock Text="{Binding FileGroup}"
-                 TextAlignment="Right" />
-    </DataTemplate>
-  </Window.Resources>
 
   <Grid>
     <!-- DockPanel; fills the remaining space -->
@@ -66,16 +38,23 @@
       <!-- Status area -->
       <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto, *" RowDefinitions="Auto,Auto" Margin="0,8,0,0">
         <!-- Metrics + operation -->
-        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
-          <TextBlock Text="Files scanned:" />
-          <TextBlock Text="{Binding Duplicates.FilesScanned, StringFormat='{}{0:N0}'}" />
+        <ItemsControl ItemsSource="{Binding StatusItems}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="16"/>
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
 
-          <TextBlock Text="Duplicates:" Margin="12,0,0,0" />
-          <TextBlock Text="{Binding Duplicates.DuplicatesFound, StringFormat='{}{0:N0}'}" />
-
-          <TextBlock Text="Space wasted:" Margin="12,0,0,0" />
-          <TextBlock Text="{Binding Duplicates.WastedBytes, Converter={StaticResource BytesToHuman}}" />
-        </StackPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{Binding Key}" />
+                <TextBlock Text=":" />
+                <TextBlock Text="{Binding Value}" FontWeight="Bold"/>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
       </Grid>
 
       <!-- Main content -->
