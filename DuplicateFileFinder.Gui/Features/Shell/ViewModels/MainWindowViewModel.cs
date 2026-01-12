@@ -1,8 +1,6 @@
 // DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Globalization;
 
 using Avalonia.Threading;
 
@@ -10,10 +8,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+using DuplicateFileFinder.Gui.Infrastructure.Status;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
@@ -22,8 +19,6 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using NLog;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
-
-public sealed record StatusItem(string Key, string Value);
 
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
@@ -34,9 +29,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IScanCoordinator _scanCoordinator;
     private readonly IToastService _toasts;
 
-    private readonly DisposableManager _disposer = new();
+    private readonly ObservableCollection<StatusItem> _statusItems = new();
+    public ReadOnlyObservableCollection<StatusItem> StatusItems { get; }
 
-    public ObservableCollection<StatusItem> StatusItems { get; } = new();
+    private readonly List<IStatusProvider> _statusProviders = new();
+    private readonly DisposableManager _disposer;
 
     public ToastHostViewModel ToastHost { get; }
 
@@ -52,7 +49,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IDialogService dialogService,
         ToastHostViewModel toastHost,
         IToastService toasts,
-        DuplicatesViewModel duplicates)
+        DuplicatesViewModel duplicates,
+        DisposableManager disposer)
     {
         _repoHost = host ?? throw new ArgumentNullException(nameof(host));
         _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
@@ -60,21 +58,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ToastHost = toastHost ?? throw new ArgumentNullException(nameof(toastHost));
         _toasts = toasts ?? throw new ArgumentNullException(nameof(toasts));
         Duplicates = duplicates ?? throw new ArgumentNullException(nameof(duplicates));
-
-        // Duplicates controller property changed -> status refresh
-        PropertyChangedEventHandler dupControllerChanged = (_, e) =>
-        {
-            if (e.PropertyName is nameof(DuplicateGroupsController.FilesScanned) ||
-                e.PropertyName is nameof(DuplicateGroupsController.DuplicatesFound) ||
-                e.PropertyName is nameof(DuplicateGroupsController.WastedBytes))
-            {
-                UpdateStatusItems();
-            }
-        };
-        Duplicates.DuplicateGroups.Controller.PropertyChanged += dupControllerChanged;
-        _disposer.Add(() => Duplicates.DuplicateGroups.Controller.PropertyChanged -= dupControllerChanged);
-
-        UpdateStatusItems();
+        _disposer =  disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         // Scan completed -> toast + IsScanning
         EventHandler<ScanCompletedEventArgs> scanCompleted = (_, e) =>
@@ -101,26 +85,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         };
         _repoHost.IndexesRebuilt += indexesRebuilt;
         _disposer.Add(() => _repoHost.IndexesRebuilt -= indexesRebuilt);
-    }
 
-    private void UpdateStatusItems()
-    {
-        StatusItems.Clear();
-
-        var c = Duplicates.DuplicateGroups.Controller;
-
-        var filesScanned = c.FilesScanned.ToString("N0");
-        var duplicatesFound = c.DuplicatesFound.ToString("N0");
-        var wastedBytes = c.WastedBytes;
-
-        var wastedBytesFormatted =
-            (string?)BytesToHumanConverter.Instance.Convert(
-                wastedBytes, typeof(string), null, CultureInfo.CurrentUICulture)
-            ?? $"{wastedBytes:n0} bytes";
-
-        StatusItems.Add(new StatusItem("Files scanned", filesScanned));
-        StatusItems.Add(new StatusItem("Duplicates", duplicatesFound));
-        StatusItems.Add(new StatusItem("Space wasted", wastedBytesFormatted));
+        StatusItems = new ReadOnlyObservableCollection<StatusItem>(_statusItems);
+        RegisterStatusProvider(duplicates.DuplicateGroups);
+        RebuildStatusItems();
     }
 
     public bool CanStartScan => !IsScanning && !(_scanCoordinator is { IsScanning: true });
@@ -177,6 +145,30 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         await _scanCoordinator.RunScanNewLocationWithDialogAsync(path);
     }
+
+    // ----------------------------- helper methods --------------
+    private void RegisterStatusProvider(IStatusProvider provider)
+    {
+        _statusProviders.Add(provider);
+
+        EventHandler handler = (_, _) => RebuildStatusItems();
+        provider.StatusChanged += handler;
+
+        _disposer.Add(() => provider.StatusChanged -= handler);
+    }
+
+    private void RebuildStatusItems()
+    {
+        _statusItems.Clear();
+
+        foreach (var p in _statusProviders)
+        {
+            foreach (var item in p.GetStatusItems())
+                _statusItems.Add(item);
+        }
+    }
+
+    // Dispose
 
     public async ValueTask DisposeAsync()
     {

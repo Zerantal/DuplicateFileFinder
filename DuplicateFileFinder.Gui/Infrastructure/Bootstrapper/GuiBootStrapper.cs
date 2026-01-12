@@ -7,6 +7,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 
@@ -26,6 +27,7 @@ public static class GuiBootstrapper
         // ---- Infrastructure services ----
         services.AddSingleton<IDialogService, DialogService>();
         services.AddSingleton<IFileSystemDeleteService, FileSystemDeleteService>();
+        services.AddSingleton<DisposableManager>();
 
         // ---- Scan engine + coordinator ----
         services.AddSingleton(_ => new DuplicateFileFinderLib.Core.DuplicateFileFinder(host));

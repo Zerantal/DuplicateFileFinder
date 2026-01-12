@@ -1,19 +1,22 @@
 // Features/Controller/ViewModels/Controller/DuplicateGroupsViewModel.cs
 
 using System.Collections.ObjectModel;
+using System.Globalization;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
+using DuplicateFileFinder.Gui.Infrastructure.Converters;
+using DuplicateFileFinder.Gui.Infrastructure.Status;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 
-public partial class DuplicateGroupsViewModel : ObservableObject
+public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvider
 {
     public DuplicateGroupsController Controller { get; }
     private readonly IDuplicateFileDeletionService _deleteService;
@@ -29,18 +32,26 @@ public partial class DuplicateGroupsViewModel : ObservableObject
         Controller = controller ?? throw new ArgumentNullException(nameof(controller));
         Controller.PropertyChanged += (_, e) =>
         {
-            // bubble up the things the view binds to
             if (e.PropertyName is nameof(Controller.FilteredSets))
                 OnPropertyChanged(nameof(FilteredSets));
 
             if (e.PropertyName is nameof(Controller.DuplicatesFound))
+            {
                 OnPropertyChanged(nameof(DuplicatesFound));
+                StatusChanged?.Invoke(this, EventArgs.Empty);
+            }
 
             if (e.PropertyName is nameof(Controller.FilesScanned))
+            {
                 OnPropertyChanged(nameof(FilesScanned));
+                StatusChanged?.Invoke(this, EventArgs.Empty);
+            }
 
             if (e.PropertyName is nameof(Controller.WastedBytes))
+            {
                 OnPropertyChanged(nameof(WastedBytes));
+                StatusChanged?.Invoke(this, EventArgs.Empty);
+            }
 
             if (e.PropertyName is nameof(Controller.SelectedSet))
             {
@@ -111,5 +122,24 @@ public partial class DuplicateGroupsViewModel : ObservableObject
 
         if (SelectedSet is { Items.Count: < 2 })
             SelectedSet = null;
+    }
+
+    public event EventHandler? StatusChanged;
+    public IReadOnlyList<StatusItem> GetStatusItems()
+    {
+        // Format here so MainWindowVM stays dumb.
+        return
+        [
+            new StatusItem("Files scanned", FilesScanned.ToString("N0", CultureInfo.CurrentUICulture)),
+            new StatusItem("Duplicates", DuplicatesFound.ToString("N0", CultureInfo.CurrentUICulture)),
+            new StatusItem("Space wasted", BytesToHuman(WastedBytes))
+        ];
+    }
+
+    private static string BytesToHuman(long bytes)
+    {
+        return (string?)BytesToHumanConverter.Instance.Convert(
+                   bytes, typeof(string), null, CultureInfo.CurrentUICulture)
+               ?? $"{bytes:n0} bytes";
     }
 }
