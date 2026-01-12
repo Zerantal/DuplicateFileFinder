@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
 
@@ -17,7 +16,7 @@ public partial class DuplicateGroupsView : UserControl
 
     private void OnDuplicateSetPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not DuplicateGroupsViewModel vm)
+        if (DataContext is not ViewModels.DuplicateGroups.DuplicateGroupsViewModel vm)
             return;
 
         if (sender is not Control c)

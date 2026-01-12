@@ -7,6 +7,11 @@ using Avalonia.Threading;
 using DuplicateFileFinder.Gui.Features.Shell.Views;
 using DuplicateFileFinder.Gui.Features.Splash.ViewModels;
 using DuplicateFileFinder.Gui.Features.Splash.Views;
+using DuplicateFileFinder.Gui.Infrastructure.Bootstrapper;
+
+using DuplicateFileFinderLib.Repository.Core;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using NLog;
 
@@ -62,7 +67,6 @@ public partial class App : Application
 
         try
         {
-            // Let the splash actually render first
             await Task.Yield();
 
             splashVm.Message = "Opening repository…";
@@ -70,24 +74,22 @@ public partial class App : Application
 
             var repoDir = Path.Combine(AppDir, "repo");
 
-            mainVm = await MainWindowViewModel.CreateMainWindowAsync(repoDir);
-            if (mainVm == null)
-                throw new InvalidOperationException("Failed to create MainWindowViewModel.");
+            // Open repo (async), then build container and resolve shell VM.
+            var host = await RepoHost.OpenAsync(repoDir);
+            var sp = GuiBootstrapper.BuildServiceProvider(host);
+
+            mainVm = sp.GetRequiredService<MainWindowViewModel>();
         }
         catch (Exception ex)
         {
-            // Show a friendly error on the splash window; you can add Retry/Exit buttons if you like
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 splashVm.Message = "Failed to open repository";
                 splashVm.SubMessage = ex.Message;
             });
-
-            // Don’t proceed to main window
             return;
         }
 
-        // Once repo is ready, create and show MainWindow, then close splash
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var mainWindow = new MainWindow

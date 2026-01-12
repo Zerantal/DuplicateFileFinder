@@ -1,12 +1,8 @@
 using Avalonia.Controls;
-using Avalonia.Input;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
-using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
-
-using JetBrains.Annotations;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Views;
 

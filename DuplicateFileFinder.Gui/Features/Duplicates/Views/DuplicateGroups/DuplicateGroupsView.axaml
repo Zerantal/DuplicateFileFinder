@@ -6,8 +6,9 @@
   xmlns:dgrid="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.DataGrid"
   xmlns:controls="clr-namespace:DuplicateFileFinder.Gui.Controls"
   xmlns:models="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Models"
-  xmlns:viewModels="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates"
-  x:DataType="viewModels:DuplicateGroupsViewModel">
+  xmlns:global="clr-namespace:"
+  xmlns:duplicateGroups="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups"
+  x:DataType="duplicateGroups:DuplicateGroupsViewModel">
 
   <Grid RowDefinitions="2*,*">
 

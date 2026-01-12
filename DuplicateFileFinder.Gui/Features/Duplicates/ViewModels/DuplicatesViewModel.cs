@@ -5,7 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
@@ -16,13 +16,11 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
-using DuplicatesController = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups.DuplicatesController;
-
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
-    private readonly DuplicatesController _duplicates;
+    private readonly DuplicatesController _controller;
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
 
@@ -33,7 +31,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
-    public DuplicateGroupsViewModel DuplicateGroups { get; }
+    public DuplicateGroups.DuplicateGroupsViewModel DuplicateGroups { get; }
 
     public DuplicatesViewModel(
         IRepoHost host,
@@ -50,7 +48,7 @@ public partial class DuplicatesViewModel : ObservableObject
         var hashIndexService = host.HashIndex;
 
         // Duplicate groups view
-        DuplicateGroups = new DuplicateGroupsViewModel(host, scanner, dialogService, deleter);
+        DuplicateGroups = new DuplicateGroups.DuplicateGroupsViewModel(host, dialogService, deleter);
 
         // folder view
         var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService, deleter);
@@ -71,7 +69,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
         TreeMapActions = new TreeMapActionsViewModel(host, scanner, dialogService, deleter);
 
-        _duplicates = new DuplicatesController(host, hashIndexService);
+        _controller = new DuplicatesController(host, hashIndexService);
 
         LoadFromRepo();
     }
@@ -98,7 +96,7 @@ public partial class DuplicatesViewModel : ObservableObject
         }
     }
 
-    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
+    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _controller.FilteredSets;
 
     // Expose treemap controller for binding
     public TreeMapController TreeMapController => _treeMap;
@@ -255,6 +253,6 @@ public partial class DuplicatesViewModel : ObservableObject
         if (Equals(SelectedDuplicateFile, item))
             SelectedDuplicateFile = null;
 
-        _duplicates.SelectedSet?.TryRemoveItemByFileId(item.Value.Id);
+        _controller.SelectedSet?.TryRemoveItemByFileId(item.Value.Id);
     }
 }

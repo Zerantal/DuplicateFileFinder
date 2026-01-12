@@ -209,14 +209,6 @@
           "Avalonia": "11.1.0"
         }
       },
-      "DynamicData": {
-        "type": "Transitive",
-        "resolved": "9.4.1",
-        "contentHash": "+SoDTbuzY9j0K+sZfRbbVpGjjylkVMhUQnw6qiPhxzYLBJlwxFpmunXSaNBtTxwC2C9d/XIp0kO7VhMAVuUt7w==",
-        "dependencies": {
-          "System.Reactive": "6.0.1"
-        }
-      },
       "HarfBuzzSharp": {
         "type": "Transitive",
         "resolved": "8.3.1.1",
@@ -299,6 +291,19 @@
         "resolved": "17.14.1",
         "contentHash": "pmTrhfFIoplzFVbhVwUquT+77CbGH+h4/3mBpdmIlYtBi9nAB+kKI6dN3A/nV4DFi3wLLx/BlHIPK+MkbQ6Tpg=="
       },
+      "Microsoft.Extensions.DependencyInjection": {
+        "type": "Transitive",
+        "resolved": "10.0.1",
+        "contentHash": "zerXV0GAR9LCSXoSIApbWn+Dq1/T+6vbXMHGduq1LoVQRHT0BXsGQEau0jeLUBUcsoF/NaUT8ADPu8b+eNcIyg==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.1"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.1",
+        "contentHash": "oIy8fQxxbUsSrrOvgBqlVgOeCtDmrcynnTG+FQufcUWBrwyPfwlUkCDB2vaiBeYPyT+20u9/HeuHeBf+H4F/8g=="
+      },
       "Microsoft.Testing.Extensions.Telemetry": {
         "type": "Transitive",
         "resolved": "1.9.1",
@@ -358,16 +363,6 @@
         "resolved": "5.5.1",
         "contentHash": "ZpLbXSi91tZJPjzNefE+3NugAkQtpWZpSLfZWJGcP1y8qMiXDKxW/nAQ+LYWo7GwH2iYsbKOdsLCK9S3BeRQxA=="
       },
-      "ReactiveUI": {
-        "type": "Transitive",
-        "resolved": "22.3.1",
-        "contentHash": "rCJ4PwXjpWZCKPXmq9N72chAO7L4EU9J14TlTO6ZI87kzrVHY+LSam8Kvkc6YctNbZA++ORiYuB/AOE8PqjrTg==",
-        "dependencies": {
-          "DynamicData": "9.4.1",
-          "Splat": "17.1.1",
-          "System.Reactive": "6.1.0"
-        }
-      },
       "SkiaSharp": {
         "type": "Transitive",
         "resolved": "2.88.9",
@@ -400,42 +395,6 @@
         "resolved": "2.88.9",
         "contentHash": "wb2kYgU7iy84nQLYZwMeJXixvK++GoIuECjU4ECaUKNuflyRlJKyiRhN1MAHswvlvzuvkrjRWlK0Za6+kYQK7w=="
       },
-      "Splat": {
-        "type": "Transitive",
-        "resolved": "17.1.1",
-        "contentHash": "WwSoJ6aPHlXwWS2jfUtKQIgzQQDSuE/iGbqEFRcM1DKVQelf+XSfnaur6oAqzECobuJLC9nqUMeDH19gU6JDag==",
-        "dependencies": {
-          "Splat.Builder": "17.1.1",
-          "Splat.Logging": "17.1.1",
-          "System.Reactive": "6.0.2"
-        }
-      },
-      "Splat.Builder": {
-        "type": "Transitive",
-        "resolved": "17.1.1",
-        "contentHash": "xlA5ErMwa/mg//uC5Ajv4ns3HbWXE0VJiyfupdsLfC+1HPf2MIUUk9ViYxwearB9nkZ+mAmteVD0keBhg/LYsQ==",
-        "dependencies": {
-          "Splat.Core": "17.1.1",
-          "System.Reactive": "6.0.2"
-        }
-      },
-      "Splat.Core": {
-        "type": "Transitive",
-        "resolved": "17.1.1",
-        "contentHash": "sRNcO9EcnrCMr2OF4IxD8gcHtIAfCi98GwVZEK9X294RQEBIsy7sHwy8fndlxLguIHvjDJMz85v+qd226pwdNw==",
-        "dependencies": {
-          "System.Reactive": "6.0.2"
-        }
-      },
-      "Splat.Logging": {
-        "type": "Transitive",
-        "resolved": "17.1.1",
-        "contentHash": "OSkQVj6/hYVHa0taPasaknuOLw4l8CH9oTFRNuFayDowhHtGg6+UQb2LeSJXV+EXRmUL2E/TFz2ucitnQyTXJQ==",
-        "dependencies": {
-          "Splat.Core": "17.1.1",
-          "System.Reactive": "6.0.2"
-        }
-      },
       "System.CodeDom": {
         "type": "Transitive",
         "resolved": "9.0.11",
@@ -453,11 +412,6 @@
         "dependencies": {
           "System.CodeDom": "9.0.11"
         }
-      },
-      "System.Reactive": {
-        "type": "Transitive",
-        "resolved": "6.1.0",
-        "contentHash": "M5cCC1ZMkZr9jbSQGTHnVkb5TDN67qWCV7AP8TAHdGkvDlu0puT5NzemESNn9+HkYIDpWpocP68/i+/ame2/2w=="
       },
       "Tmds.DBus.Protocol": {
         "type": "Transitive",
@@ -546,7 +500,7 @@
           "DuplicateFileFinderLib": "[1.0.0, )",
           "JetBrains.Annotations": "[2025.2.2, )",
           "MessageBox.Avalonia": "[3.2.0, )",
-          "ReactiveUI": "[22.3.1, )"
+          "Microsoft.Extensions.DependencyInjection": "[10.0.1, )"
         }
       },
       "duplicatefilefinderlib": {

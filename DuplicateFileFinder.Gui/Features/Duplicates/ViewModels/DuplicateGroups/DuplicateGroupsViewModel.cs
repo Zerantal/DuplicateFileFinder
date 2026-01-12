@@ -5,7 +5,6 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
@@ -14,11 +13,11 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 
 public partial class DuplicateGroupsViewModel : ObservableObject
 {
-    public DuplicateGroups.DuplicatesController Controller { get; }
+    public DuplicatesController Controller { get; }
     private readonly IRepo _repo;
     private readonly IFileDirReadModel _fileDirIndex;
     private readonly IDialogService _dialogs;
@@ -29,7 +28,6 @@ public partial class DuplicateGroupsViewModel : ObservableObject
 
     public DuplicateGroupsViewModel(
         IRepoHost host,
-        IScanCoordinator scanner,
         IDialogService dialogs,
         IFileSystemDeleteService deleter)
     {
@@ -38,23 +36,23 @@ public partial class DuplicateGroupsViewModel : ObservableObject
         _dialogs = dialogs;
         _deleter = deleter;
 
-        Controller = new DuplicateGroups.DuplicatesController(host, host.HashIndex);
+        Controller = new DuplicatesController(host, host.HashIndex);
         Controller.PropertyChanged += (_, e) =>
         {
             // bubble up the things the view binds to
-            if (e.PropertyName is nameof(DuplicateGroups.DuplicatesController.FilteredSets))
+            if (e.PropertyName is nameof(Controller.FilteredSets))
                 OnPropertyChanged(nameof(FilteredSets));
 
-            if (e.PropertyName is nameof(DuplicateGroups.DuplicatesController.DuplicatesFound))
+            if (e.PropertyName is nameof(Controller.DuplicatesFound))
                 OnPropertyChanged(nameof(DuplicatesFound));
 
-            if (e.PropertyName is nameof(DuplicateGroups.DuplicatesController.FilesScanned))
+            if (e.PropertyName is nameof(Controller.FilesScanned))
                 OnPropertyChanged(nameof(FilesScanned));
 
-            if (e.PropertyName is nameof(DuplicateGroups.DuplicatesController.WastedBytes))
+            if (e.PropertyName is nameof(Controller.WastedBytes))
                 OnPropertyChanged(nameof(WastedBytes));
 
-            if (e.PropertyName is nameof(DuplicateGroups.DuplicatesController.SelectedSet))
+            if (e.PropertyName is nameof(Controller.SelectedSet))
             {
                 OnPropertyChanged(nameof(SelectedSet));
                 OnPropertyChanged(nameof(SelectedItems));
@@ -87,7 +85,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject
                 return;
 
             Controller.SelectedSet = value;
-            OnPropertyChanged(nameof(SelectedSet));
+            OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedItems));
         }
     }
