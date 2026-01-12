@@ -1,8 +1,8 @@
-using ReactiveUI;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace DuplicateFileFinder.Gui.Features.Splash.ViewModels;
 
-public sealed class SplashViewModel : ReactiveObject
+public sealed class SplashViewModel : ObservableObject
 {
     private string _message = "Loading repository…";
     private string _subMessage = "Scanning existing data and applying migrations";
@@ -10,12 +10,12 @@ public sealed class SplashViewModel : ReactiveObject
     public string Message
     {
         get => _message;
-        set => this.RaiseAndSetIfChanged(ref _message, value);
+        set => SetProperty(ref _message, value);
     }
 
     public string SubMessage
     {
         get => _subMessage;
-        set => this.RaiseAndSetIfChanged(ref _subMessage, value);
+        set => SetProperty(ref _subMessage, value);
     }
 }

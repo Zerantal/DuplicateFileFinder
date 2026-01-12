@@ -58,7 +58,7 @@ public partial class DuplicatesViewModel : ObservableObject
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ScanRootsTreeViewModel.SelectedPath))
-                DuplicateGroups.SelectedFolderPrefix =ScanRootsTree.SelectedPath;
+                DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
         };
 
         // Treemap
