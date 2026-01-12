@@ -1,6 +1,7 @@
 // DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 
 using Avalonia.Threading;
@@ -14,6 +15,7 @@ using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 
@@ -25,12 +27,14 @@ public sealed record StatusItem(string Key, string Value);
 
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
+
     private readonly IRepoHost _repoHost;
     private readonly IDialogService _dialogService;
     private readonly IScanCoordinator _scanCoordinator;
     private readonly IToastService _toasts;
 
-    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
+    private readonly DisposableManager _disposer = new();
 
     public ObservableCollection<StatusItem> StatusItems { get; } = new();
 
@@ -57,7 +61,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _toasts = toasts ?? throw new ArgumentNullException(nameof(toasts));
         Duplicates = duplicates ?? throw new ArgumentNullException(nameof(duplicates));
 
-        Duplicates.DuplicateGroups.Controller.PropertyChanged += (_, e) =>
+        // Duplicates controller property changed -> status refresh
+        PropertyChangedEventHandler dupControllerChanged = (_, e) =>
         {
             if (e.PropertyName is nameof(DuplicateGroupsController.FilesScanned) ||
                 e.PropertyName is nameof(DuplicateGroupsController.DuplicatesFound) ||
@@ -66,12 +71,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 UpdateStatusItems();
             }
         };
+        Duplicates.DuplicateGroups.Controller.PropertyChanged += dupControllerChanged;
+        _disposer.Add(() => Duplicates.DuplicateGroups.Controller.PropertyChanged -= dupControllerChanged);
 
         UpdateStatusItems();
 
-        _scanCoordinator.ScanCompleted += (_, e) =>
+        // Scan completed -> toast + IsScanning
+        EventHandler<ScanCompletedEventArgs> scanCompleted = (_, e) =>
         {
-            // The scan body has finished; indexes may still be rebuilding asynchronously.
             IsScanning = false;
 
             if (e.Error is not null)
@@ -81,15 +88,19 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             else
                 _toasts.Show("Scan completed.", ToastKind.Success);
         };
+        _scanCoordinator.ScanCompleted += scanCompleted;
+        _disposer.Add(() => _scanCoordinator.ScanCompleted -= scanCompleted);
 
-        host.IndexesRebuilt += (_, _) =>
+        // Indexes rebuilt -> reload duplicates
+        EventHandler<RepoIndexesRebuiltEventArgs> indexesRebuilt = (_, _) =>
         {
-            // Only reload once the index plugins have processed the corresponding generation.
             if (Dispatcher.UIThread.CheckAccess())
                 Duplicates.LoadFromRepo();
             else
                 Dispatcher.UIThread.InvokeAsync(() => Duplicates.LoadFromRepo());
         };
+        _repoHost.IndexesRebuilt += indexesRebuilt;
+        _disposer.Add(() => _repoHost.IndexesRebuilt -= indexesRebuilt);
     }
 
     private void UpdateStatusItems()
@@ -167,5 +178,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         await _scanCoordinator.RunScanNewLocationWithDialogAsync(path);
     }
 
-    public async ValueTask DisposeAsync() => await _repoHost.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        _disposer.Dispose();
+        await _repoHost.DisposeAsync();
+    }
 }

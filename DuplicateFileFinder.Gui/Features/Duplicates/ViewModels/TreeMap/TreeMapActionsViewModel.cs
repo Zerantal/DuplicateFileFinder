@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -23,7 +24,8 @@ public partial class TreeMapActionsViewModel : ObservableObject
         IRepoHost host,
         IScanCoordinator scanner,
         IDialogService dialogs,
-        IFileSystemDeleteService deleter)
+        IFileSystemDeleteService deleter,
+        DisposableManager disposer)
     {
         _repo = host.Repo;
         _fileDir = host.FileDirIndex;
@@ -33,7 +35,9 @@ public partial class TreeMapActionsViewModel : ObservableObject
 
         RebuildScanRootPaths();
 
-        host.IndexesRebuilt += (_, _) => RebuildScanRootPaths();
+        EventHandler<RepoIndexesRebuiltEventArgs> handler = (_, _) => RebuildScanRootPaths();
+        host.IndexesRebuilt += handler;
+        disposer.Add(() => host.IndexesRebuilt -= handler);
     }
 
     private void RebuildScanRootPaths()

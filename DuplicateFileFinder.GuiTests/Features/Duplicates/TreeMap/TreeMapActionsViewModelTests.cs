@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -15,6 +16,8 @@ namespace DuplicateFileFinder.GuiTests.Features.Duplicates.TreeMap;
 
 public sealed class TreeMapActionsViewModelTests
 {
+    private readonly DisposableManager _disposer = new();
+
     [Fact]
     public void ContextTarget_UpdatesComputedProps_AndCanExecute()
     {
@@ -31,7 +34,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
 
-        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter);
+        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter, _disposer);
 
         Assert.False(vm.HasContextTarget);
         Assert.False(vm.IsContextDir);
@@ -76,7 +79,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
 
-        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter)
+        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter, _disposer)
         { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42) };
 
         await vm.RescanSelectedFolderCommand.ExecuteAsync(null);
@@ -102,7 +105,7 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService())
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService(), _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
         };
@@ -132,7 +135,7 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService())
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService(), _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) // scan root 1 not in map
         };
@@ -164,7 +167,8 @@ public sealed class TreeMapActionsViewModelTests
 
         var dialogs = new FakeDialogService { NextConfirmResult = false };
         var deleter = new FakeFileSystemDeleteService();
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter) { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
+            { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
@@ -193,7 +197,8 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextConfirmResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (false, "nope") };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter) { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
+            { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
@@ -223,7 +228,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextConfirmResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (true, null) };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter);
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
 
         var handle = new DirHandle(1, 10);
         vm.ContextTarget = NewDirElem(handle);
@@ -261,7 +266,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextConfirmResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter);
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
 
         var handle = new FileHandle(1, 7);
         vm.ContextTarget = NewFileElem(handle);
@@ -299,7 +304,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextConfirmResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter);
+        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
 
         // Update scan root path, notify
         repo.SetScanRoots([NewScanRoot(1, "/new", null, isDeleted: false)]);

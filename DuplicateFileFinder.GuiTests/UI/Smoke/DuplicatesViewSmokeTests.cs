@@ -11,6 +11,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using Xunit;
@@ -30,6 +31,7 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var scan = new FakeScanCoordinator();
             var dialogs = new FakeDialogService();
             var deleter = new FakeFileSystemDeleteService();
+            var disposer = new DisposableManager();
 
             // Assemble graph (DI-style)
             var dupController = new DuplicateGroupsController(host);
@@ -44,7 +46,7 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
                 Options = new TreeMapBuildOptions { MaxDepth = 8 }
             };
 
-            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, dialogs, deleter);
+            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, dialogs, deleter, disposer);
 
             var vm = new DuplicatesViewModel(
                 host,

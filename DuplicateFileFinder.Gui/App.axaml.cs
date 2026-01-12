@@ -23,6 +23,8 @@ public partial class App : Application
 {
     public static readonly string AppDir;
 
+    private ServiceProvider? _serviceProvider;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -76,9 +78,9 @@ public partial class App : Application
 
             // Open repo (async), then build container and resolve shell VM.
             var host = await RepoHost.OpenAsync(repoDir);
-            var sp = GuiBootstrapper.BuildServiceProvider(host);
+            _serviceProvider = GuiBootstrapper.BuildServiceProvider(host);
 
-            mainVm = sp.GetRequiredService<MainWindowViewModel>();
+            mainVm = _serviceProvider.GetRequiredService<MainWindowViewModel>();
         }
         catch (Exception ex)
         {
@@ -98,8 +100,20 @@ public partial class App : Application
             };
 
             desktop.MainWindow = mainWindow;
-            mainWindow.Show();
 
+            mainWindow.Closed += async (_, _) =>
+            {
+                // Ensure we only dispose once
+                var sp = _serviceProvider;
+                _serviceProvider = null;
+
+                if (sp is null)
+                    return;
+
+                await sp.DisposeAsync();
+            };
+
+            mainWindow.Show();
             splashWindow.Close();
         });
     }
