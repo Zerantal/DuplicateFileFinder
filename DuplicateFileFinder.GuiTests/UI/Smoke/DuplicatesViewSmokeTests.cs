@@ -1,9 +1,16 @@
+using System.Linq;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
+using Avalonia.VisualTree;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
+using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using Xunit;
@@ -24,21 +31,49 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var dialogs = new FakeDialogService();
             var deleter = new FakeFileSystemDeleteService();
 
-            var vm = new DuplicatesViewModel(host, scan, dialogs, deleter);
+            // Assemble graph (DI-style)
+            var dupController = new DuplicatesController(host);
+            var duplicateGroupsVm = new DuplicateGroupsViewModel(host, dialogs, deleter, dupController);
 
-            var view = new DuplicatesView
+            var scanRootsBuilder = new ScanRootsTreeBuilder(host, scan, dialogs, deleter);
+            var scanRootsVm = new ScanRootsTreeViewModel(scanRootsBuilder);
+
+            var treeMapController = new TreeMapController(host)
             {
-                DataContext = vm
+                Options = new TreeMapBuildOptions { MaxDepth = 8 }
             };
 
-            LayoutTestHelpers.DoLayout(view);
+            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, dialogs, deleter);
 
+            var vm = new DuplicatesViewModel(
+                host,
+                scanRootsVm,
+                treeMapController,
+                treeMapActionsVm,
+                duplicateGroupsVm);
+
+            var view = new DuplicatesView { DataContext = vm };
+
+            // Put in a TopLevel so templates/styles/materialization happen.
+            var window = new Window { Content = view };
+            LayoutTestHelpers.DoLayout(window);
+
+            // Controls that are directly in DuplicatesView
             Assert.NotNull(view.FindControl<Control>("ScanRootsHost"));
             Assert.NotNull(view.FindControl<Control>("ScanRootsTree"));
             Assert.NotNull(view.FindControl<Control>("MainTabs"));
-            Assert.NotNull(view.FindControl<Control>("DuplicateSetsRepeater"));
-            Assert.NotNull(view.FindControl<Control>("DuplicateFilesGrid"));
+
             Assert.NotNull(view.FindControl<Control>("TreeMap"));
+
+            // ---- DuplicateGroups controls: resolve the subview, then search within it ----
+            var groupsView = window.GetVisualDescendants()
+                .OfType<DuplicateGroupsView>()
+                .FirstOrDefault();
+
+            Assert.NotNull(groupsView);
+
+            Assert.NotNull(groupsView!.FindControl<Control>("DuplicateSetsRepeater"));
+            Assert.NotNull(groupsView.FindControl<Control>("DuplicateFilesGrid"));
         });
     }
 }

@@ -1,31 +1,21 @@
 // ViewModels/DuplicatesViewModel.cs
 
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
-using DuplicateFileFinder.Gui.Infrastructure.Services;
-using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
-    private readonly DuplicatesController _controller;
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
-
-    private readonly IFileDirReadModel _fileDirIndex;
-    private readonly IDialogService _dialogs;
-    private readonly IFileSystemDeleteService _deleter;
 
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
@@ -36,24 +26,16 @@ public partial class DuplicatesViewModel : ObservableObject
         ScanRootsTreeViewModel scanRootsTree,
         TreeMapController treeMapController,
         TreeMapActionsViewModel treeMapActions,
-        DuplicateGroupsViewModel duplicateGroups,
-        DuplicatesController duplicatesController,
-        IDialogService dialogService,
-        IFileSystemDeleteService deleter)
+        DuplicateGroupsViewModel duplicateGroups)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _repo = host.Repo;
-        _fileDirIndex = host.FileDirIndex;
-
-        _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
-        _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
 
         ScanRootsTree = scanRootsTree ?? throw new ArgumentNullException(nameof(scanRootsTree));
         _treeMap = treeMapController ?? throw new ArgumentNullException(nameof(treeMapController));
         TreeMapActions = treeMapActions ?? throw new ArgumentNullException(nameof(treeMapActions));
         DuplicateGroups = duplicateGroups ?? throw new ArgumentNullException(nameof(duplicateGroups));
-        _controller = duplicatesController ?? throw new ArgumentNullException(nameof(duplicatesController));
 
         // folder selection drives duplicate-filter prefix
         ScanRootsTree.PropertyChanged += (_, e) =>
@@ -93,8 +75,6 @@ public partial class DuplicatesViewModel : ObservableObject
                 Avalonia.Threading.DispatcherPriority.Background);
         }
     }
-
-    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _controller.FilteredSets;
 
     // Expose treemap controller for binding
     public TreeMapController TreeMapController => _treeMap;
@@ -186,71 +166,5 @@ public partial class DuplicatesViewModel : ObservableObject
         {
             _treeMap.Rebuild(snapshot);
         }
-
-        OnPropertyChanged(nameof(FilteredSets));
-    }
-
-    // NOTE: You have delete logic both here and in DuplicateGroupsViewModel.
-    // If the view no longer binds to this, delete this whole region.
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
-    private FileItem? _selectedDuplicateFile;
-
-    [RelayCommand]
-    public async Task DeleteSelectedDuplicateFileAsync()
-        => await DeleteDuplicateFileAsync(SelectedDuplicateFile);
-
-    private async Task DeleteDuplicateFileAsync(FileItem? item)
-    {
-        if (item is null)
-            return;
-
-        var fullPath = item.Value.FullPath;
-        if (string.IsNullOrWhiteSpace(fullPath))
-            return;
-
-        // Confirm
-        var ok = await _dialogs.ShowConfirmationAsync(
-            title: "Delete file",
-            message: $"Delete this file from disk?\n\n{fullPath}",
-            okText: "Delete",
-            cancelText: "Cancel");
-
-        if (!ok)
-            return;
-
-        // Delete from disk first
-        var (deleted, deleteErr) = await _deleter.DeleteFileAsync(fullPath);
-        if (!deleted)
-        {
-            await _dialogs.ShowErrorAsync(
-                title: "Delete failed",
-                message: deleteErr ?? "Unknown error.");
-            return;
-        }
-
-        // Now delete from repo using an opaque handle resolved via the index.
-        if (!_fileDirIndex.TryGetFile(item.Value.Id, out var fileHandle))
-        {
-            await _dialogs.ShowErrorAsync(
-                title: "Delete error",
-                message: "Deleted file from disk, but could not resolve the file handle in the index. " +
-                         "The repository may still show the file until the next rescan/rebuild.");
-            return;
-        }
-
-        var repoResult = await _repo.DeleteFileAsync(fileHandle);
-        if (!repoResult.Success)
-        {
-            await _dialogs.ShowErrorAsync(
-                title: "Delete error",
-                message: $"Deleted file from disk, but deleting entry from repository failed: {repoResult.Error}");
-            return;
-        }
-
-        if (Equals(SelectedDuplicateFile, item))
-            SelectedDuplicateFile = null;
-
-        _controller.SelectedSet?.TryRemoveItemByFileId(item.Value.Id);
     }
 }

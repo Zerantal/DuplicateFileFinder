@@ -1,20 +1,19 @@
-// DuplicateFileFinder.GuiTests/Features/Controller/DuplicatesViewModelTests.cs
+// DuplicateFileFinder.GuiTests/Features/Duplicates/DuplicateGroupsViewModelTests.cs
 
 using System;
 using System.Threading.Tasks;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
-
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 
 using Xunit;
 
-namespace DuplicateFileFinder.GuiTests.Features.Duplicates;
+namespace DuplicateFileFinder.GuiTests.Features.Duplicates.DuplicateGroups;
 
-public sealed class DuplicatesViewModelTests
+public sealed class DuplicateGroupsViewModelTests
 {
     [Fact]
     public void DeleteSelectedDuplicateFileCommand_CanExecute_DependsOnSelection()
@@ -97,7 +96,6 @@ public sealed class DuplicatesViewModelTests
         env.Dialogs.NextConfirmResult = true;
         env.Deleter.NextDeleteFileResult = (ok: true, error: null);
 
-        // TryGetFile fails => repo delete is NOT attempted.
         env.FileDir.TryGetFileImpl = (_, out h) =>
         {
             h = FileHandle.Invalid;
@@ -111,10 +109,8 @@ public sealed class DuplicatesViewModelTests
         Assert.Single(env.Dialogs.Confirmations);
         Assert.Single(env.Deleter.DeletedFiles);
 
-        // repo delete is NOT called if handle can't be resolved.
         Assert.Empty(env.Repo.DeletedFiles);
 
-        // shows a clear error explaining the repo may still show the file.
         var err = Assert.Single(env.Dialogs.Errors);
         Assert.Equal("Delete error", err.Title);
         Assert.Contains("could not resolve", err.Message, StringComparison.OrdinalIgnoreCase);
@@ -129,7 +125,6 @@ public sealed class DuplicatesViewModelTests
 
         var expectedHandle = new FileHandle(ScanRootId: 1, Index: 5);
 
-        // TryGetFile succeeds => repo delete is attempted with resolved handle.
         env.FileDir.TryGetFileImpl = (_, out h) =>
         {
             h = expectedHandle;
@@ -150,7 +145,6 @@ public sealed class DuplicatesViewModelTests
 
         Assert.Null(env.Vm.SelectedDuplicateFile);
     }
-
 
     // ---------------------------------------------------------------------
     // Test harness
@@ -176,18 +170,19 @@ public sealed class DuplicatesViewModelTests
 
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
-        var scanner = new FakeScanCoordinator();
 
-        var vm = new DuplicatesViewModel(host, scanner, dialogs, deleter);
+        // DuplicatesController requires HashIndex + FileDirIndex; host fake should provide HashIndex
+        var controller = new DuplicatesController(host);
+
+        var vm = new DuplicateGroupsViewModel(host, dialogs, deleter, controller);
 
         return new Sut(vm, repo, fileDir, dialogs, deleter);
     }
 
     private sealed record Sut(
-        DuplicatesViewModel Vm,
+        DuplicateGroupsViewModel Vm,
         FakeRepo Repo,
         FakeFileDirReadModel FileDir,
         FakeDialogService Dialogs,
         FakeFileSystemDeleteService Deleter);
-
 }
