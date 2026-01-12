@@ -5,37 +5,26 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
-using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 
 public partial class DuplicateGroupsViewModel : ObservableObject
 {
-    public DuplicatesController Controller { get; }
-    private readonly IRepo _repo;
-    private readonly IFileDirReadModel _fileDirIndex;
-    private readonly IDialogService _dialogs;
-    private readonly IFileSystemDeleteService _deleter;
+    public DuplicateGroupsController Controller { get; }
+    private readonly IDuplicateFileDeletionService _deleteService;
 
-    private static readonly ReadOnlyObservableCollection<FileItem> EmptyItems =
-        new(new ObservableCollection<FileItem>());
+    private static readonly ReadOnlyObservableCollection<FileItem> s_emptyItems = new([]);
 
     public DuplicateGroupsViewModel(
-        IRepoHost host,
-        IDialogService dialogs,
-        IFileSystemDeleteService deleter,
-        DuplicatesController controller)
+        DuplicateGroupsController controller,
+        IDuplicateFileDeletionService deleteService)
     {
-        _repo = host.Repo;
-        _fileDirIndex = host.FileDirIndex;
-        _dialogs = dialogs;
-        _deleter = deleter;
+        _deleteService = deleteService ?? throw new ArgumentNullException(nameof(deleteService));
 
         Controller = controller ?? throw new ArgumentNullException(nameof(controller));
         Controller.PropertyChanged += (_, e) =>
@@ -92,7 +81,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject
     }
 
     public ReadOnlyObservableCollection<FileItem> SelectedItems
-        => SelectedSet?.Items ?? EmptyItems;
+        => SelectedSet?.Items ?? s_emptyItems;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
@@ -104,49 +93,15 @@ public partial class DuplicateGroupsViewModel : ObservableObject
     private Task DeleteSelectedDuplicateFileAsync()
         => DeleteDuplicateFileAsync(SelectedDuplicateFile);
 
-    // This is your revised clearer version + optimistic UI update at the end
     private async Task DeleteDuplicateFileAsync(FileItem? item)
     {
         if (item is null)
             return;
 
-        var fullPath = item.Value.FullPath;
-        if (string.IsNullOrWhiteSpace(fullPath))
-            return;
+        var result = await _deleteService.DeleteAsync(item.Value.Id, item.Value.FullPath);
 
-        var ok = await _dialogs.ShowConfirmationAsync(
-            "Delete file",
-            $"Delete this file from disk?\n\n{fullPath}",
-            okText: "Delete",
-            cancelText: "Cancel");
-
-        if (!ok)
+        if (!result.Success)
             return;
-
-        var (deleted, deleteErr) = await _deleter.DeleteFileAsync(fullPath);
-        if (!deleted)
-        {
-            await _dialogs.ShowErrorAsync("Delete failed", deleteErr ?? "Unknown error.");
-            return;
-        }
-
-        if (!_fileDirIndex.TryGetFile(item.Value.Id, out var fileHandle))
-        {
-            await _dialogs.ShowErrorAsync(
-                "Delete error",
-                "Deleted file from disk, but could not resolve the file handle in the index. " +
-                "The repository may still show the file until the next rescan/rebuild.");
-            return;
-        }
-
-        var repoResult = await _repo.DeleteFileAsync(fileHandle);
-        if (!repoResult.Success)
-        {
-            await _dialogs.ShowErrorAsync(
-                "Delete error",
-                $"Deleted file from disk, but deleting entry from repository failed: {repoResult.Error}");
-            return;
-        }
 
         // optimistic: update selected set immediately
         SelectedSet?.TryRemoveItemByFileId(item.Value.Id);
@@ -154,8 +109,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject
         if (SelectedDuplicateFile.Equals(item))
             SelectedDuplicateFile = null;
 
-        // Optional: if the group is no longer a duplicate group, clear selection.
-        if (SelectedSet is { } set && set.Items.Count < 2)
+        if (SelectedSet is { Items.Count: < 2 })
             SelectedSet = null;
     }
 }

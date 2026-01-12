@@ -529,7 +529,7 @@ public sealed class FolderNodeViewModelTests
                 1)
         };
 
-        repo.ReturnErrorOn.Add("DeleteDirAsync");
+        repo.ReturnResultFor["DeleteDirAsync"] = DeleteResult.Fail(1, 1, "Boom!");
 
         await child.DeleteFromDiskCommand.ExecuteAsync(null);
 

@@ -19,8 +19,17 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
     private List<ScanRoot> _scanRoots = scanRoots?.ToList() ?? [];
     private readonly List<ScanRun> _scanRuns = [];
 
-    public HashSet<string> ReturnErrorOn { get; } = new();
-    private bool ShouldReturnError([CallerMemberName] string memberName = "") => ReturnErrorOn.Contains(memberName);
+    public Dictionary<string, object> ReturnResultFor { get; } = new();
+
+    private T? Result<T>(T? defaultValue = default, [CallerMemberName] string memberName = "")
+    {
+        if (!ReturnResultFor.TryGetValue(memberName, out var result))
+        {
+            return defaultValue;
+        }
+        return (T?) result;
+    }
+
 
 
     public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct) => throw new NotImplementedException();
@@ -47,16 +56,18 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
     Task<DeleteResult> IRepo.DeleteFileAsync(FileHandle file, CancellationToken ct)
     {
         DeletedFiles.Add(file);
-        return Task.FromResult(DeleteResult.Ok(1, 1, 1, 0));
+
+        return Task.FromResult(Result(
+            defaultValue: DeleteResult.Ok(1, 1, 1, 0)));
     }
 
     Task<DeleteResult> IRepo.DeleteDirAsync(DirHandle dir, CancellationToken ct)
     {
         DeletedDirs.Add(dir);
-        if (ShouldReturnError())
-            return Task.FromResult(DeleteResult.Fail(1, 1, "boom!"));
 
-        return Task.FromResult(DeleteResult.Ok(1, 1, 0, 1));
+        return Task.FromResult(Result(
+            defaultValue: DeleteResult.Ok(1, 1, 0, 1)));
+
     }
 
     public readonly List<FileHandle> DeletedFiles = [];

@@ -1,4 +1,4 @@
-// Features/Controller/ViewModels/Controller/DuplicatesController.cs
+// Features/Controller/ViewModels/Controller/DuplicateGroupsController.cs
 
 using System.Collections.ObjectModel;
 
@@ -14,7 +14,7 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 
-public partial class DuplicatesController : ObservableObject
+public partial class DuplicateGroupsController : ObservableObject
 {
     private readonly IRepo _repo;
     private readonly IHashIndexReadModel _hashIndex;
@@ -38,7 +38,7 @@ public partial class DuplicatesController : ObservableObject
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
 
-    public DuplicatesController(IRepoHost repoHost)
+    public DuplicateGroupsController(IRepoHost repoHost)
     {
         _repo = repoHost.Repo ?? throw new ArgumentNullException(nameof(repoHost));
         _mainIndex = repoHost.FileDirIndex;

@@ -32,8 +32,9 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var deleter = new FakeFileSystemDeleteService();
 
             // Assemble graph (DI-style)
-            var dupController = new DuplicatesController(host);
-            var duplicateGroupsVm = new DuplicateGroupsViewModel(host, dialogs, deleter, dupController);
+            var dupController = new DuplicateGroupsController(host);
+            var fakeDeletionService = new FakeDuplicateFileDeletionService();
+            var duplicateGroupsVm = new DuplicateGroupsViewModel(dupController, fakeDeletionService);
 
             var scanRootsBuilder = new ScanRootsTreeBuilder(host, scan, dialogs, deleter);
             var scanRootsVm = new ScanRootsTreeViewModel(scanRootsBuilder);
@@ -72,7 +73,7 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
 
             Assert.NotNull(groupsView);
 
-            Assert.NotNull(groupsView!.FindControl<Control>("DuplicateSetsRepeater"));
+            Assert.NotNull(groupsView.FindControl<Control>("DuplicateSetsRepeater"));
             Assert.NotNull(groupsView.FindControl<Control>("DuplicateFilesGrid"));
         });
     }

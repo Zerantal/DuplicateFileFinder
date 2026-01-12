@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
@@ -17,8 +18,6 @@ using DuplicateFileFinder.Gui.Infrastructure.Toasts;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 using NLog;
-
-using DuplicatesController = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups.DuplicatesController;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 
@@ -60,9 +59,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         Duplicates.DuplicateGroups.Controller.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(DuplicatesController.FilesScanned) ||
-                e.PropertyName is nameof(DuplicatesController.DuplicatesFound) ||
-                e.PropertyName is nameof(DuplicatesController.WastedBytes))
+            if (e.PropertyName is nameof(DuplicateGroupsController.FilesScanned) ||
+                e.PropertyName is nameof(DuplicateGroupsController.DuplicatesFound) ||
+                e.PropertyName is nameof(DuplicateGroupsController.WastedBytes))
             {
                 UpdateStatusItems();
             }

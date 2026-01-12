@@ -1,3 +1,4 @@
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
@@ -42,9 +43,12 @@ public static class GuiBootstrapper
                 defaultDuration: TimeSpan.FromSeconds(3),
                 maxVisible: 4));
 
+        // Application
+        services.AddSingleton<IDuplicateFileDeletionService, DuplicateFileDeletionService>();
+
         // Duplicate groups
         services.AddSingleton<DuplicateGroupsViewModel>();
-        services.AddSingleton<DuplicatesController>();
+        services.AddSingleton<DuplicateGroupsController>();
 
         // Scan roots tree + builder
         services.AddSingleton<ScanRootsTreeBuilder>();
