@@ -29,14 +29,15 @@ public partial class DuplicateGroupsViewModel : ObservableObject
     public DuplicateGroupsViewModel(
         IRepoHost host,
         IDialogService dialogs,
-        IFileSystemDeleteService deleter)
+        IFileSystemDeleteService deleter,
+        DuplicatesController controller)
     {
         _repo = host.Repo;
         _fileDirIndex = host.FileDirIndex;
         _dialogs = dialogs;
         _deleter = deleter;
 
-        Controller = new DuplicatesController(host, host.HashIndex);
+        Controller = controller ?? throw new ArgumentNullException(nameof(controller));
         Controller.PropertyChanged += (_, e) =>
         {
             // bubble up the things the view binds to

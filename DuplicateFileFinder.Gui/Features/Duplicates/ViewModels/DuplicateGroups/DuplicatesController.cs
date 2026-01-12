@@ -38,11 +38,11 @@ public partial class DuplicatesController : ObservableObject
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
 
-    public DuplicatesController(IRepoHost repoHost, IHashIndexReadModel hashIndex)
+    public DuplicatesController(IRepoHost repoHost)
     {
         _repo = repoHost.Repo ?? throw new ArgumentNullException(nameof(repoHost));
         _mainIndex = repoHost.FileDirIndex;
-        _hashIndex = hashIndex ?? throw new ArgumentNullException(nameof(hashIndex));
+        _hashIndex = repoHost.HashIndex;
     }
 
     /// <summary>Optional path prefix filter (full path string, case-insensitive).</summary>

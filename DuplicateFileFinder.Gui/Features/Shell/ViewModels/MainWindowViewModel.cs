@@ -106,7 +106,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         var wastedBytesFormatted =
             (string?)BytesToHumanConverter.Instance.Convert(
                 wastedBytes, typeof(string), null, CultureInfo.CurrentUICulture)
-            ?? $"{(long)wastedBytes:n0} bytes";
+            ?? $"{wastedBytes:n0} bytes";
 
         StatusItems.Add(new StatusItem("Files scanned", filesScanned));
         StatusItems.Add(new StatusItem("Duplicates", duplicatesFound));

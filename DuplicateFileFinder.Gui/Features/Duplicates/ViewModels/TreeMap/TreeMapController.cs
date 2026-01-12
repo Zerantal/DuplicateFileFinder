@@ -26,7 +26,7 @@ public partial class TreeMapController : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        _repo = host.Repo;
+        _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
         _treeIndex = host.TreeIndex;
         _fileDirIndex = host.FileDirIndex;
     }

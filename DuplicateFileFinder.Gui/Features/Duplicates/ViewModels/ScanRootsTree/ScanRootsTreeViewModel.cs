@@ -40,7 +40,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     public ScanRootsTreeViewModel(ScanRootsTreeBuilder builder)
     {
-        _builder = builder;
+        _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
     }
 

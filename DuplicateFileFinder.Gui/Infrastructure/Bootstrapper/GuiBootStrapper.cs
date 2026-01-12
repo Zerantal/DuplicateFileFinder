@@ -1,4 +1,8 @@
+using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
@@ -37,6 +41,26 @@ public static class GuiBootstrapper
                 sp.GetRequiredService<ToastHostViewModel>(),
                 defaultDuration: TimeSpan.FromSeconds(3),
                 maxVisible: 4));
+
+        // Duplicate groups
+        services.AddSingleton<DuplicateGroupsViewModel>();
+        services.AddSingleton<DuplicatesController>();
+
+        // Scan roots tree + builder
+        services.AddSingleton<ScanRootsTreeBuilder>();
+        services.AddSingleton<ScanRootsTreeViewModel>();
+
+        // Tree map + actions (+ builder if you have one)
+        services.AddSingleton<TreeMapActionsViewModel>();
+        services.AddSingleton<TreeMapController>(sp =>
+        {
+            var h = sp.GetRequiredService<IRepoHost>();
+            var tm = new TreeMapController(h)
+            {
+                Options = new TreeMapBuildOptions { MaxDepth = 8 }
+            };
+            return tm;
+        });
 
         // ---- Feature VMs ----
         services.AddSingleton<DuplicatesViewModel>();

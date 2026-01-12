@@ -18,7 +18,7 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 /// </summary>
 public sealed class ScanRootsTreeBuilder(
     IRepoHost host,
-    IScanCoordinator scanner,
+    IScanCoordinator scanCoordinator,
     IDialogService dialogService,
     IFileSystemDeleteService deleter)
 {
@@ -27,7 +27,7 @@ public sealed class ScanRootsTreeBuilder(
     private readonly IRepo _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
     private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
-    private readonly IScanCoordinator _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+    private readonly IScanCoordinator _scanner = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
     private readonly IDialogService _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
     private readonly IFileSystemDeleteService _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
 

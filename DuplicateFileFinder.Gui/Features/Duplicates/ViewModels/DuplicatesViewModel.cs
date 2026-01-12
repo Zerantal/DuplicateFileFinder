@@ -3,7 +3,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
@@ -28,48 +27,47 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly IDialogService _dialogs;
     private readonly IFileSystemDeleteService _deleter;
 
-
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
-    public DuplicateGroups.DuplicateGroupsViewModel DuplicateGroups { get; }
+    public DuplicateGroupsViewModel DuplicateGroups { get; }
 
     public DuplicatesViewModel(
         IRepoHost host,
-        IScanCoordinator scanner,
+        ScanRootsTreeViewModel scanRootsTree,
+        TreeMapController treeMapController,
+        TreeMapActionsViewModel treeMapActions,
+        DuplicateGroupsViewModel duplicateGroups,
+        DuplicatesController duplicatesController,
         IDialogService dialogService,
         IFileSystemDeleteService deleter)
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        _fileDirIndex = host.FileDirIndex;
-        _dialogs = dialogService;
-        _deleter = deleter;
         _repo = host.Repo;
-        var hashIndexService = host.HashIndex;
+        _fileDirIndex = host.FileDirIndex;
 
-        // Duplicate groups view
-        DuplicateGroups = new DuplicateGroups.DuplicateGroupsViewModel(host, dialogService, deleter);
+        _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
 
-        // folder view
-        var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService, deleter);
-        ScanRootsTree = new ScanRootsTreeViewModel(treeBuilder);
+        ScanRootsTree = scanRootsTree ?? throw new ArgumentNullException(nameof(scanRootsTree));
+        _treeMap = treeMapController ?? throw new ArgumentNullException(nameof(treeMapController));
+        TreeMapActions = treeMapActions ?? throw new ArgumentNullException(nameof(treeMapActions));
+        DuplicateGroups = duplicateGroups ?? throw new ArgumentNullException(nameof(duplicateGroups));
+        _controller = duplicatesController ?? throw new ArgumentNullException(nameof(duplicatesController));
+
+        // folder selection drives duplicate-filter prefix
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ScanRootsTreeViewModel.SelectedPath))
                 DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
         };
 
-        // Treemap
-        _treeMap = new TreeMapController(host) { Options = new TreeMapBuildOptions { MaxDepth = 8 } };
+        // treemap selection drives navigation
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.SelectedNode))
                 OnTreeMapSelectionChanged();
         };
-
-        TreeMapActions = new TreeMapActionsViewModel(host, scanner, dialogService, deleter);
-
-        _controller = new DuplicatesController(host, hashIndexService);
 
         LoadFromRepo();
     }
@@ -192,15 +190,15 @@ public partial class DuplicatesViewModel : ObservableObject
         OnPropertyChanged(nameof(FilteredSets));
     }
 
+    // NOTE: You have delete logic both here and in DuplicateGroupsViewModel.
+    // If the view no longer binds to this, delete this whole region.
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
     private FileItem? _selectedDuplicateFile;
 
-    private bool CanDeleteSelectedDuplicateFile() => SelectedDuplicateFile is not null;
-
-    [RelayCommand(CanExecute = nameof(CanDeleteSelectedDuplicateFile))]
-    private Task DeleteSelectedDuplicateFileAsync()
-        => DeleteDuplicateFileAsync(SelectedDuplicateFile);
+    [RelayCommand]
+    public async Task DeleteSelectedDuplicateFileAsync()
+        => await DeleteDuplicateFileAsync(SelectedDuplicateFile);
 
     private async Task DeleteDuplicateFileAsync(FileItem? item)
     {
