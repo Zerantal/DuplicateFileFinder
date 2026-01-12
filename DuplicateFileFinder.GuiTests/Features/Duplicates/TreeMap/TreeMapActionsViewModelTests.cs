@@ -168,7 +168,7 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextConfirmResult = false };
         var deleter = new FakeFileSystemDeleteService();
         var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
-            { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
@@ -198,7 +198,7 @@ public sealed class TreeMapActionsViewModelTests
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (false, "nope") };
 
         var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
-            { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 

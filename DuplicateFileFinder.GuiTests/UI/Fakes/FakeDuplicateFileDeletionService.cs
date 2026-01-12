@@ -8,14 +8,14 @@ namespace DuplicateFileFinder.GuiTests.UI.Fakes;
 
 public sealed class FakeDuplicateFileDeletionService : IDuplicateFileDeletionService
 {
-        public DuplicateFileDeletionResult NextResult { get; set; } =
-            new(false, DuplicateFileDeletionFailure.CancelledByUser);
+    public DuplicateFileDeletionResult NextResult { get; set; } =
+        new(false, DuplicateFileDeletionFailure.CancelledByUser);
 
-        public List<(long FileId, string FullPath)> Calls { get; } = [];
+    public List<(long FileId, string FullPath)> Calls { get; } = [];
 
     public Task<DuplicateFileDeletionResult> DeleteAsync(long fileId, string fullPath, CancellationToken ct)
     {
-            Calls.Add((fileId, fullPath));
-            return Task.FromResult(NextResult);
+        Calls.Add((fileId, fullPath));
+        return Task.FromResult(NextResult);
     }
 }

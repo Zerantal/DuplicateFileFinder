@@ -27,7 +27,7 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
         {
             return defaultValue;
         }
-        return (T?) result;
+        return (T?)result;
     }
 
 
