@@ -58,7 +58,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ToastHost = toastHost ?? throw new ArgumentNullException(nameof(toastHost));
         _toasts = toasts ?? throw new ArgumentNullException(nameof(toasts));
         Duplicates = duplicates ?? throw new ArgumentNullException(nameof(duplicates));
-        _disposer =  disposer ?? throw new ArgumentNullException(nameof(disposer));
+        _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         // Scan completed -> toast + IsScanning
         EventHandler<ScanCompletedEventArgs> scanCompleted = (_, e) =>

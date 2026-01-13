@@ -1,10 +1,10 @@
 // DuplicateFileFinder.GuiTests/Features/Controller/ScanRootsTree/FolderNodeViewModelTests.cs
 
-using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
-using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
@@ -18,46 +18,30 @@ public sealed class FolderNodeViewModelTests
     [Fact]
     public void DisplayName_UsesFullPathWhenShowFullPath_AndAppendsStatusTag()
     {
-        var node = TestObjectFactory.CreateFolderNode(
-            "Foo",
-            "/a/b/Foo",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P", "/a/b",
-                null,
-                null,
-                null,
-                null,
-                1));
+        var actions = new TestActions();
+
+        var model = NewModel(name: "Foo", fullPath: "/a/b/Foo", scanRootId: 1, isScanRoot: false);
+        var node = new FolderNodeViewModel(model, actions) { Parent = NewRootVm(actions, scanRootId: 1) };
 
         Assert.Equal("Foo", node.DisplayName);
 
-        node.StatusTag = "[deleted]";
+        model.StatusTag = "[deleted]";
         Assert.Equal("Foo [deleted]", node.DisplayName);
 
         node.ShowFullPath = true;
         Assert.Equal("/a/b/Foo [deleted]", node.DisplayName);
 
-        node.StatusTag = null;
+        model.StatusTag = null;
         Assert.Equal("/a/b/Foo", node.DisplayName);
     }
 
     [Fact]
-    public void ApplyAggregateStats_SetsFields_AndComputesPercent()
+    public void AggregateStats_AreProjectedFromModel_AndPercentIsComputedByModel()
     {
-        var node = TestObjectFactory.CreateFolderNode(
-            "N",
-            "/n",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P",
-                "/p",
-                null,
-                null,
-                null,
-                null, 1));
+        var actions = new TestActions();
 
-        node.ApplyAggregateStats(
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false);
+        model.ApplyAggregateStats(
             new DirAggregateStats
             {
                 TotalBytes = 50,
@@ -66,7 +50,9 @@ public sealed class FolderNodeViewModelTests
                 DuplicateFiles = 1,
                 DuplicateBytes = 10
             },
-            200);
+            scanRootTotalBytes: 200);
+
+        var node = new FolderNodeViewModel(model, actions) { Parent = NewRootVm(actions, scanRootId: 1) };
 
         Assert.Equal(50, node.TotalBytes);
         Assert.Equal(3, node.FileCount);
@@ -79,23 +65,12 @@ public sealed class FolderNodeViewModelTests
     }
 
     [Fact]
-    public void ApplyAggregateStats_WhenScanRootTotalBytesNonPositive_SetsPercentZero()
+    public void AggregateStats_WhenScanRootTotalBytesNonPositive_SetsPercentZero()
     {
-        var node = TestObjectFactory.CreateFolderNode(
-            "N",
-            "/n",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P",
-                "/p",
-                null,
-                null,
-                null,
-                null,
-                1)
-            );
+        var actions = new TestActions();
 
-        node.ApplyAggregateStats(
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false);
+        model.ApplyAggregateStats(
             new DirAggregateStats
             {
                 TotalBytes = 50,
@@ -104,7 +79,9 @@ public sealed class FolderNodeViewModelTests
                 DuplicateFiles = 0,
                 DuplicateBytes = 0
             },
-            0);
+            scanRootTotalBytes: 0);
+
+        var node = new FolderNodeViewModel(model, actions) { Parent = NewRootVm(actions, scanRootId: 1) };
 
         Assert.Equal(0, node.ScanRootTotalBytes);
         Assert.Equal(0.0, node.PercentOfScanRoot);
@@ -113,21 +90,16 @@ public sealed class FolderNodeViewModelTests
     [Fact]
     public void IsExpanded_InvokesEnsureChildrenLoaded_WhenSetTrue()
     {
+        var actions = new TestActions();
+
         FolderNodeViewModel? calledWith = null;
-        var node = TestObjectFactory.CreateFolderNode(
-            "N",
-            "/n",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P",
-                "/p",
-                null,
-                null,
-                null,
-                null,
-                1),
-            ensureChildrenLoaded: n => calledWith = n
-        );
+
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false);
+        var node = new FolderNodeViewModel(model, actions)
+        {
+            Parent = NewRootVm(actions, scanRootId: 1),
+            EnsureChildrenLoaded = n => calledWith = n
+        };
 
         Assert.False(node.IsExpanded);
 
@@ -140,19 +112,10 @@ public sealed class FolderNodeViewModelTests
     [Fact]
     public void DummyChildHelpers_AddDummyChildAndDetectsIt()
     {
-        var node = TestObjectFactory.CreateFolderNode(
-            "N",
-            "/n",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P",
-                "/p",
-                null,
-                null,
-                null,
-                null,
-                1)
-            );
+        var actions = new TestActions();
+
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false);
+        var node = new FolderNodeViewModel(model, actions) { Parent = NewRootVm(actions, scanRootId: 1) };
 
         Assert.False(node.HasDummyChild);
         Assert.Empty(node.Children);
@@ -170,94 +133,92 @@ public sealed class FolderNodeViewModelTests
     [Fact]
     public async Task RescanFolder_WhenDirInvalid_DoesNothing()
     {
-        var scanner = new FakeScanCoordinator();
-        var node = new FolderNodeViewModel(
-            DirHandle.Invalid,
-            "N",
-            "/n",
-            scanner,
-            null,
-            null,
-            null,
-            1)
+        var actions = new TestActions();
+
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false, dir: DirHandle.Invalid);
+        var node = new FolderNodeViewModel(model, actions)
         {
-            // Non-root: set parent
-            Parent = new FolderNodeViewModel(DirHandle.Invalid, "P", "/p", scanner, null, null, null, 1)
+            Parent = NewRootVm(actions, scanRootId: 1)
         };
 
         await node.RescanFolderCommand.ExecuteAsync(null);
 
-        Assert.Empty(scanner.RescannedFolders);
+        Assert.Empty(actions.RescannedFolders);
     }
 
     [Fact]
-    public async Task RescanFolder_WhenValid_InvokesScanner()
+    public async Task RescanFolder_WhenValid_InvokesActions()
     {
-        var scanner = new FakeScanCoordinator();
-        var node = TestObjectFactory.CreateFolderNode(
-            "N",
-            "/n",
-            new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "P",
-                "/p",
-                scanner,
-                null,
-                null,
-                null,
-                1),
-            scanner,
-            dir: new DirHandle(1, 123));
+        var actions = new TestActions();
+
+        var dir = new DirHandle(1, 123);
+        var model = NewModel(name: "N", fullPath: "/n", scanRootId: 1, isScanRoot: false, dir: dir);
+        var node = new FolderNodeViewModel(model, actions)
+        {
+            Parent = NewRootVm(actions, scanRootId: 1)
+        };
 
         await node.RescanFolderCommand.ExecuteAsync(null);
 
-        Assert.Single(scanner.RescannedFolders);
-        Assert.Equal(new DirHandle(1, 123), scanner.RescannedFolders[0]);
+        var called = Assert.Single(actions.RescannedFolders);
+        Assert.Equal(dir, called);
+    }
+
+    [Fact]
+    public async Task RescanLocation_WhenNotScanRoot_DoesNothing()
+    {
+        var actions = new TestActions();
+
+        var childModel = NewModel(name: "Child", fullPath: "/root/child", scanRootId: 7, isScanRoot: false);
+        var child = new FolderNodeViewModel(childModel, actions)
+        {
+            Parent = NewRootVm(actions, scanRootId: 7)
+        };
+
+        await child.RescanLocationCommand.ExecuteAsync(null);
+
+        Assert.Empty(actions.RescannedScanRoots);
+    }
+
+    [Fact]
+    public async Task RescanLocation_WhenScanRoot_InvokesActions()
+    {
+        var actions = new TestActions();
+
+        var root = NewRootVm(actions, scanRootId: 7);
+
+        await root.RescanLocationCommand.ExecuteAsync(null);
+
+        Assert.Single(actions.RescannedScanRoots);
+        Assert.Equal(7L, actions.RescannedScanRoots[0]);
     }
 
     [Fact]
     public async Task RemoveLocation_WhenNotScanRoot_DoesNothing()
     {
-        var scanner = new FakeScanCoordinator();
-        var dialogs = new FakeDialogService();
-        var node = TestObjectFactory.CreateFolderNode(
-            "Child",
-            "/root/child",
-            new FolderNodeViewModel(DirHandle.Invalid,
-                "Root",
-                "/root",
-                scanner,
-                dialogs,
-                null,
-                null,
-                1),
-            scanner,
-            dialogs);
+        var actions = new TestActions { NextRemoveResult = true };
+
+        var childModel = NewModel(name: "Child", fullPath: "/root/child", scanRootId: 7, isScanRoot: false);
+        var child = new FolderNodeViewModel(childModel, actions)
+        {
+            Parent = NewRootVm(actions, scanRootId: 7)
+        };
 
         var removedCalled = false;
-        node.OnRootRemoved = _ => removedCalled = true;
+        child.OnRootRemoved = _ => removedCalled = true;
 
-        await node.RemoveLocationCommand.ExecuteAsync(null);
+        await child.RemoveLocationCommand.ExecuteAsync(null);
 
         Assert.False(removedCalled);
-        Assert.Empty(dialogs.Confirmations);
+        Assert.Empty(actions.RemovedScanRoots);
     }
 
     [Fact]
-    public async Task RemoveLocation_WhenUserCancels_DoesNothing()
+    public async Task RemoveLocation_WhenScanRoot_AndActionsReturnsFalse_DoesNotInvokeOnRootRemoved()
     {
-        var scanner = new FakeScanCoordinator();
-        var dialogs = new FakeDialogService { NextConfirmResult = false };
+        var actions = new TestActions { NextRemoveResult = false };
 
-        var root = new FolderNodeViewModel(
-            DirHandle.Invalid,
-            "Root",
-            "/root",
-            scanner,
-            dialogs,
-            null,
-            null,
-            7);
+        var root = NewRootVm(actions, scanRootId: 7);
 
         var removedCalled = false;
         root.OnRootRemoved = _ => removedCalled = true;
@@ -265,55 +226,50 @@ public sealed class FolderNodeViewModelTests
         await root.RemoveLocationCommand.ExecuteAsync(null);
 
         Assert.False(removedCalled);
-        Assert.Single(dialogs.Confirmations);
+        Assert.Single(actions.RemovedScanRoots);
+        Assert.Equal(7L, actions.RemovedScanRoots[0]);
     }
 
     [Fact]
-    public async Task SetDisplayName_WhenCancelled_DoesNotUpdateDisplayName_AndDoesNotRefresh()
+    public async Task RemoveLocation_WhenScanRoot_AndActionsReturnsTrue_InvokesOnRootRemoved()
     {
-        var scanner = new FakeScanCoordinator();
-        var dialogs = new FakeDialogService() { NextTextInput = null };
+        var actions = new TestActions { NextRemoveResult = true };
 
-        var root = new FolderNodeViewModel(
-            dir: DirHandle.Invalid,
-            name: "Root",
-            fullPath: "/root",
-            scanCoordinator: scanner,
-            dialogs: dialogs,
-            deleter: null,
-            repo: null,
-            scanRootId: 7);
+        var root = NewRootVm(actions, scanRootId: 7);
+
+        var removedCalled = false;
+        root.OnRootRemoved = _ => removedCalled = true;
+
+        await root.RemoveLocationCommand.ExecuteAsync(null);
+
+        Assert.True(removedCalled);
+        Assert.Single(actions.RemovedScanRoots);
+        Assert.Equal(7L, actions.RemovedScanRoots[0]);
+    }
+
+    [Fact]
+    public async Task SetDisplayName_WhenCancelled_DoesNotRequestRefresh()
+    {
+        var actions = new TestActions { NextSetDisplayNameResult = false };
+
+        var root = NewRootVm(actions, scanRootId: 7);
 
         var refreshCalled = false;
         root.OnRootLabelRefreshRequested = () => refreshCalled = true;
 
         await root.SetDisplayNameCommand.ExecuteAsync(null);
 
-        // Dialog should be shown
-        Assert.Single(dialogs.TextInputs);
-
-        // But no update should be applied
-        Assert.Empty(scanner.DisplayNameUpdates);
-
-        // And no UI refresh should be triggered
         Assert.False(refreshCalled);
+        Assert.Single(actions.SetDisplayNameCalls);
+        Assert.Equal((7L, "Root"), actions.SetDisplayNameCalls[0]);
     }
 
     [Fact]
-    public async Task SetDisplayName_WhenBlank_SetsNull_AndRequestsRefresh()
+    public async Task SetDisplayName_WhenApplied_RequestsRefresh()
     {
-        var scanner = new FakeScanCoordinator();
-        var dialogs = new FakeDialogService() { NextTextInput = "   " };
+        var actions = new TestActions { NextSetDisplayNameResult = true };
 
-        var root = new FolderNodeViewModel(
-            dir: DirHandle.Invalid,
-            name: "Root",
-            fullPath: "/root",
-            scanCoordinator: scanner,
-            dialogs: dialogs,
-            deleter: null,
-            repo: null,
-            scanRootId: 7);
+        var root = NewRootVm(actions, scanRootId: 7);
 
         var refreshCalled = false;
         root.OnRootLabelRefreshRequested = () => refreshCalled = true;
@@ -321,220 +277,133 @@ public sealed class FolderNodeViewModelTests
         await root.SetDisplayNameCommand.ExecuteAsync(null);
 
         Assert.True(refreshCalled);
-        Assert.Single(scanner.DisplayNameUpdates);
-        Assert.Equal((7L, (string?)null), scanner.DisplayNameUpdates[0]);
-    }
-
-    [Fact]
-    public async Task SetDisplayName_WhenNonBlank_SetsValue_AndRequestsRefresh()
-    {
-        var scanner = new FakeScanCoordinator();
-        var dialogs = new FakeDialogService() { NextTextInput = "My Root" };
-
-        var root = new FolderNodeViewModel(
-            dir: DirHandle.Invalid,
-            name: "Root",
-            fullPath: "/root",
-            scanCoordinator: scanner,
-            dialogs: dialogs,
-            deleter: null,
-            repo: null,
-            scanRootId: 7);
-
-        var refreshCalled = false;
-        root.OnRootLabelRefreshRequested = () => refreshCalled = true;
-
-        await root.SetDisplayNameCommand.ExecuteAsync(null);
-
-        Assert.True(refreshCalled);
-        Assert.Single(scanner.DisplayNameUpdates);
-        Assert.Equal((7L, "My Root"), scanner.DisplayNameUpdates[0]);
+        Assert.Single(actions.SetDisplayNameCalls);
+        Assert.Equal((7L, "Root"), actions.SetDisplayNameCalls[0]);
     }
 
     [Fact]
     public void CanDeleteFromDisk_IsFalse_ForScanRoot_AndDummy()
     {
-        var scanRoot = new FolderNodeViewModel(
-            DirHandle.Invalid,
-            "Root",
-            "/root",
-            new FakeScanCoordinator(),
-            new FakeDialogService(),
-            new FakeFileSystemDeleteService(),
-            new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]),
-            1);
+        var actions = new TestActions();
+
+        var scanRoot = NewRootVm(actions, scanRootId: 1);
 
         Assert.True(scanRoot.IsScanRoot);
         Assert.False(scanRoot.CanDeleteFromDisk);
 
-        // dummy instance is internal; we can emulate by passing isDummy=true
-        var dummy = new FolderNodeViewModel(
-            DirHandle.Invalid,
-            "Loading...",
-            "",
-            new FakeScanCoordinator(),
-            new FakeDialogService(),
-            new FakeFileSystemDeleteService(),
-            new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]),
-            1,
-            true)
-        { Parent = scanRoot };
+        // emulate dummy by passing isDummy=true and giving it a parent
+        var dummyModel = NewModel(name: "Loading...", fullPath: "", scanRootId: 1, isScanRoot: false, dir: DirHandle.Invalid);
+        var dummy = new FolderNodeViewModel(dummyModel, actions, isDummy: true)
+        {
+            Parent = scanRoot
+        };
 
         Assert.False(dummy.IsScanRoot);
         Assert.False(dummy.CanDeleteFromDisk);
     }
 
     [Fact]
-    public async Task DeleteFromDisk_WhenUserCancels_DoesNothing()
-    {
-        var repo = new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]);
-        var dialogs = new FakeDialogService { NextConfirmResult = false };
-        var deleter = new FakeFileSystemDeleteService();
-        var scanner = new FakeScanCoordinator();
-
-        var child = new FolderNodeViewModel(
-            new DirHandle(1, 10),
-            "Child",
-            "/root/child",
-            scanner,
-            dialogs,
-            deleter,
-            repo,
-            1)
+    public async Task DeleteFromDisk_WhenNotAllowed_DoesNothing()
         {
-            Parent = new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "Root",
-                "/root",
-                scanner,
-                dialogs,
-                deleter,
-                repo,
-                1)
-        };
+        var actions = new TestActions();
 
-        await child.DeleteFromDiskCommand.ExecuteAsync(null);
+        var root = NewRootVm(actions, scanRootId: 1);
+        await root.DeleteFromDiskCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
-        Assert.Empty(deleter.DeletedDirectories);
-        Assert.Empty(repo.DeletedDirs);
+        Assert.Empty(actions.DeletedFolders);
     }
 
     [Fact]
-    public async Task DeleteFromDisk_WhenDeleteFails_ShowsError_AndDoesNotCallRepo()
+    public async Task DeleteFromDisk_WhenAllowed_InvokesActions()
     {
-        var repo = new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]);
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
-        var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (false, "nope") };
-        var scanner = new FakeScanCoordinator();
+        var actions = new TestActions();
 
-        var child = new FolderNodeViewModel(
-            new DirHandle(1, 10),
-            "Child",
-            "/root/child",
-            scanner,
-            dialogs,
-            deleter,
-            repo,
-            1)
+        var dir = new DirHandle(1, 10);
+        var childModel = NewModel(name: "Child", fullPath: "/root/child", scanRootId: 1, isScanRoot: false, dir: dir);
+        var child = new FolderNodeViewModel(childModel, actions)
         {
-            Parent = new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "Root",
-                "/root",
-                scanner,
-                dialogs,
-                deleter,
-                repo,
-                1)
+            Parent = NewRootVm(actions, scanRootId: 1)
         };
 
         await child.DeleteFromDiskCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
-        Assert.Single(deleter.DeletedDirectories);
-        Assert.Empty(repo.DeletedDirs);
-
-        Assert.Contains(dialogs.Errors,
-            e => e.Title == "Delete failed" && e.Message.Contains("nope", StringComparison.OrdinalIgnoreCase));
+        var deleted = Assert.Single(actions.DeletedFolders);
+        Assert.Equal(dir, deleted.Dir);
+        Assert.Equal("/root/child", deleted.FullPath);
     }
 
-    [Fact]
-    public async Task DeleteFromDisk_Success_DeletesDirectory_ThenCallsRepoDeleteDir()
+    // ---------------------------------------------------------------------
+    // Helpers / fakes
+    // ---------------------------------------------------------------------
+
+    private static FolderNodeViewModel NewRootVm(TestActions actions, long scanRootId)
     {
-        var repo = new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]);
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
-        var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (true, null) };
-        var scanner = new FakeScanCoordinator();
-
-        var child = new FolderNodeViewModel(
-            new DirHandle(1, 10),
-            "Child",
-            "/root/child",
-            scanner,
-            dialogs,
-            deleter,
-            repo,
-            1)
-        {
-            Parent = new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "Root",
-                "/root",
-                scanner,
-                dialogs,
-                deleter,
-                repo,
-                1)
-        };
-
-        await child.DeleteFromDiskCommand.ExecuteAsync(null);
-
-        Assert.Single(dialogs.Confirmations);
-        Assert.Single(deleter.DeletedDirectories);
-        Assert.Equal(("/root/child", true),
-            (deleter.DeletedDirectories[0].Path, deleter.DeletedDirectories[0].Recursive));
-
-        Assert.Single(repo.DeletedDirs);
-        Assert.Equal(new DirHandle(1, 10), repo.DeletedDirs[0]);
-        Assert.Empty(dialogs.Errors);
+        var rootModel = NewModel(name: "Root", fullPath: "/root", scanRootId: scanRootId, isScanRoot: true, dir: DirHandle.Invalid);
+        // Root-ness is determined by Parent==null in the VM.
+        return new FolderNodeViewModel(rootModel, actions);
     }
 
-    [Fact]
-    public async Task DeleteFromDisk_WhenRepoDeleteFails_ShowsError()
+    private static ScanRootsTreeNode NewModel(
+        string name,
+        string fullPath,
+        long scanRootId,
+        bool isScanRoot,
+        DirHandle? dir = null)
     {
-        var repo = new FakeRepo([TestObjectFactory.NewScanRoot(1, "/root")]);
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
-        var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (true, null) };
-        var scanner = new FakeScanCoordinator();
-
-        var child = new FolderNodeViewModel(
-            new DirHandle(1, 10),
-            "Child",
-            "/root/child",
-            scanner,
-            dialogs,
-            deleter,
-            repo,
-            1)
+        return new ScanRootsTreeNode
         {
-            Parent = new FolderNodeViewModel(
-                DirHandle.Invalid,
-                "Root",
-                "/root",
-                scanner,
-                dialogs,
-                deleter,
-                repo,
-                1)
+            Dir = dir ?? new DirHandle(scanRootId, 1),
+            Name = name,
+            FullPath = fullPath,
+            ScanRootId = scanRootId,
+            IsScanRoot = isScanRoot,
+
+            // reasonable defaults for tests
+            IsAvailable = true,
+            ChildrenMaterialized = true,
+            HasLazyChildren = false
         };
+    }
 
-        repo.ReturnResultFor["DeleteDirAsync"] = DeleteResult.Fail(1, 1, "Boom!");
+    private sealed class TestActions : IScanRootsTreeNodeActions
+    {
+        public readonly List<long> RescannedScanRoots = new();
+        public readonly List<DirHandle> RescannedFolders = new();
+        public readonly List<long> RemovedScanRoots = new();
+        public readonly List<(long ScanRootId, string CurrentLabel)> SetDisplayNameCalls = new();
+        public readonly List<(DirHandle Dir, string FullPath)> DeletedFolders = new();
 
-        await child.DeleteFromDiskCommand.ExecuteAsync(null);
+        public bool NextRemoveResult { get; set; } = true;
+        public bool NextSetDisplayNameResult { get; set; } = true;
 
-        Assert.Single(repo.DeletedDirs);
-        Assert.Contains(dialogs.Errors,
-            e => e.Title == "Delete error" && e.Message.Contains("repository", StringComparison.OrdinalIgnoreCase));
+        public Task RescanScanRootAsync(long scanRootId)
+        {
+            RescannedScanRoots.Add(scanRootId);
+            return Task.CompletedTask;
+        }
+
+        public Task RescanFolderAsync(DirHandle dir)
+        {
+            RescannedFolders.Add(dir);
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> TryRemoveScanRootAsync(long scanRootId)
+        {
+            RemovedScanRoots.Add(scanRootId);
+            return Task.FromResult(NextRemoveResult);
+        }
+
+        public Task<bool> TrySetScanRootDisplayNameAsync(long scanRootId, string currentLabel)
+        {
+            SetDisplayNameCalls.Add((scanRootId, currentLabel));
+            return Task.FromResult(NextSetDisplayNameResult);
+        }
+
+        public Task DeleteFolderAsync(DirHandle dir, string fullPath)
+        {
+            DeletedFolders.Add((dir, fullPath));
+            return Task.CompletedTask;
+        }
     }
 }

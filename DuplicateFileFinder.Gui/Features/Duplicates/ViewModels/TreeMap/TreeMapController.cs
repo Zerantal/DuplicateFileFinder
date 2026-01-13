@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.TreeMap;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;

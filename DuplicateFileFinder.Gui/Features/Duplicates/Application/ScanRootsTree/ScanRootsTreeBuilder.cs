@@ -1,35 +1,26 @@
-// DuplicateFileFinder.Gui/Features/Controller/Domain/ScanRootsTreeBuilder.cs
-
-using System.Collections.ObjectModel;
-
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
-using DuplicateFileFinder.Gui.Infrastructure.Services;
+// DuplicateFileFinder.Gui/Features/Duplicates/Application/ScanRootsTree/ScanRootsTreeBuilder.cs
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 /// <summary>
-/// Builds a scan-root directory tree, with aggregate stats pulled from TreeIndex stats.
+/// Builds a scan-root directory tree as UI-agnostic node models (no ViewModel creation, no UI callbacks).
 /// Supports lazy materialization and navigation by ancestry expansion.
+///
+/// This is the "Step 2" refactor: the builder returns ScanRootsTreeNode models and holds lookup state.
+/// Presentation (FolderNodeViewModelFactory / ScanRootsTreeViewModel) is responsible for turning nodes into VMs.
 /// </summary>
-public sealed class ScanRootsTreeBuilder(
-    IRepoHost host,
-    IScanCoordinator scanCoordinator,
-    IDialogService dialogService,
-    IFileSystemDeleteService deleter)
+public sealed class ScanRootsTreeBuilder(IRepoHost host)
 {
-    private readonly Dictionary<DirHandle, FolderNodeViewModel> _nodesByDirHandle = new();
+    private readonly Dictionary<DirHandle, ScanRootsTreeNode> _nodesByDirHandle = new();
 
     private readonly IRepo _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
     private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
-    private readonly IScanCoordinator _scanner = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
-    private readonly IDialogService _dialogs = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
-    private readonly IFileSystemDeleteService _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
 
     private RepoSnapshotView? _snapshot;
 
@@ -42,11 +33,13 @@ public sealed class ScanRootsTreeBuilder(
         string? VolumeLabel,
         string? DisplayName);
 
-    public void Rebuild(RepoSnapshotView snapshot, ObservableCollection<FolderNodeViewModel> roots)
+    /// <summary>
+    /// Rebuilds and returns the root node models (one per scan root).
+    /// </summary>
+    public List<ScanRootsTreeNode> Build(RepoSnapshotView snapshot)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
 
-        roots.Clear();
         _nodesByDirHandle.Clear();
 
         _scanRootByDirId = _repo.ScanRootsView
@@ -54,6 +47,8 @@ public sealed class ScanRootsTreeBuilder(
             .ToDictionary(
                 r => r.DirId,
                 r => new ScanRootViewEntry(r.RootPath, r.VolumePath, r.VolumeLabel, r.DisplayName));
+
+        var roots = new List<ScanRootsTreeNode>();
 
         foreach (var scanRoot in _repo.ScanRootsView.Where(r => !r.IsDeleted))
         {
@@ -71,13 +66,13 @@ public sealed class ScanRootsTreeBuilder(
             if (!string.IsNullOrWhiteSpace(statusTag))
                 label = $"{label} {statusTag}";
 
-            var rootNode = CreateRootNode(
-                scanRoot.DirId,
-                label,
-                scanRootFullPath,
-                roots,
-                scanRoot.RootId,
-                hasCheckpoint,
+            // Create root (resolvable handle => normal; otherwise placeholder)
+            var rootNode = CreateRootNodeModel(
+                rootDirId: scanRoot.DirId,
+                label: label,
+                fullPath: scanRootFullPath,
+                scanRootId: scanRoot.RootId,
+                hasCheckpoint: hasCheckpoint,
                 out var rootHandle);
 
             // If we don't have a resolvable handle (or it isn't usable in snapshot), it's a placeholder.
@@ -91,15 +86,16 @@ public sealed class ScanRootsTreeBuilder(
             var rootStats = _treeIndex.GetDirStats(rootHandle);
             rootNode.ApplyAggregateStats(rootStats, scanRootTotalBytes: rootStats.TotalBytes);
 
-            // Dummy child if it has subdirs (lazy load)
-            if (HasChildDirs(rootHandle))
-                rootNode.AddDummyChild();
+            // Mark lazy children support
+            rootNode.HasLazyChildren = HasChildDirs(rootHandle);
 
             InsertSortedBySizeDesc(roots, rootNode);
         }
+
+        return roots;
     }
 
-    public bool TryGetNode(DirHandle dirHandle, out FolderNodeViewModel node)
+    public bool TryGetNode(DirHandle dirHandle, out ScanRootsTreeNode node)
         => _nodesByDirHandle.TryGetValue(dirHandle, out node!);
 
     public bool TryGetDirHandle(long dirId, out DirHandle handle)
@@ -154,176 +150,50 @@ public sealed class ScanRootsTreeBuilder(
         return true;
     }
 
-    public FolderNodeViewModel EnsureNodeExistsUnderParent(
-        FolderNodeViewModel parentNode,
+    /// <summary>
+    /// Ensures a child node model exists under a given parent model.
+    /// This does NOT create viewmodels; it only materializes the model tree.
+    /// </summary>
+    public ScanRootsTreeNode EnsureNodeExistsUnderParent(
+        ScanRootsTreeNode parentNode,
         DirHandle childHandle)
     {
         if (_snapshot is null)
-            throw new InvalidOperationException("Rebuild must be called first.");
+            throw new InvalidOperationException("Build must be called first.");
 
-        // Ensure parent children are loaded (no-op if already loaded).
         EnsureChildrenLoaded(parentNode);
 
-        // If the child VM already exists (loaded or created earlier), return it.
+        // Already created anywhere in the tree?
         if (_nodesByDirHandle.TryGetValue(childHandle, out var existing))
             return existing;
 
-        // Otherwise create just this child and attach it to the parent.
-        var childNode = GetOrCreateNode(
-            childHandle,
-            parentNode.FullPath,
-            parentNode.ScanRootTotalBytes,
-            parentNode.ScanRootId);
+        // Create and attach to parent
+        var childNode = GetOrCreateNodeModel(
+            dirHandle: childHandle,
+            parentPath: parentNode.FullPath,
+            scanRootTotalBytes: parentNode.ScanRootTotalBytes,
+            scanRootId: parentNode.ScanRootId);
 
         childNode.Parent = parentNode;
-        childNode.ShowFullPath = false;
 
         InsertSortedBySizeDesc(parentNode.Children, childNode);
 
         return childNode;
     }
 
-    private FolderNodeViewModel CreateRootNode(
-        long rootDirId,
-        string label,
-        string fullPath,
-        ObservableCollection<FolderNodeViewModel> roots,
-        long scanRootId,
-        bool hasCheckpoint,
-        out DirHandle rootHandle)
+    /// <summary>
+    /// Materializes (once) the children models for a parent model, if it is marked as lazy.
+    /// </summary>
+    public void EnsureChildrenLoaded(ScanRootsTreeNode node)
     {
         if (_snapshot is null)
-            throw new InvalidOperationException("Rebuild must be called first.");
+            throw new InvalidOperationException("Build must be called first.");
 
-        rootHandle = DirHandle.Invalid;
-
-        // Try to resolve the root dir into the current main index.
-        if (!_mainIndex.TryGetDir(rootDirId, out var handle))
-        {
-            return CreatePlaceholderRootNode(label, fullPath, roots, scanRootId, hasCheckpoint);
-        }
-
-        // If the snapshot record is absent/deleted, treat it as placeholder so it still shows.
-        var rootRec = _snapshot.GetDirRecord(handle);
-        if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
-        {
-            return CreatePlaceholderRootNode(label, fullPath, roots, scanRootId, hasCheckpoint);
-        }
-
-        rootHandle = handle;
-
-        var node = new FolderNodeViewModel(
-            rootHandle,
-            name: label,
-            fullPath: fullPath,
-            scanCoordinator: _scanner,
-            dialogs: _dialogs,
-            deleter: _deleter,
-            repo: _repo,
-            scanRootId: scanRootId)
-        {
-            EnsureChildrenLoaded = EnsureChildrenLoaded
-        };
-
-        _nodesByDirHandle[rootHandle] = node;
-
-        node.Parent = null;
-        node.ShowFullPath = false;
-        node.OnRootRemoved = n => roots.Remove(n);
-
-        node.OnRootLabelRefreshRequested = () =>
-        {
-            var snap = _repo.GetRepoSnapshotView();
-            Rebuild(snap, roots);
-        };
-
-        return node;
-    }
-
-    private FolderNodeViewModel CreatePlaceholderRootNode(
-        string label,
-        string fullPath,
-        ObservableCollection<FolderNodeViewModel> roots,
-        long scanRootId,
-        bool hasCheckpoint)
-    {
-        var placeholder = new FolderNodeViewModel(
-            dir: DirHandle.Invalid,
-            name: label,
-            fullPath: fullPath,
-            scanCoordinator: _scanner,
-            dialogs: _dialogs,
-            deleter: _deleter,
-            repo: _repo,
-            scanRootId: scanRootId)
-        {
-            HasCheckpoint = hasCheckpoint,
-            Parent = null,
-            ShowFullPath = false,
-            OnRootRemoved = n => roots.Remove(n),
-            OnRootLabelRefreshRequested = () =>
-            {
-                var snap = _repo.GetRepoSnapshotView();
-                Rebuild(snap, roots);
-            }
-        };
-
-        return placeholder;
-    }
-
-    private FolderNodeViewModel GetOrCreateNode(
-        DirHandle dirHandle,
-        string parentPath,
-        long scanRootTotalBytes,
-        long scanRootId)
-    {
-        if (_snapshot is null)
-            throw new InvalidOperationException("Rebuild must be called first.");
-
-        if (_nodesByDirHandle.TryGetValue(dirHandle, out var existing))
-            return existing;
-
-        var name = _snapshot.DecodeDirName(dirHandle);
-        var fullPath = Path.Combine(parentPath, name);
-
-        var node = new FolderNodeViewModel(
-            dir: dirHandle,
-            name: name,
-            fullPath: fullPath,
-            scanCoordinator: _scanner,
-            dialogs: _dialogs,
-            deleter: _deleter,
-            repo: _repo,
-            scanRootId: scanRootId)
-        {
-            EnsureChildrenLoaded = EnsureChildrenLoaded
-        };
-
-        _nodesByDirHandle[dirHandle] = node;
-
-        // Stats from index
-        var stats = _treeIndex.GetDirStats(dirHandle);
-        node.ApplyAggregateStats(stats, scanRootTotalBytes);
-
-        if (HasChildDirs(dirHandle))
-            node.AddDummyChild();
-
-        return node;
-    }
-
-    private bool HasChildDirs(DirHandle dirHandle) => _treeIndex.GetChildDirs(dirHandle).Length > 0;
-
-    private void EnsureChildrenLoaded(FolderNodeViewModel node)
-    {
-        if (_snapshot is null)
-            throw new InvalidOperationException("Rebuild must be called first.");
-
-        if (!node.HasDummyChild)
+        if (!node.HasLazyChildren || node.ChildrenMaterialized)
             return;
 
-        node.ClearChildren();
+        node.Children.Clear();
 
-        // For percent calculation, every node uses the scan-root total bytes
         var scanRootTotal = node.ScanRootTotalBytes;
 
         var childHandles = _treeIndex.GetChildDirs(node.Dir);
@@ -333,13 +203,133 @@ public sealed class ScanRootsTreeBuilder(
             if (childRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
                 continue;
 
-            var childNode = GetOrCreateNode(childHandle, node.FullPath, scanRootTotal, node.ScanRootId);
+            var childNode = GetOrCreateNodeModel(childHandle, node.FullPath, scanRootTotal, node.ScanRootId);
             childNode.Parent = node;
-            childNode.ShowFullPath = false;
 
             InsertSortedBySizeDesc(node.Children, childNode);
         }
+
+        node.ChildrenMaterialized = true;
     }
+
+    // ---------------------------------------------------------------------
+    // Internal model creation
+    // ---------------------------------------------------------------------
+
+    private ScanRootsTreeNode CreateRootNodeModel(
+        long rootDirId,
+        string label,
+        string fullPath,
+        long scanRootId,
+        bool hasCheckpoint,
+        out DirHandle rootHandle)
+    {
+        if (_snapshot is null)
+            throw new InvalidOperationException("Build must be called first.");
+
+        rootHandle = DirHandle.Invalid;
+
+        // Try to resolve the root dir into the current main index.
+        if (!_mainIndex.TryGetDir(rootDirId, out var handle))
+            return CreatePlaceholderRootNodeModel(label, fullPath, scanRootId, hasCheckpoint);
+
+        // If the snapshot record is absent/deleted, treat it as placeholder so it still shows.
+        var rootRec = _snapshot.GetDirRecord(handle);
+        if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
+            return CreatePlaceholderRootNodeModel(label, fullPath, scanRootId, hasCheckpoint);
+
+        rootHandle = handle;
+
+        var node = new ScanRootsTreeNode
+        {
+            Dir = rootHandle,
+            Name = label,
+            FullPath = fullPath,
+            ScanRootId = scanRootId,
+            IsScanRoot = true,
+
+            HasCheckpoint = hasCheckpoint,
+
+            // Root percent baseline
+            ScanRootTotalBytes = 0, // set by ApplyAggregateStats below
+            ChildrenMaterialized = false,
+            HasLazyChildren = false,
+        };
+
+        _nodesByDirHandle[rootHandle] = node;
+
+        return node;
+    }
+
+    private static ScanRootsTreeNode CreatePlaceholderRootNodeModel(
+        string label,
+        string fullPath,
+        long scanRootId,
+        bool hasCheckpoint)
+    {
+        // Placeholder: Dir invalid, no stats, no children.
+        return new ScanRootsTreeNode
+        {
+            Dir = DirHandle.Invalid,
+            Name = label,
+            FullPath = fullPath,
+            ScanRootId = scanRootId,
+            IsScanRoot = true,
+
+            HasCheckpoint = hasCheckpoint,
+
+            ScanRootTotalBytes = 0,
+            ChildrenMaterialized = true,
+            HasLazyChildren = false,
+        };
+    }
+
+    private ScanRootsTreeNode GetOrCreateNodeModel(
+        DirHandle dirHandle,
+        string parentPath,
+        long scanRootTotalBytes,
+        long scanRootId)
+    {
+        if (_snapshot is null)
+            throw new InvalidOperationException("Build must be called first.");
+
+        if (_nodesByDirHandle.TryGetValue(dirHandle, out var existing))
+            return existing;
+
+        var name = _snapshot.DecodeDirName(dirHandle);
+        var fullPath = Path.Combine(parentPath, name);
+
+        var node = new ScanRootsTreeNode
+        {
+            Dir = dirHandle,
+            Name = name,
+            FullPath = fullPath,
+            ScanRootId = scanRootId,
+            IsScanRoot = false,
+
+            HasCheckpoint = false,
+
+            ScanRootTotalBytes = scanRootTotalBytes,
+            ChildrenMaterialized = false,
+            HasLazyChildren = false,
+        };
+
+        _nodesByDirHandle[dirHandle] = node;
+
+        // Stats from index
+        var stats = _treeIndex.GetDirStats(dirHandle);
+        node.ApplyAggregateStats(stats, scanRootTotalBytes);
+
+        node.HasLazyChildren = HasChildDirs(dirHandle);
+
+        return node;
+    }
+
+    private bool HasChildDirs(DirHandle dirHandle) => _treeIndex.GetChildDirs(dirHandle).Length > 0;
+
+    // ---------------------------------------------------------------------
+    // Scan root labeling / status
+    // ---------------------------------------------------------------------
 
     private string GetScanRootLabel(long rootDirId)
     {
@@ -398,7 +388,11 @@ public sealed class ScanRootsTreeBuilder(
         };
     }
 
-    private static void InsertSortedBySizeDesc(ObservableCollection<FolderNodeViewModel> list, FolderNodeViewModel node)
+    // ---------------------------------------------------------------------
+    // Sorting helper (model lists)
+    // ---------------------------------------------------------------------
+
+    private static void InsertSortedBySizeDesc(IList<ScanRootsTreeNode> list, ScanRootsTreeNode node)
     {
         var i = 0;
         while (i < list.Count && list[i].TotalBytes > node.TotalBytes)

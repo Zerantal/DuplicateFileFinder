@@ -1,5 +1,5 @@
 using DuplicateFileFinder.Gui.Features.Duplicates.Application;
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
@@ -53,6 +53,8 @@ public static class GuiBootstrapper
         services.AddSingleton<DuplicateGroupsController>();
 
         // Scan roots tree + builder
+        services.AddSingleton<FolderNodeViewModelFactory>();
+        services.AddSingleton<IScanRootsTreeNodeActions, ScanRootsTreeNodeActions>();
         services.AddSingleton<ScanRootsTreeBuilder>();
         services.AddSingleton<ScanRootsTreeViewModel>();
 

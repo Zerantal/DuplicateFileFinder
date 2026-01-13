@@ -1,10 +1,12 @@
+// DuplicateFileFinder.GuiTests/UI/Smoke/DuplicatesViewSmokeTests.cs
+
 using System.Linq;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
 using Avalonia.VisualTree;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
@@ -12,6 +14,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
+
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using Xunit;
@@ -31,16 +34,32 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var scan = new FakeScanCoordinator();
             var dialogs = new FakeDialogService();
             var deleter = new FakeFileSystemDeleteService();
-            var disposer = new DisposableManager();
+
+            using var disposer = new DisposableManager();
 
             // Assemble graph (DI-style)
             var dupController = new DuplicateGroupsController(host);
             var fakeDeletionService = new FakeDuplicateFileDeletionService();
             var duplicateGroupsVm = new DuplicateGroupsViewModel(dupController, fakeDeletionService);
 
-            var scanRootsBuilder = new ScanRootsTreeBuilder(host, scan, dialogs, deleter);
-            var scanRootsVm = new ScanRootsTreeViewModel(scanRootsBuilder);
+            // ---- ScanRoots tree: builder + actions + factory + vm ----
+            var scanRootsBuilder = new ScanRootsTreeBuilder(host);
 
+            var scanRootsActions = new ScanRootsTreeNodeActions(
+                host: host,
+                scanner: scan,
+                dialogs: dialogs,
+                deleter: deleter);
+
+            var folderVmFactory = new FolderNodeViewModelFactory(
+                actions: scanRootsActions,
+                builder: scanRootsBuilder);
+
+            var scanRootsVm = new ScanRootsTreeViewModel(
+                builder: scanRootsBuilder,
+                factory: folderVmFactory);
+
+            // ---- TreeMap ----
             var treeMapController = new TreeMapController(host)
             {
                 Options = new TreeMapBuildOptions { MaxDepth = 8 }
@@ -65,7 +84,6 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             Assert.NotNull(view.FindControl<Control>("ScanRootsHost"));
             Assert.NotNull(view.FindControl<Control>("ScanRootsTree"));
             Assert.NotNull(view.FindControl<Control>("MainTabs"));
-
             Assert.NotNull(view.FindControl<Control>("TreeMap"));
 
             // ---- DuplicateGroups controls: resolve the subview, then search within it ----

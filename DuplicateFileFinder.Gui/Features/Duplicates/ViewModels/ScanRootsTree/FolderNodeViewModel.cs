@@ -1,81 +1,68 @@
-// ViewModels/FolderNodeViewModel.cs
+// DuplicateFileFinder.Gui/Features/Duplicates/ViewModels/ScanRootsTree/FolderNodeViewModel.cs
 
 using System.Collections.ObjectModel;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Infrastructure.Services;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Interfaces;
-using DuplicateFileFinderLib.Repository.Plugins.Models;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
-public sealed partial class FolderNodeViewModel(
-    DirHandle dir,
-    string name,
-    string fullPath,
-    IScanCoordinator? scanCoordinator,
-    IDialogService? dialogs,
-    IFileSystemDeleteService? deleter,
-    IRepo? repo,
-    long scanRootId,
-    bool isDummy = false
-    )
-    : ObservableObject
+public sealed partial class FolderNodeViewModel : ObservableObject
 {
     // Dummy child used to show the expand arrow before children are loaded.
-    private static readonly FolderNodeViewModel s_dummyChild = new(
-        DirHandle.Invalid,
-        "Loading...",
-        "",
-        null,
-        null,
-        null,
-        null,
-        -1,
-        true);
+    private static readonly FolderNodeViewModel s_dummyChild = CreateDummy();
 
-    public DirHandle Dir { get; } = dir;
+    private readonly IScanRootsTreeNodeActions? _actions;
+    private readonly bool _isDummy;
+
+    public FolderNodeViewModel(
+        ScanRootsTreeNode model,
+    IScanRootsTreeNodeActions? actions,
+    bool isDummy = false)
+    {
+        Model = model ?? throw new ArgumentNullException(nameof(model));
+        _actions = actions;
+        _isDummy = isDummy;
+    }
+
+    private static FolderNodeViewModel CreateDummy()
+        => new(new ScanRootsTreeNode
+{
+            Dir = DirHandle.Invalid,
+            Name = "Loading...",
+            FullPath = "",
+            ScanRootId = -1,
+            IsScanRoot = false,
+            ChildrenMaterialized = true,
+            HasLazyChildren = false
+        }, actions: null, isDummy: true);
+
+    /// <summary>Application model this VM projects.</summary>
+    public ScanRootsTreeNode Model { get; }
+
+    public DirHandle Dir => Model.Dir;
+
+    public long ScanRootId => Model.ScanRootId;
 
     public FolderNodeViewModel? Parent { get; set; }
 
     public ObservableCollection<FolderNodeViewModel> Children { get; } = new();
 
-    public bool IsScanRoot => Parent == null;
+    // View-level decision. Root nodes are created with Parent == null.
+    public bool IsScanRoot => Parent is null;
 
-    public long ScanRootId { get; } = scanRootId;
+    // Provided by factory/VM: triggers model materialization and populates Children VMs.
+    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; set; }
 
-    public Action<FolderNodeViewModel>? EnsureChildrenLoaded { get; init; }
-
-    // A callback that the owning viewmodel can set to remove this node
+    // These two should go away long-term; keep only during transition.
     public Action<FolderNodeViewModel>? OnRootRemoved { get; set; }
-
-    // Called after updating scan root metadata so the owner can rebuild the tree labels
     public Action? OnRootLabelRefreshRequested { get; set; }
 
     // ----- UI state -----
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayName))]
-    private string _name = name;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayName))]
-    private string _fullPath = fullPath;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayName))]
-    private string? _statusTag;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RescanOrResumeHeader))]
-    private bool _hasCheckpoint;
-
-    [ObservableProperty]
-    private bool _isAvailable = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayName))]
@@ -101,43 +88,46 @@ public sealed partial class FolderNodeViewModel(
 
     public string RescanOrResumeHeader => HasCheckpoint ? "Resume scan" : "Rescan location";
 
-    // ----- Aggregate stats -----
+    // ----- Projection properties (read from Model) -----
 
-    [ObservableProperty]
-    private long _totalBytes;
+    public string Name => Model.Name;
+    public string FullPath => Model.FullPath;
+    public string? StatusTag => Model.StatusTag;
+    public bool HasCheckpoint => Model.HasCheckpoint;
+    public bool IsAvailable => Model.IsAvailable;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ItemCount))]
-    private int _fileCount;
+    public long TotalBytes => Model.TotalBytes;
+    public int FileCount => Model.FileCount;
+    public int DirCount => Model.DirCount;
+    public int ItemCount => Model.ItemCount;
+    public long DuplicateFiles => Model.DuplicateFiles;
+    public long DuplicateBytes => Model.DuplicateBytes;
+    public double PercentOfScanRoot => Model.PercentOfScanRoot;
+    public long ScanRootTotalBytes => Model.ScanRootTotalBytes;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ItemCount))]
-    private int _dirCount;
-
-    [ObservableProperty]
-    private long _duplicateFiles;
-
-    [ObservableProperty]
-    private long _duplicateBytes;
-
-    [ObservableProperty]
-    private double _percentOfScanRoot;
-
-    [ObservableProperty]
-    private long _scanRootTotalBytes;
-
-    public int ItemCount => FileCount + DirCount;
-
-    public void ApplyAggregateStats(DirAggregateStats stats, long scanRootTotalBytes)
+    /// <summary>
+    /// Call when the underlying model was updated and the UI needs to refresh bindings.
+    /// (Common during rebuild or when display name/status tag changes.)
+    /// </summary>
+    public void RefreshFromModel()
     {
-        TotalBytes = stats.TotalBytes;
-        FileCount = stats.FileCount;
-        DirCount = stats.DirCount;
-        DuplicateFiles = stats.DuplicateFiles;
-        DuplicateBytes = stats.DuplicateBytes;
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(FullPath));
+        OnPropertyChanged(nameof(StatusTag));
+        OnPropertyChanged(nameof(HasCheckpoint));
+        OnPropertyChanged(nameof(IsAvailable));
 
-        ScanRootTotalBytes = scanRootTotalBytes <= 0 ? 0 : scanRootTotalBytes;
-        PercentOfScanRoot = ScanRootTotalBytes <= 0 ? 0.0 : TotalBytes * 100.0 / ScanRootTotalBytes;
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(RescanOrResumeHeader));
+
+        OnPropertyChanged(nameof(TotalBytes));
+        OnPropertyChanged(nameof(FileCount));
+        OnPropertyChanged(nameof(DirCount));
+        OnPropertyChanged(nameof(ItemCount));
+        OnPropertyChanged(nameof(DuplicateFiles));
+        OnPropertyChanged(nameof(DuplicateBytes));
+        OnPropertyChanged(nameof(PercentOfScanRoot));
+        OnPropertyChanged(nameof(ScanRootTotalBytes));
     }
 
     // ----- Dummy children helpers -----
@@ -158,94 +148,50 @@ public sealed partial class FolderNodeViewModel(
     [RelayCommand]
     private async Task RescanLocationAsync()
     {
-        if (!IsScanRoot || isDummy || scanCoordinator is null)
+        if (!IsScanRoot || _isDummy || _actions is null)
             return;
 
-        // will resume a scan if there's a checkpoint
-        await scanCoordinator.RunRescanLocationWithDialogAsync(ScanRootId);
+        await _actions.RescanScanRootAsync(ScanRootId);
     }
 
     [RelayCommand]
     private async Task RescanFolderAsync()
     {
-        if (isDummy || scanCoordinator is null)
+        if (_isDummy || _actions is null || !Dir.IsValid)
             return;
 
-        if (!Dir.IsValid)
-            return;
-
-        await scanCoordinator.RunFolderRescanWithDialogAsync(Dir);
+        await _actions.RescanFolderAsync(Dir);
     }
 
     [RelayCommand]
     private async Task RemoveLocationAsync()
     {
-        if (!IsScanRoot || isDummy || scanCoordinator is null || dialogs is null)
+        if (!IsScanRoot || _isDummy || _actions is null)
             return;
 
-        var ok = await (dialogs?.ShowConfirmationAsync(
-            "Remove scan root",
-            "Remove this scan root from the repository?",
-            "Remove") ?? Task.FromResult(false));
-
-        if (!ok)
-            return;
-
-        await scanCoordinator.RemoveScanRoot(ScanRootId);
-        OnRootRemoved?.Invoke(this);
+        if (await _actions.TryRemoveScanRootAsync(ScanRootId))
+            OnRootRemoved?.Invoke(this);
     }
 
     [RelayCommand]
     private async Task SetDisplayNameAsync()
     {
-        if (!IsScanRoot || isDummy || scanCoordinator is null || dialogs is null)
+        if (!IsScanRoot || _isDummy || _actions is null)
             return;
 
-        var input = await dialogs.ShowTextInputAsync(
-            "Set display name",
-            "Enter a display name for this scan root (blank = clear).",
-            Name);
-
-        if (input is null)
-            return;
-
-        var normalized = string.IsNullOrWhiteSpace(input) ? null : input;
-
-        await scanCoordinator.SetScanRootDisplayName(ScanRootId, normalized);
-
-        OnRootLabelRefreshRequested?.Invoke();
+        // This only changes repo state. Your rebuild path should refresh the model + call RefreshFromModel().
+        if (await _actions.TrySetScanRootDisplayNameAsync(ScanRootId, Name))
+            OnRootLabelRefreshRequested?.Invoke();
     }
 
-    public bool CanDeleteFromDisk => !IsScanRoot && !isDummy;
+    public bool CanDeleteFromDisk => !IsScanRoot && !_isDummy;
 
     [RelayCommand(CanExecute = nameof(CanDeleteFromDisk))]
-    private async Task DeleteFromDiskAsync()
+    private Task DeleteFromDiskAsync()
     {
-        if (IsScanRoot || isDummy || dialogs is null || deleter is null || scanCoordinator is null || repo is null)
-            return;
+        if (IsScanRoot || _isDummy || _actions is null)
+            return Task.CompletedTask;
 
-        var ok = await dialogs.ShowConfirmationAsync(
-            "Delete folder",
-            $"Delete this folder from disk?\n\n{FullPath}",
-            okText: "Delete",
-            cancelText: "Cancel");
-
-        if (!ok)
-            return;
-
-        var (deleted, err) = await deleter.DeleteDirectoryAsync(FullPath, recursive: true);
-        if (!deleted)
-        {
-            await dialogs.ShowErrorAsync("Delete failed", err ?? "Unknown error.");
-            return;
-        }
-
-        var result = await repo.DeleteDirAsync(Dir);
-        if (!result.Success)
-        {
-            await dialogs.ShowErrorAsync(
-                "Delete error",
-                $"Deleting entry from repository failed: {result.Error}");
-        }
+        return _actions.DeleteFolderAsync(Dir, FullPath);
     }
 }
