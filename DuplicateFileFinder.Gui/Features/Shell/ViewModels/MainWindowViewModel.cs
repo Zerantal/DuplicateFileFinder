@@ -1,57 +1,68 @@
 // DuplicateFileFinder.Gui/Features/Shell/ViewModels/MainWindowViewModel.cs
 
+using System.Collections.ObjectModel;
+
 using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Debug;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
+using DuplicateFileFinder.Gui.Infrastructure.Status;
 using DuplicateFileFinder.Gui.Infrastructure.Toasts;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
-using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 using NLog;
-
-using DuplicatesViewModel = DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicatesViewModel;
 
 namespace DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 
 public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 {
-    private readonly IRepoHost _repoHost;
-
     private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
+    private readonly IRepoHost _repoHost;
     private readonly IDialogService _dialogService;
     private readonly IScanCoordinator _scanCoordinator;
     private readonly IToastService _toasts;
+
+    private readonly ObservableCollection<StatusItem> _statusItems = new();
+    public ReadOnlyObservableCollection<StatusItem> StatusItems { get; }
+
+    private readonly List<IStatusProvider> _statusProviders = new();
+    private readonly DisposableManager _disposer;
+
+    public ToastHostViewModel ToastHost { get; }
+
+    public DuplicatesViewModel Duplicates { get; }
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ScanLocationCommand))]
     private bool _isScanning;
 
-    public ToastHostViewModel ToastHost { get; }
-
-    /// <inheritdoc/>
-    private MainWindowViewModel(IRepoHost host,
+    public MainWindowViewModel(
+        IRepoHost host,
         IScanCoordinator scanCoordinator,
         IDialogService dialogService,
         ToastHostViewModel toastHost,
-        IToastService toasts)
+        IToastService toasts,
+        DuplicatesViewModel duplicates,
+        DisposableManager disposer)
     {
-        _repoHost = host;
-        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _repoHost = host ?? throw new ArgumentNullException(nameof(host));
         _scanCoordinator = scanCoordinator ?? throw new ArgumentNullException(nameof(scanCoordinator));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         ToastHost = toastHost ?? throw new ArgumentNullException(nameof(toastHost));
         _toasts = toasts ?? throw new ArgumentNullException(nameof(toasts));
+        Duplicates = duplicates ?? throw new ArgumentNullException(nameof(duplicates));
+        _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
-        Duplicates = new DuplicatesViewModel(host, scanCoordinator, dialogService);
-
-        _scanCoordinator.ScanCompleted += (_, e) =>
+        // Scan completed -> toast + IsScanning
+        EventHandler<ScanCompletedEventArgs> scanCompleted = (_, e) =>
         {
-            // The scan body has finished; indexes may still be rebuilding asynchronously.
             IsScanning = false;
 
             if (e.Error is not null)
@@ -61,18 +72,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             else
                 _toasts.Show("Scan completed.", ToastKind.Success);
         };
+        _scanCoordinator.ScanCompleted += scanCompleted;
+        _disposer.Add(() => _scanCoordinator.ScanCompleted -= scanCompleted);
 
-        host.IndexesRebuilt += (_, _) =>
+        // Indexes rebuilt -> reload duplicates
+        EventHandler<RepoIndexesRebuiltEventArgs> indexesRebuilt = (_, _) =>
         {
-            // Only reload once the index plugins have processed the corresponding generation.
             if (Dispatcher.UIThread.CheckAccess())
                 Duplicates.LoadFromRepo();
             else
                 Dispatcher.UIThread.InvokeAsync(() => Duplicates.LoadFromRepo());
         };
-    }
+        _repoHost.IndexesRebuilt += indexesRebuilt;
+        _disposer.Add(() => _repoHost.IndexesRebuilt -= indexesRebuilt);
 
-    public DuplicatesViewModel Duplicates { get; set; }
+        StatusItems = new ReadOnlyObservableCollection<StatusItem>(_statusItems);
+        RegisterStatusProvider(duplicates.DuplicateGroups);
+        RebuildStatusItems();
+    }
 
     public bool CanStartScan => !IsScanning && !(_scanCoordinator is { IsScanning: true });
 
@@ -104,7 +121,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private async Task DumpAllRepoTreesAsync()
     {
         var path = await RepoTreeDumper.DumpAsync(_repoHost, false, CancellationToken.None);
-
         _toasts.Show($"Repo tree dumped: {path}.", ToastKind.Success);
     }
 
@@ -112,7 +128,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private async Task DumpLiveRepoTreesAsync()
     {
         var path = await RepoTreeDumper.DumpAsync(_repoHost, true, CancellationToken.None);
-
         _toasts.Show($"Repo tree dumped: {path}.", ToastKind.Success);
     }
 
@@ -131,28 +146,33 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         await _scanCoordinator.RunScanNewLocationWithDialogAsync(path);
     }
 
-    public static async Task<MainWindowViewModel?> CreateMainWindowAsync(string repoDir)
+    // ----------------------------- helper methods --------------
+    private void RegisterStatusProvider(IStatusProvider provider)
     {
-        try
+        _statusProviders.Add(provider);
+
+        EventHandler handler = (_, _) => RebuildStatusItems();
+        provider.StatusChanged += handler;
+
+        _disposer.Add(() => provider.StatusChanged -= handler);
+    }
+
+    private void RebuildStatusItems()
+    {
+        _statusItems.Clear();
+
+        foreach (var p in _statusProviders)
         {
-            var host = await RepoHost.OpenAsync(repoDir);
-
-            var dialogService = new DialogService();
-            var scanEngine = new DuplicateFileFinderLib.Core.DuplicateFileFinder(host);
-            var scanCoordinator = new ScanCoordinator(host, scanEngine, dialogService);
-
-            // Toasts: create host VM + service here (composition root)
-            var toastHost = new ToastHostViewModel();
-            var toastService = new ToastService(toastHost, defaultDuration: TimeSpan.FromSeconds(3), maxVisible: 4);
-
-            return new MainWindowViewModel(host, scanCoordinator, dialogService, toastHost, toastService);
-        }
-        catch (Exception e)
-        {
-            Console.Error.WriteLine(e);
-            throw;
+            foreach (var item in p.GetStatusItems())
+                _statusItems.Add(item);
         }
     }
 
-    public async ValueTask DisposeAsync() => await _repoHost.DisposeAsync();
+    // Dispose
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposer.Dispose();
+        await _repoHost.DisposeAsync();
+    }
 }

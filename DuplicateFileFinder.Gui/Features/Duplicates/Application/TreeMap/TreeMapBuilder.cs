@@ -11,7 +11,7 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.TreeMap;
 
 public static class TreeMapBuilder
 {

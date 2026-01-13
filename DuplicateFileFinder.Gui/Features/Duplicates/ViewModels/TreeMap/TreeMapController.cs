@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.TreeMap;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
@@ -22,24 +22,16 @@ public partial class TreeMapController : ObservableObject
 
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _selectedNode;
 
-    [NotifyPropertyChangedFor(nameof(IsOverFileNode))]
-    [NotifyPropertyChangedFor(nameof(IsOverFolderNode))]
-    [ObservableProperty]
-    private ITreeMapNodeElement? _hoveringOverNode;
-
     public TreeMapController(IRepoHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
 
-        _repo = host.Repo;
+        _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
         _treeIndex = host.TreeIndex;
         _fileDirIndex = host.FileDirIndex;
     }
 
     public TreeMapBuildOptions Options { get; init; } = TreeMapBuildOptions.Default;
-
-    public bool IsOverFolderNode => HoveringOverNode is DirTreeMapElement;
-    public bool IsOverFileNode => HoveringOverNode is FileTreeMapElement;
 
     public bool IsMetricBytes
     {

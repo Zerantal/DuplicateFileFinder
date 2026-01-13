@@ -1,10 +1,21 @@
+// DuplicateFileFinder.GuiTests/UI/Smoke/DuplicatesViewSmokeTests.cs
+
+using System.Linq;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
+using Avalonia.VisualTree;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
-using DuplicateFileFinder.GuiTests.Ui.Fakes;
+using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
+
+using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using Xunit;
 
@@ -18,25 +29,72 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
     {
         await ui.RunOnUiThreadAsync(() =>
         {
-            var host = new FakeRepoHost();
+            var repo = new FakeRepo([]);
+            var host = new FakeRepoHost(repo);
             var scan = new FakeScanCoordinator();
             var dialogs = new FakeDialogService();
+            var deleter = new FakeFileSystemDeleteService();
 
-            var vm = new DuplicatesViewModel(host, scan, dialogs);
+            using var disposer = new DisposableManager();
 
-            var view = new DuplicatesView
+            // Assemble graph (DI-style)
+            var dupController = new DuplicateGroupsController(host);
+            var fakeDeletionService = new FakeDuplicateFileDeletionService();
+            var duplicateGroupsVm = new DuplicateGroupsViewModel(dupController, fakeDeletionService);
+
+            // ---- ScanRoots tree: builder + actions + factory + vm ----
+            var scanRootsBuilder = new ScanRootsTreeBuilder(host);
+
+            var scanRootsActions = new ScanRootsTreeNodeActions(
+                host: host,
+                scanner: scan,
+                dialogs: dialogs,
+                deleter: deleter);
+
+            var folderVmFactory = new FolderNodeViewModelFactory(
+                actions: scanRootsActions,
+                builder: scanRootsBuilder);
+
+            var scanRootsVm = new ScanRootsTreeViewModel(
+                builder: scanRootsBuilder,
+                factory: folderVmFactory);
+
+            // ---- TreeMap ----
+            var treeMapController = new TreeMapController(host)
             {
-                DataContext = vm
+                Options = new TreeMapBuildOptions { MaxDepth = 8 }
             };
 
-            LayoutTestHelpers.DoLayout(view);
+            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, dialogs, deleter, disposer);
 
+            var vm = new DuplicatesViewModel(
+                host,
+                scanRootsVm,
+                treeMapController,
+                treeMapActionsVm,
+                duplicateGroupsVm);
+
+            var view = new DuplicatesView { DataContext = vm };
+
+            // Put in a TopLevel so templates/styles/materialization happen.
+            var window = new Window { Content = view };
+            LayoutTestHelpers.DoLayout(window);
+
+            // Controls that are directly in DuplicatesView
             Assert.NotNull(view.FindControl<Control>("ScanRootsHost"));
             Assert.NotNull(view.FindControl<Control>("ScanRootsTree"));
             Assert.NotNull(view.FindControl<Control>("MainTabs"));
-            Assert.NotNull(view.FindControl<Control>("DuplicateSetsRepeater"));
-            Assert.NotNull(view.FindControl<Control>("DuplicateFilesGrid"));
             Assert.NotNull(view.FindControl<Control>("TreeMap"));
+
+            // ---- DuplicateGroups controls: resolve the subview, then search within it ----
+            var groupsView = window.GetVisualDescendants()
+                .OfType<DuplicateGroupsView>()
+                .FirstOrDefault();
+
+            Assert.NotNull(groupsView);
+
+            Assert.NotNull(groupsView.FindControl<Control>("DuplicateSetsRepeater"));
+            Assert.NotNull(groupsView.FindControl<Control>("DuplicateFilesGrid"));
         });
     }
 }

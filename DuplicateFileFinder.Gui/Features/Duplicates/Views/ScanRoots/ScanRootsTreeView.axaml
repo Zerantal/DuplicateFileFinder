@@ -6,6 +6,7 @@
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   xmlns:vm="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree"
   xmlns:scanRoots="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots"
+  xmlns:util="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Util"
   mc:Ignorable="d">
 
   <UserControl.Styles>
@@ -138,6 +139,11 @@
         </Style>
       </TreeView.Styles>
 
+      <TreeView.KeyBindings>
+        <KeyBinding Gesture="Delete"
+                    Command="{Binding SelectedNode.DeleteFromDiskCommand,
+                                FallbackValue={x:Static util:Commands.DisabledCommand}}" />
+      </TreeView.KeyBindings>
       <TreeView.ItemTemplate>
         <TreeDataTemplate DataType="vm:FolderNodeViewModel"
                           ItemsSource="{Binding Children}">
@@ -149,14 +155,17 @@
               <ContextMenu>
                 <MenuItem Header="{Binding RescanOrResumeHeader}"
                           Command="{Binding RescanLocationCommand}"
-                          IsVisible="{Binding IsScanRoot}"/>
+                          IsVisible="{Binding IsScanRoot}" />
                 <MenuItem Header="Rescan folder"
                           Command="{Binding RescanFolderCommand}"
-                          IsVisible="{Binding !IsScanRoot }"/>
+                          IsVisible="{Binding !IsScanRoot }" />
+                <MenuItem Header="Delete from disk"
+                          Command="{Binding DeleteFromDiskCommand}"
+                          IsVisible="{Binding CanDeleteFromDisk}" />
                 <MenuItem Header="Remove location"
-                                                        Command="{Binding RemoveLocationCommand}"
-                                                        IsVisible="{Binding IsScanRoot}" />
-              <MenuItem Header="Set display name"
+                          Command="{Binding RemoveLocationCommand}"
+                          IsVisible="{Binding IsScanRoot}" />
+                <MenuItem Header="Set display name"
                           Command="{Binding SetDisplayNameCommand}"
                           IsVisible="{Binding IsScanRoot}" />
               </ContextMenu>

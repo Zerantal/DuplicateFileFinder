@@ -2,13 +2,9 @@
 
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
-using DuplicateFileFinder.Gui.Features.Duplicates.Models;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
-using DuplicateFileFinder.Gui.Infrastructure.Services;
-using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -18,57 +14,41 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
 public partial class DuplicatesViewModel : ObservableObject
 {
-    private readonly DuplicatesController _duplicates;
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
 
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
+    public DuplicateGroupsViewModel DuplicateGroups { get; }
 
-    public DuplicatesViewModel(IRepoHost host, IScanCoordinator scanner, IDialogService dialogService)
+    public DuplicatesViewModel(
+        IRepoHost host,
+        ScanRootsTreeViewModel scanRootsTree,
+        TreeMapController treeMapController,
+        TreeMapActionsViewModel treeMapActions,
+        DuplicateGroupsViewModel duplicateGroups)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _repo = host.Repo;
-        var hashIndexService = host.HashIndex;
 
-        // folder view
-        var treeBuilder = new ScanRootsTreeBuilder(host, scanner, dialogService);
-        ScanRootsTree = new ScanRootsTreeViewModel(treeBuilder);
+        ScanRootsTree = scanRootsTree ?? throw new ArgumentNullException(nameof(scanRootsTree));
+        _treeMap = treeMapController ?? throw new ArgumentNullException(nameof(treeMapController));
+        TreeMapActions = treeMapActions ?? throw new ArgumentNullException(nameof(treeMapActions));
+        DuplicateGroups = duplicateGroups ?? throw new ArgumentNullException(nameof(duplicateGroups));
+
+        // folder selection drives duplicate-filter prefix
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ScanRootsTreeViewModel.SelectedPath))
-                SelectedFolderPrefix = ScanRootsTree.SelectedPath;
+                DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
         };
 
-        // Treemap
-        _treeMap = new TreeMapController(host) { Options = new TreeMapBuildOptions { MaxDepth = 8 } };
+        // treemap selection drives navigation
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.SelectedNode))
                 OnTreeMapSelectionChanged();
-        };
-
-        TreeMapActions = new TreeMapActionsViewModel(scanner);
-
-        _duplicates = new DuplicatesController(host, hashIndexService);
-        _duplicates.PropertyChanged += (_, e) =>
-        {
-            switch (e.PropertyName)
-            {
-                case nameof(DuplicatesController.DuplicatesFound):
-                    OnPropertyChanged(nameof(DuplicatesFound));
-                    break;
-                case nameof(DuplicatesController.FilesScanned):
-                    OnPropertyChanged(nameof(FilesScanned));
-                    break;
-                case nameof(DuplicatesController.WastedBytes):
-                    OnPropertyChanged(nameof(WastedBytes));
-                    break;
-                case nameof(DuplicatesController.SelectedItems):
-                    OnPropertyChanged(nameof(SelectedItems));
-                    break;
-            }
         };
 
         LoadFromRepo();
@@ -95,26 +75,6 @@ public partial class DuplicatesViewModel : ObservableObject
                 Avalonia.Threading.DispatcherPriority.Background);
         }
     }
-
-    public DuplicateSetRow? SelectedSet
-    {
-        get => _duplicates.SelectedSet;
-        set => _duplicates.SelectedSet = value;
-    }
-
-    public IReadOnlyList<FileItem> SelectedItems => _duplicates.SelectedItems;
-
-    public string? SelectedFolderPrefix
-    {
-        get => _duplicates.SelectedFolderPrefix;
-        set => _duplicates.SelectedFolderPrefix = value;
-    }
-
-    public int DuplicatesFound => _duplicates.DuplicatesFound;
-    public int FilesScanned => _duplicates.FilesScanned;
-    public long WastedBytes => _duplicates.WastedBytes;
-
-    public BulkObservableCollection<DuplicateSetRow> FilteredSets => _duplicates.FilteredSets;
 
     // Expose treemap controller for binding
     public TreeMapController TreeMapController => _treeMap;
@@ -199,15 +159,12 @@ public partial class DuplicatesViewModel : ObservableObject
 
         using (TimingLog.StartPhase("RebuildDuplicatesAndState()"))
         {
-            _duplicates.Rebuild(snapshot);
+            DuplicateGroups.Rebuild(snapshot);
         }
 
         using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
         {
             _treeMap.Rebuild(snapshot);
         }
-
-        OnPropertyChanged(nameof(FilteredSets));
     }
-
 }

@@ -46,4 +46,7 @@ public interface IRepo : IDisposable, IAsyncDisposable
     ScanRootSnapshotView? TryGetScanRootView(long scanRootId);
     public RepoSnapshotView GetRepoSnapshotView();
     public bool HasScanCheckpoint(long scanRootId);
+    Task<DeleteResult> DeleteFileAsync(FileHandle file, CancellationToken ct = default);
+    Task<DeleteResult> DeleteDirAsync(DirHandle dir, CancellationToken ct = default);
+
 }

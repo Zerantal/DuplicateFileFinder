@@ -16,6 +16,7 @@
         <PackageReference Include="Avalonia.Desktop" Version="11.3.6"/>
         <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6"/>
         <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.6"/>
+        <PackageReference Include="Castle.Core" Version="5.2.1" />
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*"/>
         <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.6"/>
 
@@ -26,7 +27,7 @@
         </PackageReference>
         <PackageReference Include="JetBrains.Annotations" Version="2025.2.2"/>
         <PackageReference Include="MessageBox.Avalonia" Version="3.2.0"/>
-        <PackageReference Include="ReactiveUI" Version="22.3.1" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
     </ItemGroup>
 
     <ItemGroup>
@@ -38,16 +39,12 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Update="Features\Splash\Views\SplashWindow.axaml.cs">
-        <DependentUpon>SplashWindow.axaml</DependentUpon>
-        <SubType>Code</SubType>
-      </Compile>
-    </ItemGroup>
-
-    <ItemGroup>
-      <Reference Include="xunit.v3.core">
-        <HintPath>..\..\..\.nuget\packages\xunit.v3.extensibility.core\3.2.1\lib\netstandard2.0\xunit.v3.core.dll</HintPath>
-      </Reference>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>DuplicateFileFinder.GuiTests</_Parameter1>
+        </AssemblyAttribute>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>DynamicProxyGenAssembly2</_Parameter1>
+        </AssemblyAttribute>
     </ItemGroup>
 
 </Project>

@@ -1,10 +1,12 @@
+// DuplicateFileFinder.Gui/Features/Duplicates/ViewModels/ScanRootsTree/ScanRootsTreeViewModel.cs
+
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Domain;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 
@@ -17,6 +19,12 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 public sealed partial class ScanRootsTreeViewModel : ObservableObject
 {
     private readonly ScanRootsTreeBuilder _builder;
+    private readonly FolderNodeViewModelFactory _factory;
+
+    private RepoSnapshotView? _snapshot;
+
+    // DirHandle -> currently materialized VM
+    private readonly Dictionary<DirHandle, FolderNodeViewModel> _vmByHandle = new();
 
     public ObservableCollection<FolderNodeViewModel> Roots { get; } = [];
 
@@ -38,9 +46,10 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     public ICommand SortByCommand { get; }
 
-    public ScanRootsTreeViewModel(ScanRootsTreeBuilder builder)
+    public ScanRootsTreeViewModel(ScanRootsTreeBuilder builder, FolderNodeViewModelFactory factory)
     {
-        _builder = builder;
+        _builder = builder ?? throw new ArgumentNullException(nameof(builder));
+        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
     }
 
@@ -51,10 +60,33 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     public void Rebuild(RepoSnapshotView snapshot)
     {
-        _builder.Rebuild(snapshot, Roots);
+        _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+        _vmByHandle.Clear();
 
-        // Keep whatever sort the user chose.
+        var rootModels = _builder.Build(_snapshot);
+
+        Roots.Clear();
+        foreach (var rootModel in rootModels)
+        {
+            var rootVm = _factory.CreateVm(
+                model: rootModel,
+                parent: null,
+                snapshot: _snapshot,
+                register: RegisterVm);
+
+            Roots.Add(rootVm);
+        }
+
         ResortAll();
+    }
+
+    private void RegisterVm(FolderNodeViewModel vm)
+    {
+        // Only register valid handles; placeholders are invalid and shouldn't participate in navigation.
+        if (!vm.Dir.IsValid)
+            return;
+
+        _vmByHandle[vm.Dir] = vm;
     }
 
     private void SortBy(ScanRootsSortColumn column)
@@ -150,25 +182,51 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
     private void NavigateToDirHandleLazy(DirHandle target)
     {
+        if (_snapshot is null)
+            return;
+
         // Build chain: scanroot -> ... -> target
         if (!_builder.TryBuildAncestorChainToScanRoot(target, out var chain))
             return;
 
-        // Chain[0] is scanroot dir handle, which must exist as a root node.
-        if (!_builder.TryGetNode(chain[0], out var current))
+        // Chain[0] is scanroot dir handle. It MUST already be a root VM.
+        if (!_vmByHandle.TryGetValue(chain[0], out var current))
             return;
 
         // Expand/materialize down the chain.
         for (var i = 1; i < chain.Count; i++)
         {
-            // Ensure parent expanded (triggers lazy load)
+            // Ensure parent expanded (triggers lazy load via EnsureChildrenLoaded)
             current.IsExpanded = true;
 
-            // Ensure the child exists even if it wasn't materialized yet.
-            current = _builder.EnsureNodeExistsUnderParent(current, chain[i]);
+            // If we already have the child VM in the map, use it.
+            if (_vmByHandle.TryGetValue(chain[i], out var existingChild))
+            {
+                current = existingChild;
+                continue;
+            }
+
+            // Otherwise, ensure the *model* exists under parent and create the VM.
+            if (!current.Model.ChildrenMaterialized)
+                _builder.EnsureChildrenLoaded(current.Model);
+
+            var childModel = current.Model.Children.FirstOrDefault(m => m.Dir.Equals(chain[i]));
+            if (childModel is null)
+            {
+                // Fallback: builder can create/attach missing model (e.g. if parent wasn't materialized yet).
+                childModel = _builder.EnsureNodeExistsUnderParent(current.Model, chain[i]);
+            }
+
+            // Ensure the UI children collection contains the child VM (without duplicating work).
+            if (current.HasDummyChild)
+                current.ClearChildren();
+
+            var childVm = _factory.CreateVm(childModel, current, _snapshot, register: RegisterVm);
+            InsertSortedBySizeDesc(current.Children, childVm);
+
+            current = childVm;
         }
 
-        // Expand-to ensures UI shows the selection; selection sets SelectedPath.
         ExpandTo(current);
         SelectedNode = current;
     }
@@ -182,5 +240,14 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
 
         while (stack.Count > 0)
             stack.Pop().IsExpanded = true;
+    }
+
+    private static void InsertSortedBySizeDesc(ObservableCollection<FolderNodeViewModel> list, FolderNodeViewModel node)
+    {
+        var i = 0;
+        while (i < list.Count && list[i].TotalBytes > node.TotalBytes)
+            i++;
+
+        list.Insert(i, node);
     }
 }

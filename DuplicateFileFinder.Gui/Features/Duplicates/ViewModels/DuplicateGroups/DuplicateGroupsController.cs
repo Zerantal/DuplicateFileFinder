@@ -1,3 +1,7 @@
+// Features/Controller/ViewModels/Controller/DuplicateGroupsController.cs
+
+using System.Collections.ObjectModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
@@ -8,9 +12,9 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.Duplicates;
+namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 
-public partial class DuplicatesController : ObservableObject
+public partial class DuplicateGroupsController : ObservableObject
 {
     private readonly IRepo _repo;
     private readonly IHashIndexReadModel _hashIndex;
@@ -24,17 +28,21 @@ public partial class DuplicatesController : ObservableObject
     // RootId -> full path (e.g. VolumePath + RootPath)
     private Dictionary<long, string> _scanRootFullPathByRootId = new();
 
+    // Empty observable collection so the grid always binds to something observable.
+    private static readonly ReadOnlyObservableCollection<FileItem> EmptyItems =
+        new(new ObservableCollection<FileItem>());
+
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;
     [ObservableProperty] private long _wastedBytes;
 
     public BulkObservableCollection<DuplicateSetRow> FilteredSets { get; } = [];
 
-    public DuplicatesController(IRepoHost repoHost, IHashIndexReadModel hashIndex)
+    public DuplicateGroupsController(IRepoHost repoHost)
     {
         _repo = repoHost.Repo ?? throw new ArgumentNullException(nameof(repoHost));
         _mainIndex = repoHost.FileDirIndex;
-        _hashIndex = hashIndex ?? throw new ArgumentNullException(nameof(hashIndex));
+        _hashIndex = repoHost.HashIndex;
     }
 
     /// <summary>Optional path prefix filter (full path string, case-insensitive).</summary>
@@ -72,7 +80,28 @@ public partial class DuplicatesController : ObservableObject
         }
     }
 
-    public IReadOnlyList<FileItem> SelectedItems => _selectedSet?.Items ?? [];
+    // IMPORTANT: return an observable collection so DataGrid updates on add/remove
+    public ReadOnlyObservableCollection<FileItem> SelectedItems
+        => _selectedSet?.Items ?? EmptyItems;
+
+    /// <summary>
+    /// Optimistically remove a file from the currently selected set to update UI immediately.
+    /// This does not change repo/index state; the next rebuild will re-sync from repo truth.
+    /// </summary>
+    public void OptimisticallyRemoveFromSelectedSet(long fileId)
+    {
+        if (_selectedSet is null)
+            return;
+
+        if (!_selectedSet.TryRemoveItemByFileId(fileId))
+            return;
+
+        // If the set no longer qualifies as duplicate, clear selection so grid doesn't show a 1-item "duplicate" group.
+        if (_selectedSet.Items.Count < 2)
+            SelectedSet = null;
+        else
+            OnPropertyChanged(nameof(SelectedItems)); // mostly redundant, but harmless
+    }
 
     public void Rebuild(RepoSnapshotView snapshot, int minDuplicates = 2, long minSizeBytes = 10 * 1024 * 1024)
     {
@@ -141,7 +170,7 @@ public partial class DuplicatesController : ObservableObject
                 .Where(fr => fr.FileRecord.Status != ScanEntryStatus.Deleted)
                 .ToList();
 
-            if (fileRecords.Count == 0)
+            if (fileRecords.Count < minDuplicates)
                 continue;
 
             var hash = fileRecords[0].FileRecord.Hash;
@@ -154,6 +183,12 @@ public partial class DuplicatesController : ObservableObject
         WastedBytes = _hashIndex.TotalSpaceTakenByDuplicates;
 
         ApplyFilters();
+
+        // If selection points at a set that no longer exists after rebuild, clear it.
+        if (_selectedSet is not null && !FilteredSets.Contains(_selectedSet))
+            SelectedSet = null;
+        else
+            OnPropertyChanged(nameof(SelectedItems));
     }
 
     private void ApplyFilters()
