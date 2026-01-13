@@ -61,7 +61,7 @@ public sealed class ScanRootsTreeNode
 
         ScanRootTotalBytes = scanRootTotalBytes <= 0 ? 0 : scanRootTotalBytes;
         PercentOfScanRoot = ScanRootTotalBytes <= 0 ? 0.0 : TotalBytes * 100.0 / ScanRootTotalBytes;
-}
+    }
 
     // ---- Lazy materialization flags ----
 

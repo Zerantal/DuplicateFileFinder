@@ -304,7 +304,7 @@ public sealed class FolderNodeViewModelTests
 
     [Fact]
     public async Task DeleteFromDisk_WhenNotAllowed_DoesNothing()
-        {
+    {
         var actions = new TestActions();
 
         var root = NewRootVm(actions, scanRootId: 1);

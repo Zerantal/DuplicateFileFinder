@@ -31,7 +31,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     private static FolderNodeViewModel CreateDummy()
         => new(new ScanRootsTreeNode
-{
+        {
             Dir = DirHandle.Invalid,
             Name = "Loading...",
             FullPath = "",

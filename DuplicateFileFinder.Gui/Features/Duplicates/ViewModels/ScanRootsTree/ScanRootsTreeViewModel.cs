@@ -215,7 +215,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
             {
                 // Fallback: builder can create/attach missing model (e.g. if parent wasn't materialized yet).
                 childModel = _builder.EnsureNodeExistsUnderParent(current.Model, chain[i]);
-        }
+            }
 
             // Ensure the UI children collection contains the child VM (without duplicating work).
             if (current.HasDummyChild)
