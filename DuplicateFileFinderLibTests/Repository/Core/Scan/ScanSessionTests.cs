@@ -439,6 +439,199 @@ public sealed class ScanSessionTests
         Assert.Equal(1, repo.GetMethodCount("CommitCheckpoint"));
     }
 
+    [Fact]
+    public async Task ImportPartialSnapshot_WhenCompleted_CommitsImportedDirsAndFiles_WithNamesFromStringPool()
+    {
+        // Build a partial snapshot that contains a small tree + one file.
+        // IMPORTANT: scanRootId matches the run so CommitSnapshotV2 is consistent.
+        const long scanRootId = 123;
+        const long scanSequence = 77;
+
+        // Pool indices:
+        // 0 => "" (root)
+        // 1 => "D1"
+        // 2 => "F1.bin"
+        var pool = PackedStringPool.FromStrings(["", "D1", "F1.bin"]);
+
+        var partial = new ScanRootSnapshotV2
+        {
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs =
+            [
+                new DirRecordV2
+                {
+                    DirId = 50,
+                    ParentDirId = -1,
+                    NameStrIdx = 0,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1,
+                    CreatedTicks = 0,
+                    ModifiedTicks = 0
+                },
+                new DirRecordV2
+                {
+                    DirId = 101,
+                    ParentDirId = 50,
+                    NameStrIdx = 1,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1,
+                    CreatedTicks = 10,
+                    ModifiedTicks = 11
+                }
+            ],
+            Files =
+            [
+                new FileRecordV2
+                {
+                    FileId = 201,
+                    DirId = 101,
+                    NameStrIdx = 2,
+                    Size = 123,
+                    Hash = HashKey.NotComputed,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1,
+                    CreatedTicks = 1,
+                    ModifiedTicks = 2
+                }
+            ]
+        };
+
+        var repo = new CapturingRepo { BaselineView = null };
+        var run = CreateRun(scanSequence, scanRootId);
+
+        // Root DirId must match (50) so we don't end up with competing roots.
+        var session = new ScanSession(
+            repo,
+            run,
+            rootDirInput: new DirScanInput
+            {
+                DirId = 50,
+                ParentDirId = -1,
+                Name = "",
+                CreatedTicks = 0,
+                ModifiedTicks = 0,
+                Status = ScanEntryStatus.None,
+                ErrorMessage = null
+            });
+
+        session.ImportPartialSnapshot(partial);
+
+        await session.CompleteAsync(TestContext.Current.CancellationToken);
+
+        var committed = repo.LastCommittedSnapshot!.Value;
+
+        var d1 = committed.Dirs.Single(d => d.DirId == 101);
+        Assert.Equal(50, d1.ParentDirId);
+        Assert.Equal("D1", committed.StringPool.GetString(d1.NameStrIdx));
+
+        var f1 = committed.Files.Single(f => f.FileId == 201);
+        Assert.Equal(101, f1.DirId);
+        Assert.Equal("F1.bin", committed.StringPool.GetString(f1.NameStrIdx));
+    }
+
+    [Fact]
+    public async Task ImportPartialSnapshot_ThenNewFinds_CommitsUnionOfImportedAndNew()
+    {
+        const long scanRootId = 123;
+        const long scanSequence = 88;
+
+        var pool = PackedStringPool.FromStrings(["", "D1", "F1.bin"]);
+
+        var partial = new ScanRootSnapshotV2
+        {
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs =
+            [
+                new DirRecordV2
+                {
+                    DirId = 50,
+                    ParentDirId = -1,
+                    NameStrIdx = 0,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1
+                },
+                new DirRecordV2
+                {
+                    DirId = 101,
+                    ParentDirId = 50,
+                    NameStrIdx = 1,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1
+                }
+            ],
+            Files =
+            [
+                new FileRecordV2
+                {
+                    FileId = 201,
+                    DirId = 101,
+                    NameStrIdx = 2,
+                    Size = 123,
+                    Hash = HashKey.NotComputed,
+                    Status = ScanEntryStatus.Enumerated,
+                    LastSeenScanSequence = scanSequence,
+                    ErrorMessageStrIdx = -1
+                }
+            ]
+        };
+
+        var repo = new CapturingRepo
+        {
+            BaselineView = null,
+            NextFileId = 10_000 // so new file allocation is obvious
+        };
+
+        var run = CreateRun(scanSequence, scanRootId);
+
+        var session = new ScanSession(
+            repo,
+            run,
+            rootDirInput: new DirScanInput
+            {
+                DirId = 50,
+                ParentDirId = -1,
+                Name = "",
+                CreatedTicks = 0,
+                ModifiedTicks = 0,
+                Status = ScanEntryStatus.None,
+                ErrorMessage = null
+            });
+
+        session.ImportPartialSnapshot(partial);
+
+        // Add a NEW file in the imported directory (101).
+        var ctx = session.BeginDirectory(new DirCursor(101));
+        _ = session.OnFileFound(
+            new ObservedFile
+            {
+                Name = "NEW.bin",
+                Size = 999,
+                CreatedTicks = 1,
+                ModifiedTicks = 2,
+                ErrorMessage = null
+            },
+            ref ctx);
+        session.EndDirectory(ref ctx);
+
+        await session.CompleteAsync(TestContext.Current.CancellationToken);
+
+        var committed = repo.LastCommittedSnapshot!.Value;
+
+        Assert.Contains(committed.Files, f => committed.StringPool.GetString(f.NameStrIdx) == "F1.bin");
+        Assert.Contains(committed.Files, f => committed.StringPool.GetString(f.NameStrIdx) == "NEW.bin");
+
+        var newFile = committed.Files.Single(f => committed.StringPool.GetString(f.NameStrIdx) == "NEW.bin");
+        Assert.True(newFile.FileId >= 10_000);
+        Assert.Equal(101, newFile.DirId);
+    }
+
     // ---------------- helpers ----------------
 
     private static ScanSession NewSession(CapturingRepo repo, ScanRun run, long rootDirId = -1)
