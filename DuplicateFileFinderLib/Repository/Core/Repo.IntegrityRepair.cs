@@ -24,7 +24,7 @@ public sealed partial class Repo
     /// - Writes ONLY changed snapshots.
     /// - Writes meta only if it changed.
     /// </summary>
-    public async Task RepairMigratedRepoAsync(CancellationToken ct = default)
+    public async Task RepairRepoAsync(CancellationToken ct = default)
     {
         // Capture repo path (no locking needed after construction)
         string repoPath;
@@ -42,6 +42,7 @@ public sealed partial class Repo
 
         // ------------------------------
         // 1) Fix per-root snapshots: parent missing => promote to root
+        // PLUS: rebuild StringPool + remap indices (repairs NameStrIdx == -1, OOB)
         // ------------------------------
         lock (_sync)
         {
@@ -70,14 +71,26 @@ public sealed partial class Repo
                     }
                 }
 
+                var updated = changed ? (snap with { Dirs = newDirs }) : snap;
+
+                var stringPoolCount = updated.StringPool.Count;
+                if (updated.Dirs.Any(d => !IsValidPoolIndex(d.NameStrIdx, stringPoolCount)) ||
+                    updated.Dirs.Any(d => !IsValidPoolIndex(d.ErrorMessageStrIdx, stringPoolCount)) ||
+                    updated.Files.Any(f => !IsValidPoolIndex(f.NameStrIdx, stringPoolCount)) ||
+                    updated.Files.Any(f => !IsValidPoolIndex(f.ErrorMessageStrIdx, stringPoolCount)))
+                {
+                    updated = RewriteSnapshotStringPool(updated);
+                    changed = true;
+                };
+
                 if (changed)
                 {
-                    var updated = snap with { Dirs = newDirs };
                     _scanRootSnapshots[rootId] = updated;
                     changedSnapshots.Add(updated);
                 }
             }
         }
+
 
         // Persist changed snapshots (outside lock). RepoStore is gated; writes are temp+move.
         foreach (var s in changedSnapshots)
@@ -370,6 +383,74 @@ public sealed partial class Repo
 
         return firstRoot;
     }
+
+    private static ScanRootSnapshotV2 RewriteSnapshotStringPool(
+        ScanRootSnapshotV2 snap)
+    {
+        var oldPool = snap.StringPool;
+        var oldCount = oldPool.Count;
+
+        var builder = new PackedStringBuilder(
+            initialCapacityStrings: Math.Max(256, oldCount),
+            initialCapacityBytes: Math.Max(1024 * 1024, oldPool.Data.Length));
+
+        // Ensure empty string exists
+        var emptyIdx = builder.Intern("");
+
+        int MapRequiredNameIdx(int oldIdx)
+        {
+            // Repair policy: any invalid required index becomes ""
+            if (oldIdx < 0 || oldIdx >= oldCount)
+                return emptyIdx;
+
+            return builder.Intern(oldPool.GetString(oldIdx));
+        }
+
+        int MapOptionalIdx(int oldIdx)
+        {
+            if (oldIdx == -1)
+                return -1;
+
+            if (oldIdx < 0 || oldIdx >= oldCount)
+                return -1;
+
+            return builder.Intern(oldPool.GetString(oldIdx));
+        }
+
+        // Rewrite dirs
+        var newDirs = snap.Dirs;
+        for (int i = 0; i < newDirs.Length; i++)
+        {
+            var d = newDirs[i];
+
+            newDirs[i] = d with
+            {
+                NameStrIdx = MapRequiredNameIdx(d.NameStrIdx),
+                ErrorMessageStrIdx = MapOptionalIdx(d.ErrorMessageStrIdx)
+            };
+        }
+
+        // Rewrite files
+        var newFiles = snap.Files;
+        for (int i = 0; i < newFiles.Length; i++)
+        {
+            var f = newFiles[i];
+
+            newFiles[i] = f with
+            {
+                NameStrIdx = MapRequiredNameIdx(f.NameStrIdx),
+                ErrorMessageStrIdx = MapOptionalIdx(f.ErrorMessageStrIdx)
+            };
+        }
+
+        return snap with
+        {
+            StringPool = builder.Build(),
+            Dirs = newDirs,
+            Files = newFiles
+        };
+    }
+
 
     private sealed class VolumeRootKeyComparer : IEqualityComparer<(string VolumePath, string RootPath)>
     {

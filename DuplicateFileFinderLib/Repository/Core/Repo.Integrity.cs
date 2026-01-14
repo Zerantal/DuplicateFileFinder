@@ -293,21 +293,35 @@ public sealed partial class Repo
         // ----------------------------------------------------
 
         // 3a. duplicate ScanRoots for same RootPath
-        var rootsByPath = scanRoots.Values
+        var rootsByVolumeAndPath = scanRoots.Values
             .Where(r => !r.IsDeleted)
-            .GroupBy(r => r.RootPath, StringComparer.Ordinal)
+            .GroupBy(
+                r => new
+                {
+                    // Prefer stable identity if available; else fall back to path.
+                    VolumeId = r.VolumeId ?? "",
+                    VolumePath = r.VolumePath ?? "",
+                    r.RootPath
+                })
             .ToList();
 
-        foreach (var grp in rootsByPath)
+        foreach (var grp in rootsByVolumeAndPath)
         {
+            // If VolumeId is populated, only use that + RootPath.
+            // If VolumeId is empty for all entries in the group, VolumePath+RootPath is still better than RootPath alone.
             if (grp.Count() > 1)
             {
                 var ids = string.Join(", ", grp.Select(r => r.RootId));
+
+                var volKey = !string.IsNullOrWhiteSpace(grp.Key.VolumeId)
+                    ? $"VolumeId='{grp.Key.VolumeId}'"
+                    : $"VolumePath='{grp.Key.VolumePath}'";
+
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
-                    Code = "ROOT_DUP_ROOTPATH",
-                    Message = $"RootPath '{grp.Key}' has {grp.Count()} ScanRoots: {ids}."
+                    Code = "ROOT_DUP_VOLUME_AND_ROOTPATH",
+                    Message = $"{volKey}, RootPath '{grp.Key.RootPath}' has {grp.Count()} ScanRoots: {ids}."
                 });
             }
         }
@@ -441,8 +455,9 @@ public sealed partial class Repo
             }
         }
 
-        return issues;
+        return DeduplicateIssues(issues);
     }
+
 
     private readonly record struct DirEntry(long ScanRootId, DirRecordV2 Record);
     private readonly record struct FileEntry(long ScanRootId, FileRecordV2 Record);
@@ -454,15 +469,15 @@ public sealed partial class Repo
         var files = new Dictionary<long, FileEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
         var issues = new List<RepoIntegrityIssue>();
 
-        foreach (var (rootId, snap) in snapshots)
+        foreach (var (scanRootId, snap) in snapshots)
         {
-            if (snap.ScanRootId != rootId)
+            if (snap.ScanRootId != scanRootId)
             {
                 issues.Add(new RepoIntegrityIssue
                 {
                     Severity = RepoIntegritySeverity.Warning,
                     Code = "SNAPSHOT_ROOTID_MISMATCH",
-                    Message = $"In-memory snapshot dictionary key rootId={rootId} but snapshot.ScanRootId={snap.ScanRootId}."
+                    Message = $"In-memory snapshot dictionary key scanRootId={scanRootId} but snapshot.ScanRootId={snap.ScanRootId}."
                 });
             }
 
@@ -477,33 +492,34 @@ public sealed partial class Repo
                     {
                         Severity = RepoIntegritySeverity.Error,
                         Code = "SNAPSHOT_DUP_DIRID",
-                        Message = $"Snapshot for ScanRootId {rootId} contains duplicate dirId {d.DirId}."
+                        Message = $"Snapshot for ScanRootId {scanRootId} contains duplicate dirId {d.DirId}."
                     });
                     continue;
                 }
 
-                if (snap.StringPool is not null && (uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "DIR_NAMEIDX_OOB",
-                        Message = $"Dir {d.DirId} (root={rootId}) has NameStrIdx {d.NameStrIdx} outside pool range 0..{poolCount - 1}."
-                    });
-                }
+                ValidateRequiredStringIndex(
+                    issues,
+                    RepoIntegritySeverity.Error,
+                    code: "DIR_NAMEIDX_INVALID",
+                    scanRootId: scanRootId,
+                    entityKind: "Dir",
+                    entityId: d.DirId,
+                    fieldName: nameof(d.NameStrIdx),
+                    idx: d.NameStrIdx,
+                    poolCount: poolCount);
 
-                if (d.ErrorMessageStrIdx >= 0 && snap.StringPool is not null &&
-                    (uint)d.ErrorMessageStrIdx >= (uint)poolCount)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "DIR_ERRIDX_OOB",
-                        Message = $"Dir {d.DirId} (root={rootId}) has ErrorMessageStrIdx {d.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}."
-                    });
-                }
+                ValidateOptionalStringIndex(
+                    issues,
+                    RepoIntegritySeverity.Error,
+                    code: "DIR_ERRIDX_INVALID",
+                    scanRootId: scanRootId,
+                    entityKind: "Dir",
+                    entityId: d.DirId,
+                    fieldName: nameof(d.ErrorMessageStrIdx),
+                    idx: d.ErrorMessageStrIdx,
+                    poolCount: poolCount);
 
-                dirs[d.DirId] = new DirEntry(rootId, d);
+                dirs[d.DirId] = new DirEntry(scanRootId, d);
             }
 
             var seenFileIds = new HashSet<long>();
@@ -515,33 +531,34 @@ public sealed partial class Repo
                     {
                         Severity = RepoIntegritySeverity.Error,
                         Code = "SNAPSHOT_DUP_FILEID",
-                        Message = $"Snapshot for ScanRootId {rootId} contains duplicate fileId {f.FileId}."
+                        Message = $"Snapshot for ScanRootId {scanRootId} contains duplicate fileId {f.FileId}."
                     });
                     continue;
                 }
 
-                if (snap.StringPool is not null && (uint)f.NameStrIdx >= (uint)poolCount)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "FILE_NAMEIDX_OOB",
-                        Message = $"File {f.FileId} (root={rootId}) has NameStrIdx {f.NameStrIdx} outside pool range 0..{poolCount - 1}."
-                    });
-                }
+                ValidateRequiredStringIndex(
+                    issues,
+                    RepoIntegritySeverity.Error,
+                    code: "FILE_NAMEIDX_INVALID",
+                    scanRootId: scanRootId,
+                    entityKind: "File",
+                    entityId: f.FileId,
+                    fieldName: nameof(f.NameStrIdx),
+                    idx: f.NameStrIdx,
+                    poolCount: poolCount);
 
-                if (f.ErrorMessageStrIdx >= 0 && snap.StringPool is not null &&
-                    (uint)f.ErrorMessageStrIdx >= (uint)poolCount)
-                {
-                    issues.Add(new RepoIntegrityIssue
-                    {
-                        Severity = RepoIntegritySeverity.Error,
-                        Code = "FILE_ERRIDX_OOB",
-                        Message = $"File {f.FileId} (root={rootId}) has ErrorMessageStrIdx {f.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}."
-                    });
-                }
+                ValidateOptionalStringIndex(
+                    issues,
+                    RepoIntegritySeverity.Error,
+                    code: "FILE_ERRIDX_INVALID",
+                    scanRootId: scanRootId,
+                    entityKind: "File",
+                    entityId: f.FileId,
+                    fieldName: nameof(f.ErrorMessageStrIdx),
+                    idx: f.ErrorMessageStrIdx,
+                    poolCount: poolCount);
 
-                files[f.FileId] = new FileEntry(rootId, f);
+                files[f.FileId] = new FileEntry(scanRootId, f);
             }
         }
 
@@ -569,27 +586,27 @@ public sealed partial class Repo
                 });
             }
 
-            if ((uint)d.NameStrIdx >= (uint)poolCount && d.ParentDirId != -1)
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "ROOT_SNAPSHOT_DIR_NAMEIDX_OOB",
-                    Message = $"Snapshot {filePath} dirId {d.DirId} has NameStrIdx {d.NameStrIdx} outside pool range 0..{poolCount - 1}.",
-                    FilePath = filePath
-                });
-            }
+            ValidateRequiredStringIndex(
+                issues,
+                RepoIntegritySeverity.Error,
+                code: "DIR_NAMEIDX_INVALID",
+                scanRootId: snap.ScanRootId,
+                entityKind: "Dir",
+                entityId: d.DirId,
+                fieldName: nameof(d.NameStrIdx),
+                idx: d.NameStrIdx,
+                poolCount: poolCount);
 
-            if (d.ErrorMessageStrIdx >= 0 && (uint)d.ErrorMessageStrIdx >= (uint)poolCount)
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "ROOT_SNAPSHOT_DIR_ERRIDX_OOB",
-                    Message = $"Snapshot {filePath} dirId {d.DirId} has ErrorMessageStrIdx {d.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}.",
-                    FilePath = filePath
-                });
-            }
+            ValidateOptionalStringIndex(
+                issues,
+                RepoIntegritySeverity.Error,
+                code: "DIR_ERRIDX_INVALID",
+                scanRootId: snap.ScanRootId,
+                entityKind: "Dir",
+                entityId: d.DirId,
+                fieldName: nameof(d.ErrorMessageStrIdx),
+                idx: d.ErrorMessageStrIdx,
+                poolCount: poolCount);
         }
 
         foreach (var d in snap.Dirs)
@@ -619,27 +636,27 @@ public sealed partial class Repo
                 });
             }
 
-            if ((uint)f.NameStrIdx >= (uint)poolCount)
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "ROOT_SNAPSHOT_FILE_NAMEIDX_OOB",
-                    Message = $"Snapshot {filePath} fileId {f.FileId} has NameStrIdx {f.NameStrIdx} outside pool range 0..{poolCount - 1}.",
-                    FilePath = filePath
-                });
-            }
+            ValidateRequiredStringIndex(
+                issues,
+                RepoIntegritySeverity.Error,
+                code: "FILE_NAMEIDX_INVALID",
+                scanRootId: snap.ScanRootId,
+                entityKind: "File",
+                entityId: f.FileId,
+                fieldName: nameof(f.NameStrIdx),
+                idx: f.NameStrIdx,
+                poolCount: poolCount);
 
-            if (f.ErrorMessageStrIdx >= 0 && (uint)f.ErrorMessageStrIdx >= (uint)poolCount)
-            {
-                issues.Add(new RepoIntegrityIssue
-                {
-                    Severity = RepoIntegritySeverity.Error,
-                    Code = "ROOT_SNAPSHOT_FILE_ERRIDX_OOB",
-                    Message = $"Snapshot {filePath} fileId {f.FileId} has ErrorMessageStrIdx {f.ErrorMessageStrIdx} outside pool range 0..{poolCount - 1}.",
-                    FilePath = filePath
-                });
-            }
+            ValidateOptionalStringIndex(
+                issues,
+                RepoIntegritySeverity.Error,
+                code: "FILE_ERRIDX_INVALID",
+                scanRootId: snap.ScanRootId,
+                entityKind: "File",
+                entityId: f.FileId,
+                fieldName: nameof(f.ErrorMessageStrIdx),
+                idx: f.ErrorMessageStrIdx,
+                poolCount: poolCount);
         }
     }
 
@@ -759,4 +776,102 @@ public sealed partial class Repo
         visiting.Remove(dirId);
         visited.Add(dirId);
     }
+
+
+
+    private static bool IsValidPoolIndex(int idx, int poolCount)
+        => idx >= 0 && idx < poolCount;
+
+    private static void ValidateRequiredStringIndex(
+        IList<RepoIntegrityIssue> issues,
+        RepoIntegritySeverity severity,
+        string code,
+        long scanRootId,
+        string entityKind,
+        long entityId,
+        string fieldName,
+        int idx,
+        int poolCount,
+        string? filePath = null)
+    {
+        if (IsValidPoolIndex(idx, poolCount))
+            return;
+
+        issues.Add(new RepoIntegrityIssue
+        {
+            Severity = severity,
+            Code = code,
+            Message = $"{entityKind} {entityId} (ScanRoot={scanRootId}) has {fieldName}={idx} which is invalid. Expected 0..{poolCount - 1}.",
+            FilePath = filePath
+        });
+    }
+
+    private static void ValidateOptionalStringIndex(
+        IList<RepoIntegrityIssue> issues,
+        RepoIntegritySeverity severity,
+        string code,
+        long scanRootId,
+        string entityKind,
+        long entityId,
+        string fieldName,
+        int idx,
+        int poolCount,
+        string? filePath = null)
+    {
+        // Optional string: -1 means “none”
+        if (idx < 0)
+            return;
+
+        ValidateRequiredStringIndex(
+            issues, severity, code, scanRootId, entityKind, entityId, fieldName, idx, poolCount, filePath);
+    }
+
+    private static string BuildIssueKey(RepoIntegrityIssue i)
+    {
+        // The aim is: if two paths report the same thing, keep only one.
+        // Prefer entries with FilePath (more actionable).
+        // Key includes Code + ScanRoot/Entity info embedded in message, so Message is part of key.
+        // (If you later add structured fields, switch to those instead of Message.)
+        return string.Join("|",
+            i.Severity.ToString(),
+            i.Code,
+            i.FilePath ?? "",
+            i.Message);
+    }
+
+    private static List<RepoIntegrityIssue> DeduplicateIssues(List<RepoIntegrityIssue> issues)
+    {
+        // Prefer issues that have FilePath when duplicates exist.
+        var bestByKey = new Dictionary<string, RepoIntegrityIssue>(capacity: issues.Count);
+
+        foreach (var issue in issues)
+        {
+            var key = BuildIssueKey(issue);
+
+            if (!bestByKey.TryGetValue(key, out var existing))
+            {
+                bestByKey[key] = issue;
+                continue;
+            }
+
+            // Prefer the one that has FilePath (more actionable).
+            var existingHasPath = !string.IsNullOrWhiteSpace(existing.FilePath);
+            var currentHasPath = !string.IsNullOrWhiteSpace(issue.FilePath);
+
+            if (!existingHasPath && currentHasPath)
+                bestByKey[key] = issue;
+
+            // Otherwise keep first (stable).
+        }
+
+        // Keep a stable-ish order: severity then code then message.
+        // (If you want to preserve original order, store an ordinal and sort by it.)
+        return bestByKey.Values
+            .OrderBy(i => i.Severity)
+            .ThenBy(i => i.Code, StringComparer.Ordinal)
+            .ThenBy(i => i.FilePath ?? "", StringComparer.Ordinal)
+            .ThenBy(i => i.Message, StringComparer.Ordinal)
+            .ToList();
+    }
+
 }
