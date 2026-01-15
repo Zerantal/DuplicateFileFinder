@@ -1,7 +1,5 @@
 // DuplicateFileFinder.Gui/Features/Duplicates/ViewModels/ScanRootsTree/FolderNodeViewModel.cs
 
-using System.Collections.ObjectModel;
-
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -50,7 +48,7 @@ public sealed partial class FolderNodeViewModel : ObservableObject
 
     public FolderNodeViewModel? Parent { get; set; }
 
-    public ObservableCollection<FolderNodeViewModel> Children { get; } = new();
+    public List<FolderNodeViewModel> Children { get; } = new();
 
     // View-level decision. Root nodes are created with Parent == null.
     public bool IsScanRoot => Parent is null;

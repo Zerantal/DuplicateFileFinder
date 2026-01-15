@@ -230,9 +230,7 @@ public sealed class ScanSessionTests
 
         await session.CompleteAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, repo.GetMethodCount("CommitScanRootSnapshotV2Async"));
-        Assert.Equal(1, repo.GetMethodCount("MarkScanCompletedAsync"));
-        Assert.Equal(0, repo.GetMethodCount("MarkScanFailedAsync"));
+        Assert.Equal(1, repo.GetMethodCount("FinaliseCompletedScanAsync"));
         Assert.NotNull(repo.LastCommittedSnapshot);
         Assert.Equal(7, repo.LastCommittedSnapshot!.Value.ScanRootId);
     }
@@ -246,8 +244,7 @@ public sealed class ScanSessionTests
 
         await session.FailAsync("boom", cancelled: false, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, repo.GetMethodCount("CommitScanRootSnapshotV2Async"));
-        Assert.Equal(0, repo.GetMethodCount("MarkScanCompletedAsync"));
+        Assert.Equal(0, repo.GetMethodCount("FinaliseCompletedScanAsync"));
         Assert.Equal(1, repo.GetMethodCount("MarkScanFailedAsync"));
         Assert.Equal("boom", repo.LastFailedMessage);
         Assert.False(repo.LastFailedCancelled);

@@ -16,6 +16,16 @@ internal interface IRepoInternal : IRepo
     Task CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct = default);
     Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Finalise a successfully completed scan in one operation:
+    /// commit the completed snapshot, mark the scan run completed, and delete any scan checkpoint.
+    /// This allows the repo to publish a single, reasoned event using the correct generation + snapshot view.
+    /// </summary>
+    Task FinaliseCompletedScanAsync(
+        long scanSequence,
+        ScanRootSnapshotV2 completedSnapshot,
+        CancellationToken ct = default);
+
     Task<ScanContext> BeginNewScanAsync(
         string rootPath,
         ScanOptions options,
@@ -28,7 +38,7 @@ internal interface IRepoInternal : IRepo
         VolumeInfo? volumeInfo = null,
         CancellationToken ct = default);
 
-    // NEW: subtree scan (folder rescan) entrypoint.
+    // subtree scan (folder rescan) entrypoint.
     // Must be StartFresh=true and requires a loaded snapshot for the root.
     Task<ScanContext> BeginSubtreeScanAsync(
         long scanRootId,

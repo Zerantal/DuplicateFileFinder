@@ -198,11 +198,12 @@ public sealed class TreeIndexPluginTests
                 ],
                 files: Array.Empty<(string name, long dirId, long fileId, long size)>());
 
-            plugin.Post(new ScanRootSnapshotCommittedEvent
+            plugin.Post(new ScanRootSnapshotReplacedEvent
             {
                 Generation = 2,
                 ScanRootId = 1,
-                RepoSnapshotView = snap2
+                RepoSnapshotView = snap2,
+                Reason = RepoSnapshotCommitReason.ScanCompleted
             });
 
             await AsyncUtil.WaitForConditionAsync(

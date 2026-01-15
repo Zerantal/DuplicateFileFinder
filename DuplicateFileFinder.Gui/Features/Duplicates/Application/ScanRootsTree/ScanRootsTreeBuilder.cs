@@ -195,8 +195,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         node.Children.Clear();
 
         var scanRootTotal = node.ScanRootTotalBytes;
-
         var childHandles = _treeIndex.GetChildDirs(node.Dir);
+
+        var children = new List<ScanRootsTreeNode>(childHandles.Length);
+
         foreach (var childHandle in childHandles)
         {
             var childRec = _snapshot.GetDirRecord(childHandle);
@@ -205,12 +207,19 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
 
             var childNode = GetOrCreateNodeModel(childHandle, node.FullPath, scanRootTotal, node.ScanRootId);
             childNode.Parent = node;
-
-            InsertSortedBySizeDesc(node.Children, childNode);
+            children.Add(childNode);
         }
+
+        // Sort descending
+        children.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
+
+        // Bulk append
+        for (var i = 0; i < children.Count; i++)
+            node.Children.Add(children[i]);
 
         node.ChildrenMaterialized = true;
     }
+
 
     // ---------------------------------------------------------------------
     // Internal model creation

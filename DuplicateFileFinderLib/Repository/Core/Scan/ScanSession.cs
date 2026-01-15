@@ -382,21 +382,14 @@ internal sealed class ScanSession : IScanSession
 
         // Build V2 snapshot (dirs/files arrays + PackedStringPool)
         var snapshot = _mut.BuildSnapshotV2(ScanRootId);
-        await _repo.CommitScanRootSnapshotV2Async(snapshot, cancellationToken).ConfigureAwait(false);
 
-        await _repo.MarkScanCompletedAsync(ScanSequence, cancellationToken).ConfigureAwait(false);
+        // Finalise in one repo-level operation so it can publish a single reasoned event
+        // using the correct generation + snapshot view.
+        await _repo.FinaliseCompletedScanAsync(ScanSequence, snapshot, cancellationToken).ConfigureAwait(false);
+
         _finished = true;
-
-        // Successful completion => checkpoint is no longer needed.
-        try
-        {
-            await _repo.DeleteScanCheckpointAsync(ScanRootId, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Best effort.
-        }
     }
+
 
     public async Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default)
     {

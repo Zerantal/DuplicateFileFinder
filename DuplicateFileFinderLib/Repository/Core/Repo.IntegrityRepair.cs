@@ -81,7 +81,7 @@ public sealed partial class Repo
                 {
                     updated = RewriteSnapshotStringPool(updated);
                     changed = true;
-                };
+                }
 
                 if (changed)
                 {

@@ -275,11 +275,12 @@ public sealed class FileDirIndexPluginTests
             // Post committed event with gen=2 and different snapshot
             var newSnapshot = MakeDifferentSnapshotSameRoots();
 
-            plugin.Post(new ScanRootSnapshotCommittedEvent
+            plugin.Post(new ScanRootSnapshotReplacedEvent
             {
                 Generation = 2,
                 ScanRootId = 1,
-                RepoSnapshotView = newSnapshot
+                RepoSnapshotView = newSnapshot,
+                Reason = RepoSnapshotCommitReason.ScanCompleted
             });
 
             await AsyncUtil.WaitForConditionAsync(

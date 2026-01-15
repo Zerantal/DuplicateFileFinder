@@ -137,7 +137,7 @@ public sealed class RepoHost : IRepoHost
             {
                 await foreach (var evt in _channel.Reader.ReadAllAsync(_cts.Token).ConfigureAwait(false))
                 {
-                    if (evt is not ScanRootSnapshotCommittedEvent committed)
+                    if (evt is not ScanRootSnapshotReplacedEvent committed)
                         continue;
 
                     var gen = committed.Generation;

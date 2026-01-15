@@ -38,11 +38,12 @@ public sealed class HashIndexPluginTests
 
     private static RepoEvent MakeSnapshotCommittedEvent(long gen, long scanRootId, RepoSnapshotView snapshot)
     {
-        return new ScanRootSnapshotCommittedEvent
+        return new ScanRootSnapshotReplacedEvent
         {
             Generation = gen,
             ScanRootId = scanRootId,
-            RepoSnapshotView = snapshot
+            RepoSnapshotView = snapshot,
+            Reason = RepoSnapshotCommitReason.ScanCompleted
         };
     }
 

@@ -82,7 +82,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
     }
 
-    protected override void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt)
+    protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
     {
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)

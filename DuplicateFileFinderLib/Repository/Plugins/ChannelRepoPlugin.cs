@@ -78,24 +78,36 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
                 OnScanRunFinalisedEvent(finalised);
                 break;
 
-            case ScanRootSnapshotCommittedEvent snapCommitted:
-                using (TimingLog.Start($"Processing OnScanRootSnapshotCommittedEvent ({GetType().Name})"))
+            case ScanRootSnapshotReplacedEvent replaced:
+                using (TimingLog.Start($"Processing ScanRootSnapshotReplacedEvent ({GetType().Name})"))
                 {
-                    OnScanRootSnapshotCommittedEvent(snapCommitted);
+                    OnScanRootSnapshotReplacedEvent(replaced);
                 }
+                break;
+
+            case RepoFileDeletedEvent fileDeleted:
+                OnRepoFileDeletedEvent(fileDeleted);
+                break;
+
+            case RepoDirDeletedEvent dirDeleted:
+                OnRepoDirDeletedEvent(dirDeleted);
+                break;
+
+            case RepoScanRootRemovedEvent rootRemoved:
+                OnRepoScanRootRemovedEvent(rootRemoved);
                 break;
         }
 
-        // Record that we have fully processed this event's generation.
-        // This enables callers (e.g., RepoHost) to wait until indexes have rebuilt.
         UpdateLastProcessedGeneration(evt.Generation);
-
         return ValueTask.CompletedTask;
     }
 
+    protected virtual void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt) { }
+    protected virtual void OnRepoFileDeletedEvent(RepoFileDeletedEvent evt) { }
+    protected virtual void OnRepoDirDeletedEvent(RepoDirDeletedEvent evt) { }
+    protected virtual void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt) { }
     protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
     protected virtual void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt) { }
-    protected virtual void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt) { }
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
     {

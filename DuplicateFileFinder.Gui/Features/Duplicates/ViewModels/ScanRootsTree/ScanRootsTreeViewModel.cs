@@ -1,6 +1,5 @@
 // DuplicateFileFinder.Gui/Features/Duplicates/ViewModels/ScanRootsTree/ScanRootsTreeViewModel.cs
 
-using System.Collections.ObjectModel;
 using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,7 +25,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
     // DirHandle -> currently materialized VM
     private readonly Dictionary<DirHandle, FolderNodeViewModel> _vmByHandle = new();
 
-    public ObservableCollection<FolderNodeViewModel> Roots { get; } = [];
+    public List<FolderNodeViewModel> Roots { get; } = [];
 
     // ---- Selection ----
 
@@ -117,7 +116,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
             SortRecursively(child);
     }
 
-    private void SortInPlace(ObservableCollection<FolderNodeViewModel> nodes)
+    private void SortInPlace(List<FolderNodeViewModel> nodes)
     {
         if (nodes.Count <= 1)
             return;
@@ -130,8 +129,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
             list.Reverse();
 
         nodes.Clear();
-        foreach (var n in list)
-            nodes.Add(n);
+        nodes.AddRange(list);
     }
 
     private Comparison<FolderNodeViewModel> GetComparison()
@@ -242,7 +240,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject
             stack.Pop().IsExpanded = true;
     }
 
-    private static void InsertSortedBySizeDesc(ObservableCollection<FolderNodeViewModel> list, FolderNodeViewModel node)
+    private static void InsertSortedBySizeDesc(List<FolderNodeViewModel> list, FolderNodeViewModel node)
     {
         var i = 0;
         while (i < list.Count && list[i].TotalBytes > node.TotalBytes)

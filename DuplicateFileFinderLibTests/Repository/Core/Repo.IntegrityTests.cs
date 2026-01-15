@@ -368,8 +368,8 @@ public sealed class RepoIntegrityTests : IDisposable
         var issues = repo.ValidateIntegrity(ct: TestContext.Current.CancellationToken);
 
         // These codes depend on how you implemented the OOB checks.
-        Assert.Contains(issues, i => i.Code is "DIR_NAMEIDX_OOB" or "ROOT_SNAPSHOT_DIR_NAMEIDX_OOB");
-        Assert.Contains(issues, i => i.Code is "FILE_NAMEIDX_OOB" or "ROOT_SNAPSHOT_FILE_NAMEIDX_OOB");
+        Assert.Contains(issues, i => i.Code is "DIR_NAMEIDX_INVALID");
+        Assert.Contains(issues, i => i.Code is "FILE_NAMEIDX_INVALID");
 
         await repo.DisposeAsync();
     }
@@ -421,8 +421,8 @@ public sealed class RepoIntegrityTests : IDisposable
 
         var issues = repo.ValidateIntegrity(ct: TestContext.Current.CancellationToken);
 
-        Assert.Contains(issues, i => i.Code is "DIR_ERRIDX_OOB" or "ROOT_SNAPSHOT_DIR_ERRIDX_OOB");
-        Assert.Contains(issues, i => i.Code is "FILE_ERRIDX_OOB" or "ROOT_SNAPSHOT_FILE_ERRIDX_OOB");
+        Assert.Contains(issues, i => i.Code is "DIR_ERRIDX_INVALID" or "ROOT_SNAPSHOT_DIR_ERRIDX_OOB");
+        Assert.Contains(issues, i => i.Code is "FILE_ERRIDX_INVALID" or "ROOT_SNAPSHOT_FILE_ERRIDX_OOB");
 
         await repo.DisposeAsync();
     }
