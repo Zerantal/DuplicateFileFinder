@@ -4,8 +4,5 @@ namespace DuplicateFileFinder.Gui.Features.Scanning.Views;
 
 public partial class ScanProgressWindow : Window
 {
-    public ScanProgressWindow()
-    {
-        InitializeComponent();
-    }
+    public ScanProgressWindow() => InitializeComponent();
 }

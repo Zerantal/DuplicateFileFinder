@@ -250,7 +250,7 @@ public sealed class FullScanOperationTests
 
         // Empty enumeration => HashFilesAsync called with empty list
         fs.Setup(f => f.EnumerateChildren(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Array.Empty<FsEntry>());
+            .Returns([]);
 
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
 
@@ -420,7 +420,7 @@ public sealed class FullScanOperationTests
             VolumePath = volPath
         };
 
-        repo.SetupGet(r => r.ScanRootsView).Returns(new[] { scanRoot });
+        repo.SetupGet(r => r.ScanRootsView).Returns([scanRoot]);
 
         volume.Setup(v => v.GetVolumeInfoForPath(It.IsAny<string>())).Returns((VolumeInfo?)null);
 
@@ -453,7 +453,7 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
 
         fs.Setup(f => f.EnumerateChildren(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Array.Empty<FsEntry>());
+            .Returns([]);
 
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
@@ -510,7 +510,7 @@ public sealed class FullScanOperationTests
             CreatedAt = DateTimeOffset.UtcNow,
             VolumePath = PathUtils.NormalizePath(_fs.Dir("vol"))
         };
-        repo.SetupGet(r => r.ScanRootsView).Returns(new[] { scanRoot });
+        repo.SetupGet(r => r.ScanRootsView).Returns([scanRoot]);
 
         var snap = new ScanRootSnapshotView
         {
@@ -559,7 +559,7 @@ public sealed class FullScanOperationTests
         fs.Setup(f => f.EnumerateChildren(
                 It.Is<string>(p => PathUtils.NormalizePath(p).EndsWith(expectedSuffix, StringComparison.Ordinal)),
                 It.IsAny<CancellationToken>()))
-            .Returns(Array.Empty<FsEntry>());
+            .Returns([]);
 
 
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))

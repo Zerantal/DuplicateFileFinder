@@ -12,7 +12,7 @@ using BaseLineMapValue = (long id, string name, ScanEntryStatus status, long las
 
 internal sealed class BaselineIndex
 {
-    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
     private long _baselineNameCollisions;
     private const int BaselineCollisionTraceLimit = 25;
@@ -158,7 +158,7 @@ internal sealed class BaselineIndex
         if (collisions <= BaselineCollisionTraceLimit)
         {
 
-            _log.Trace(
+            s_log.Trace(
                 $"Baseline collision ({kind}): container={parentOrDirId} name='{name}' " +
                 $"keptId={kept.id} keptStatus={kept.status} keptLastSeen={kept.lastSeen} " +
                 $"droppedId={existing.id} droppedStatus={existing.status} droppedLastSeen={existing.lastSeen}");

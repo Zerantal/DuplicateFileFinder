@@ -47,4 +47,10 @@
         </AssemblyAttribute>
     </ItemGroup>
 
+    <ItemGroup>
+      <Compile Update="Features\Duplicates\Views\ScanRoots\ScanRootsFlatTreeView.axaml.cs">
+        <DependentUpon>ScanRootsFlatTreeView.axaml</DependentUpon>
+      </Compile>
+    </ItemGroup>
+
 </Project>

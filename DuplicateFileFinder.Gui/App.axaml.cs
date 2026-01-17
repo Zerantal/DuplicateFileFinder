@@ -9,7 +9,7 @@ using DuplicateFileFinder.Gui.Features.Splash.ViewModels;
 using DuplicateFileFinder.Gui.Features.Splash.Views;
 using DuplicateFileFinder.Gui.Infrastructure.Bootstrapper;
 
-using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 using Microsoft.Extensions.DependencyInjection;
 

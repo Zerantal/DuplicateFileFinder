@@ -1,9 +1,7 @@
-// ViewModels/DuplicatesViewModel.cs
-
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 using DuplicateFileFinderLib.Logging;
@@ -17,13 +15,13 @@ public partial class DuplicatesViewModel : ObservableObject
     private readonly IRepo _repo;
     private readonly TreeMapController _treeMap;
 
-    public ScanRootsTreeViewModel ScanRootsTree { get; }
+    public ScanRootsFlatTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
     public DuplicateGroupsViewModel DuplicateGroups { get; }
 
     public DuplicatesViewModel(
         IRepoHost host,
-        ScanRootsTreeViewModel scanRootsTree,
+        ScanRootsFlatTreeViewModel scanRootsTree,
         TreeMapController treeMapController,
         TreeMapActionsViewModel treeMapActions,
         DuplicateGroupsViewModel duplicateGroups)
@@ -40,7 +38,7 @@ public partial class DuplicatesViewModel : ObservableObject
         // folder selection drives duplicate-filter prefix
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ScanRootsTreeViewModel.SelectedPath))
+            if (e.PropertyName == nameof(ScanRootsFlatTreeViewModel.SelectedPath))
                 DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
         };
 

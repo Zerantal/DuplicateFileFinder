@@ -9,7 +9,7 @@ using Avalonia.VisualTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
@@ -51,13 +51,9 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
                 dialogs: dialogs,
                 deleter: deleter);
 
-            var folderVmFactory = new FolderNodeViewModelFactory(
-                actions: scanRootsActions,
-                builder: scanRootsBuilder);
-
-            var scanRootsVm = new ScanRootsTreeViewModel(
+            var scanRootsVm = new ScanRootsFlatTreeViewModel(
                 builder: scanRootsBuilder,
-                factory: folderVmFactory);
+                actions: scanRootsActions);
 
             // ---- TreeMap ----
             var treeMapController = new TreeMapController(host)

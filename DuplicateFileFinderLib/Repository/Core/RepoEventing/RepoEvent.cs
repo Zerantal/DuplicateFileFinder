@@ -1,8 +1,7 @@
-
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
-namespace DuplicateFileFinderLib.Repository.Core;
+namespace DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 public abstract record RepoEvent
 {

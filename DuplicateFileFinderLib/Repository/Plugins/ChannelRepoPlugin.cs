@@ -3,12 +3,12 @@
 using System.Threading.Channels;
 
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
-public abstract class ChannelRepoPlugin : IRepoPlugin
+public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenerationBarrier
 {
     private readonly Channel<RepoEvent> _channel;
     private readonly CancellationTokenSource _cts = new();
@@ -96,6 +96,9 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
             case RepoScanRootRemovedEvent rootRemoved:
                 OnRepoScanRootRemovedEvent(rootRemoved);
                 break;
+            case ScanRootMetaChangedEvent metaChanged:
+                OnScanRootMetaChangedEvent(metaChanged);
+                break;
         }
 
         UpdateLastProcessedGeneration(evt.Generation);
@@ -108,6 +111,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
     protected virtual void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt) { }
     protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
     protected virtual void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt) { }
+    protected virtual void OnScanRootMetaChangedEvent(ScanRootMetaChangedEvent evt) { }
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
     {
@@ -199,7 +203,9 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
 
     private readonly record struct GenerationWaiter(long TargetGeneration, TaskCompletionSource Tcs);
 
-    public async ValueTask DisposeAsync()
+    protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
+
+    public virtual async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();
         _channel.Writer.TryComplete();

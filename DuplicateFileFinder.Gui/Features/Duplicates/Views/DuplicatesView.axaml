@@ -18,13 +18,9 @@
     <Grid Grid.Row="0"
           x:Name="ScanRootsHost">
 
-      <ScrollViewer
-        VerticalScrollBarVisibility="Auto"
-        HorizontalScrollBarVisibility="Disabled">
-        <scanRoots:ScanRootsTreeView
-          x:Name="ScanRootsTree"
-          DataContext="{Binding ScanRootsTree}" />
-      </ScrollViewer>
+      <scanRoots:ScanRootsFlatTreeView
+        x:Name="ScanRootsTree"
+        DataContext="{Binding ScanRootsTree}" />
     </Grid>
 
     <!-- Divider -->

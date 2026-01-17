@@ -8,33 +8,26 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 /// <summary>
-/// Builds a scan-root directory tree as UI-agnostic node models (no ViewModel creation, no UI callbacks).
-/// Supports lazy materialization and navigation by ancestry expansion.
-///
-/// This is the "Step 2" refactor: the builder returns ScanRootsTreeNode models and holds lookup state.
-/// Presentation (FolderNodeViewModelFactory / ScanRootsTreeViewModel) is responsible for turning nodes into VMs.
+///     Builds a scan-root directory tree as UI-agnostic node models.
+///     Supports lazy materialization and navigation by ancestry expansion.
+///     the builder returns ScanRootsTreeNode models and holds lookup state.
+///     ScanRootsTreeViewModel is responsible for turning nodes into VMs (ScanRootsTreeView.
 /// </summary>
 public sealed class ScanRootsTreeBuilder(IRepoHost host)
 {
+    private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
     private readonly Dictionary<DirHandle, ScanRootsTreeNode> _nodesByDirHandle = new();
 
     private readonly IRepo _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
-    private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
-
-    private RepoSnapshotView? _snapshot;
 
     // dirId (of scanroot dir) -> scanroot display info
     private Dictionary<long, ScanRootViewEntry> _scanRootByDirId = new();
 
-    private sealed record ScanRootViewEntry(
-        string RootPath,
-        string? VolumePath,
-        string? VolumeLabel,
-        string? DisplayName);
+    private RepoSnapshotView? _snapshot;
 
     /// <summary>
-    /// Rebuilds and returns the root node models (one per scan root).
+    ///     Rebuilds and returns the root node models (one per scan root).
     /// </summary>
     public List<ScanRootsTreeNode> Build(RepoSnapshotView snapshot)
     {
@@ -68,11 +61,11 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
 
             // Create root (resolvable handle => normal; otherwise placeholder)
             var rootNode = CreateRootNodeModel(
-                rootDirId: scanRoot.DirId,
-                label: label,
-                fullPath: scanRootFullPath,
-                scanRootId: scanRoot.RootId,
-                hasCheckpoint: hasCheckpoint,
+                scanRoot.DirId,
+                label,
+                scanRootFullPath,
+                scanRoot.RootId,
+                hasCheckpoint,
                 out var rootHandle);
 
             // If we don't have a resolvable handle (or it isn't usable in snapshot), it's a placeholder.
@@ -84,7 +77,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
 
             // Stats for root from index
             var rootStats = _treeIndex.GetDirStats(rootHandle);
-            rootNode.ApplyAggregateStats(rootStats, scanRootTotalBytes: rootStats.TotalBytes);
+            rootNode.ApplyAggregateStats(rootStats, rootStats.TotalBytes);
 
             // Mark lazy children support
             rootNode.HasLazyChildren = HasChildDirs(rootHandle);
@@ -151,8 +144,8 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     }
 
     /// <summary>
-    /// Ensures a child node model exists under a given parent model.
-    /// This does NOT create viewmodels; it only materializes the model tree.
+    ///     Ensures a child node model exists under a given parent model.
+    ///     This does NOT create viewmodels; it only materializes the model tree.
     /// </summary>
     public ScanRootsTreeNode EnsureNodeExistsUnderParent(
         ScanRootsTreeNode parentNode,
@@ -169,10 +162,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
 
         // Create and attach to parent
         var childNode = GetOrCreateNodeModel(
-            dirHandle: childHandle,
-            parentPath: parentNode.FullPath,
-            scanRootTotalBytes: parentNode.ScanRootTotalBytes,
-            scanRootId: parentNode.ScanRootId);
+            childHandle,
+            parentNode.FullPath,
+            parentNode.ScanRootTotalBytes,
+            parentNode.ScanRootId);
 
         childNode.Parent = parentNode;
 
@@ -182,7 +175,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     }
 
     /// <summary>
-    /// Materializes (once) the children models for a parent model, if it is marked as lazy.
+    ///     Materializes (once) the children models for a parent model, if it is marked as lazy.
     /// </summary>
     public void EnsureChildrenLoaded(ScanRootsTreeNode node)
     {
@@ -220,6 +213,65 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         node.ChildrenMaterialized = true;
     }
 
+    // Materialize child node if not already created, but without enumerating siblings
+    public bool TryEnsureChildNodeFast(
+        ScanRootsTreeNode parentNode,
+        DirHandle childHandle,
+        out ScanRootsTreeNode childNode)
+    {
+        if (_snapshot is null)
+            throw new InvalidOperationException("Build must be called first.");
+
+        childNode = null!;
+
+        if (!childHandle.IsValid)
+            return false;
+
+        // Already created anywhere in the tree?
+        if (_nodesByDirHandle.TryGetValue(childHandle, out var existing))
+        {
+            // Ensure parent link if missing (safe)
+            existing.Parent ??= parentNode;
+            childNode = existing;
+            return true;
+        }
+
+        // Validate the dir exists in snapshot and isn't deleted
+        var childRec = _snapshot.GetDirRecord(childHandle);
+        if (childRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
+            return false;
+
+        // Create like GetOrCreateNodeModel, but without enumerating siblings
+        var name = _snapshot.DecodeDirName(childHandle);
+        var fullPath = Path.Combine(parentNode.FullPath, name);
+
+        var node = new ScanRootsTreeNode
+        {
+            Dir = childHandle,
+            Parent = parentNode,
+            ChildrenMaterialized = false,
+            HasLazyChildren = false,
+            Name = name,
+            FullPath = fullPath,
+            ScanRootId = parentNode.ScanRootId,
+            IsScanRoot = false,
+            HasCheckpoint = false,
+            IsAvailable = true,
+            ScanRootTotalBytes = parentNode.ScanRootTotalBytes
+        };
+
+        _nodesByDirHandle[childHandle] = node;
+
+        // Stats from index
+        var stats = _treeIndex.GetDirStats(childHandle);
+        node.ApplyAggregateStats(stats, parentNode.ScanRootTotalBytes);
+
+        // Has children?
+        node.HasLazyChildren = HasChildDirs(childHandle);
+
+        childNode = node;
+        return true;
+    }
 
     // ---------------------------------------------------------------------
     // Internal model creation
@@ -256,13 +308,12 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             FullPath = fullPath,
             ScanRootId = scanRootId,
             IsScanRoot = true,
-
             HasCheckpoint = hasCheckpoint,
 
             // Root percent baseline
             ScanRootTotalBytes = 0, // set by ApplyAggregateStats below
             ChildrenMaterialized = false,
-            HasLazyChildren = false,
+            HasLazyChildren = false
         };
 
         _nodesByDirHandle[rootHandle] = node;
@@ -284,12 +335,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             FullPath = fullPath,
             ScanRootId = scanRootId,
             IsScanRoot = true,
-
             HasCheckpoint = hasCheckpoint,
-
             ScanRootTotalBytes = 0,
             ChildrenMaterialized = true,
-            HasLazyChildren = false,
+            HasLazyChildren = false
         };
     }
 
@@ -315,12 +364,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             FullPath = fullPath,
             ScanRootId = scanRootId,
             IsScanRoot = false,
-
             HasCheckpoint = false,
-
             ScanRootTotalBytes = scanRootTotalBytes,
             ChildrenMaterialized = false,
-            HasLazyChildren = false,
+            HasLazyChildren = false
         };
 
         _nodesByDirHandle[dirHandle] = node;
@@ -408,4 +455,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             i++;
         list.Insert(i, node);
     }
+
+    private sealed record ScanRootViewEntry(
+        string RootPath,
+        string? VolumePath,
+        string? VolumeLabel,
+        string? DisplayName);
 }

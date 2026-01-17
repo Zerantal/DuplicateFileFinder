@@ -62,7 +62,7 @@ public sealed class PackedStringBuilder
 
         offsets[n] = _length; // sentinel
 
-        var data = _length == 0 ? Array.Empty<byte>() : _buffer.AsSpan(0, _length).ToArray();
+        var data = _length == 0 ? [] : _buffer.AsSpan(0, _length).ToArray();
 
         return new Models.PackedStringPool(data, offsets);
     }
@@ -74,7 +74,7 @@ public sealed class PackedStringBuilder
         _length = 0;
 
         if (!keepCapacity)
-            _buffer = Array.Empty<byte>();
+            _buffer = [];
     }
 
     private void EnsureCapacity(int required)

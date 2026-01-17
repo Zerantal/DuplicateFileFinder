@@ -13,6 +13,8 @@
     <Application.Resources>
         <conv:BytesToHumanConverter x:Key="BytesToHuman" />
         <conv:OneThirdConverter x:Key="OneThirdConverter"/>
+        <conv:DepthToIndentWidthConverter x:Key="DepthToIndentWidthConverter"/>
+        <conv:ExpandedToGlyphConverter x:Key="ExpandedToGlyphConverter"/>
     </Application.Resources>
 
     <Application.DataTemplates>

@@ -1,0 +1,254 @@
+<!-- DuplicateFileFinder.Gui/Features/Duplicates/Views/ScanRoots/ScanRootsFlatTreeView.axaml -->
+
+<UserControl
+  x:Class="DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots.ScanRootsFlatTreeView"
+  xmlns="https://github.com/avaloniaui"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:vm="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat"
+  xmlns:scanRoots="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots"
+  xmlns:util="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Util"
+  xmlns:scanRootsTree="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree"
+  xmlns:converters="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Converters"
+  mc:Ignorable="d"
+  x:DataType="vm:ScanRootsFlatTreeViewModel">
+
+  <UserControl.Resources>
+    <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
+                                               SelectedBrush="#FF2D7DFF"
+                                               UnselectedBrush="Transparent"/>
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+
+    <Style Selector="Button.scanroot-header:pointerover">
+      <Setter Property="Background" Value="#22FFFFFF" />
+    </Style>
+
+    <Style Selector="Button.scanroot-header:disabled">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+
+    <Style Selector="Button.scanroot-header">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Grid ColumnDefinitions="*,16">
+            <TextBlock
+              Text="{TemplateBinding (scanRoots:HeaderButton.Text)}"
+              HorizontalAlignment="{TemplateBinding (scanRoots:HeaderButton.TextAlignment)}"
+              VerticalAlignment="Center"
+              Foreground="White" />
+
+            <TextBlock Grid.Column="1"
+                       Text="{TemplateBinding (scanRoots:HeaderButton.Arrow)}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="White" />
+          </Grid>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+
+    <!-- Row hover/selection (minimal; keep neutral like original TreeView which had no row background) -->
+    <Style Selector="Border.scanroots-row:pointerover">
+      <Setter Property="Background" Value="#11FFFFFF" />
+    </Style>
+
+  </UserControl.Styles>
+
+  <DockPanel>
+
+    <!-- Header (same grid/columns as original) -->
+    <Border DockPanel.Dock="Top"
+            Background="#333"
+            Padding="4">
+      <Grid x:DataType="vm:ScanRootsFlatTreeViewModel"
+            ColumnDefinitions="2*,200,100,100,100,100,100">
+
+        <Button Grid.Column="0"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Name"
+                scanRoots:HeaderButton.Arrow="{Binding NameArrow}"
+                scanRoots:HeaderButton.TextAlignment="Left"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.Name}" />
+
+        <Button Grid.Column="1"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Subtree %"
+                IsEnabled="False"
+                MinWidth="100"
+                MaxWidth="400" />
+
+        <Button Grid.Column="2"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Size"
+                scanRoots:HeaderButton.Arrow="{Binding SizeArrow}"
+                scanRoots:HeaderButton.TextAlignment="Right"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.Size}" />
+
+        <Button Grid.Column="3"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Items"
+                scanRoots:HeaderButton.Arrow="{Binding ItemsArrow}"
+                scanRoots:HeaderButton.TextAlignment="Right"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.Items}" />
+
+        <Button Grid.Column="4"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Files"
+                scanRoots:HeaderButton.Arrow="{Binding FilesArrow}"
+                scanRoots:HeaderButton.TextAlignment="Right"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.Files}" />
+
+        <Button Grid.Column="5"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Dup Files"
+                scanRoots:HeaderButton.Arrow="{Binding DupFilesArrow}"
+                scanRoots:HeaderButton.TextAlignment="Right"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.DupFiles}" />
+
+        <Button Grid.Column="6"
+                Classes="scanroot-header"
+                scanRoots:HeaderButton.Text="Dup Size"
+                scanRoots:HeaderButton.Arrow="{Binding DupBytesArrow}"
+                scanRoots:HeaderButton.TextAlignment="Right"
+                Command="{Binding SortByCommand}"
+                CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.DupBytes}" />
+
+      </Grid>
+    </Border>
+
+    <!-- Virtualized "tree" -->
+    <ScrollViewer x:Name="PART_Scroller">
+      <ItemsRepeater x:Name="PART_Repeater"
+                     ItemsSource="{Binding Rows}">
+        <ItemsRepeater.Layout>
+          <!-- default vertical stack; ItemsRepeater provides virtualization -->
+          <StackLayout Orientation="Vertical" />
+        </ItemsRepeater.Layout>
+
+        <!-- Delete key binding (same semantics as TreeView version) -->
+        <ItemsRepeater.KeyBindings>
+          <KeyBinding Gesture="Delete"
+                      Command="{Binding SelectedRow.DeleteFromDiskCommand,
+                                      FallbackValue={x:Static util:Commands.DisabledCommand}}" />
+        </ItemsRepeater.KeyBindings>
+
+        <ItemsRepeater.ItemTemplate>
+          <DataTemplate x:DataType="vm:ScanRootsFlatRowViewModel">
+
+            <!-- Row wrapper -->
+            <Border Classes="scanroots-row"
+                    Margin="0,0,0,0"
+                    Padding="0"
+                    PointerPressed="Row_OnPointerPressed">
+              <Border.Background>
+                <MultiBinding Converter="{StaticResource SelectedRowBackgroundConverter}">
+                  <Binding /> <!-- the row VM -->
+                  <Binding Path="$parent[UserControl].((vm:ScanRootsFlatTreeViewModel)DataContext).SelectedRow" />
+                </MultiBinding>
+              </Border.Background>
+              <Border.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="{Binding RescanOrResumeHeader}"
+                            Command="{Binding RescanLocationCommand}"
+                            IsVisible="{Binding IsScanRoot}" />
+                  <MenuItem Header="Rescan folder"
+                            Command="{Binding RescanFolderCommand}"
+                            IsVisible="{Binding !IsScanRoot }" />
+                  <MenuItem Header="Delete from disk"
+                            Command="{Binding DeleteFromDiskCommand}"
+                            IsVisible="{Binding CanDeleteFromDisk}" />
+                  <MenuItem Header="Remove location"
+                            Command="{Binding RemoveLocationCommand}"
+                            IsVisible="{Binding IsScanRoot}" />
+                  <MenuItem Header="Set display name"
+                            Command="{Binding SetDisplayNameCommand}"
+                            IsVisible="{Binding IsScanRoot}" />
+                </ContextMenu>
+              </Border.ContextMenu>
+
+              <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
+                    Margin="0,0,16,0"
+                    Background="Transparent">
+
+                <!-- Name column: indent + expander glyph + text -->
+                <DockPanel Grid.Column="0" LastChildFill="True">
+
+                  <!-- Indent: depth provided by converter -->
+                  <Border Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
+
+                  <!-- Expander button -->
+                  <Button Width="16"
+                          Height="16"
+                          Padding="0"
+                          Margin="0,0,4,0"
+                          Background="Transparent"
+                          BorderThickness="0"
+                          IsVisible="{Binding HasLazyChildren}"
+                          Command="{Binding $parent[UserControl].((vm:ScanRootsFlatTreeViewModel)DataContext).ToggleExpandedCommand}"
+                          CommandParameter="{Binding}"
+                          Content="{Binding IsExpanded, Converter={StaticResource ExpandedToGlyphConverter}}" />
+
+                  <!-- Name -->
+                  <TextBlock Text="{Binding DisplayName}"
+                             TextTrimming="CharacterEllipsis"
+                             FontFamily="monospace" />
+                </DockPanel>
+
+                <!-- Subtree % -->
+                <Grid Grid.Column="1"
+                      ColumnDefinitions="*,Auto"
+                      VerticalAlignment="Center"
+                      MinWidth="100"
+                      MaxWidth="400">
+                  <ProgressBar Value="{Binding PercentOfScanRoot}"
+                               Maximum="100"
+                               Height="14"
+                               Margin="0,0,6,0" />
+                  <TextBlock Grid.Column="0"
+                             Text="{Binding PercentOfScanRoot, StringFormat={}{0:F1}%}"
+                             FontSize="11"
+                             VerticalAlignment="Center" />
+                </Grid>
+
+                <!-- Size -->
+                <TextBlock Grid.Column="2"
+                           Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}"
+                           HorizontalAlignment="Right" />
+
+                <!-- Items -->
+                <TextBlock Grid.Column="3"
+                           Text="{Binding ItemCount, StringFormat={}{0:N0}}"
+                           HorizontalAlignment="Right" />
+
+                <!-- Files -->
+                <TextBlock Grid.Column="4"
+                           Text="{Binding FileCount, StringFormat={}{0:N0}}"
+                           HorizontalAlignment="Right" />
+
+                <!-- Dup Files -->
+                <TextBlock Grid.Column="5"
+                           Text="{Binding DuplicateFiles, StringFormat={}{0:N0}}"
+                           HorizontalAlignment="Right" />
+
+                <!-- Dup Bytes -->
+                <TextBlock Grid.Column="6"
+                           Text="{Binding DuplicateBytes, Converter={StaticResource BytesToHuman}}"
+                           HorizontalAlignment="Right" />
+
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsRepeater.ItemTemplate>
+      </ItemsRepeater>
+    </ScrollViewer>
+
+  </DockPanel>
+</UserControl>

@@ -1,4 +1,4 @@
-using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
 
