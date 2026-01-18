@@ -95,6 +95,67 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         SaveState();
     }
 
+    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    {
+        // Ignore stale/out-of-order events (channel may drop old items).
+        if (evt.Generation <= _lastIndexedGeneration)
+            return;
+
+        var removedRootId = evt.ScanRootId;
+
+        var oldChildDirs = _childrenDirsByParentId;
+        var oldChildFiles = _childrenFilesByDirId;
+        var oldStats = _dirStatsById;
+
+        // Remove all keys that belong to the removed scan root.
+        // Values should not contain cross-root handles, but filter defensively anyway.
+        var newChildDirs = new Dictionary<DirHandle, ImmutableArray<DirHandle>>(oldChildDirs.Count);
+        foreach (var (k, v) in oldChildDirs)
+        {
+            if (k.ScanRootId == removedRootId)
+                continue;
+
+            if (v.IsDefaultOrEmpty)
+            {
+                newChildDirs[k] = ImmutableArray<DirHandle>.Empty;
+                continue;
+            }
+
+            // Defensive filter (should be no-ops in normal conditions)
+            var filtered = v.Where(h => h.ScanRootId != removedRootId).ToImmutableArray();
+            newChildDirs[k] = filtered;
+        }
+
+        var newChildFiles = new Dictionary<DirHandle, ImmutableArray<FileHandle>>(oldChildFiles.Count);
+        foreach (var (k, v) in oldChildFiles)
+        {
+            if (k.ScanRootId == removedRootId)
+                continue;
+
+            if (v.IsDefaultOrEmpty)
+            {
+                newChildFiles[k] = ImmutableArray<FileHandle>.Empty;
+                continue;
+            }
+
+            var filtered = v.Where(h => h.ScanRootId != removedRootId).ToImmutableArray();
+            newChildFiles[k] = filtered;
+        }
+
+        var newStats = new Dictionary<DirHandle, DirAggregateStats>(oldStats.Count);
+        foreach (var (k, s) in oldStats)
+            if (k.ScanRootId != removedRootId)
+                newStats[k] = s;
+
+        // Publish.
+        _childrenDirsByParentId = newChildDirs;
+        _childrenFilesByDirId = newChildFiles;
+        _dirStatsById = newStats;
+
+        _lastIndexedGeneration = evt.Generation;
+        SaveState();
+    }
+
 
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)

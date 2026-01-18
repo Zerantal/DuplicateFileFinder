@@ -96,6 +96,59 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         SaveState();
     }
 
+    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    {
+        // Ignore stale/out-of-order events (channel may drop old items).
+        if (evt.Generation <= _lastIndexedGeneration)
+            return;
+
+        var removedRootId = evt.ScanRootId;
+
+        var oldGroups = _groupsByHash;
+        var oldAll = _allFiles;
+
+        // Rebuild per-hash handle lists excluding the removed scan root.
+        var tmp = new Dictionary<HashKey, (long size, List<FileHandle> list)>(oldGroups.Count);
+
+        foreach (var (hash, meta) in oldGroups)
+        {
+            if (meta.Count <= 0)
+            {
+                tmp[hash] = (meta.Size, new List<FileHandle>(capacity: 0));
+                continue;
+            }
+
+            var list = new List<FileHandle>(capacity: meta.Count);
+
+            var start = meta.Offset;
+            var end = meta.Offset + meta.Count;
+
+            for (var i = start; i < end; i++)
+            {
+                var fh = oldAll[i];
+                if (fh.ScanRootId == removedRootId)
+                    continue;
+
+                list.Add(fh);
+            }
+
+            // Preserve best-known size for the group.
+            tmp[hash] = (meta.Size, list);
+        }
+
+        // Drop empty groups? Either is fine, but keeping empties wastes map entries.
+        // We'll drop empties to keep the published index compact.
+        var compact = new Dictionary<HashKey, (long size, List<FileHandle> list)>(tmp.Count);
+        foreach (var (hash, g) in tmp)
+            if (g.list.Count > 0)
+                compact[hash] = g;
+
+        FlattenAndPublish(compact);
+
+        _lastIndexedGeneration = evt.Generation;
+        SaveState();
+    }
+
 
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)

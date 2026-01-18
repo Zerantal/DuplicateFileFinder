@@ -1,5 +1,3 @@
-using System.Collections.ObjectModel;
-
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
@@ -25,6 +23,20 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
     private readonly string _dataDirectory;
     private const string StateFileName = "file-dir-index.bin";
+
+    // Active (non-deleted) scan roots (based on snapshot scanroot meta)
+    private HashSet<long> _activeScanRoots = new();
+
+    // Per-root counts (only updated on worker thread)
+    private Dictionary<long, int> _dirCountByRootId = new();
+    private Dictionary<long, int> _fileCountByRootId = new();
+
+    // Published counts (exclude deleted scan roots)
+    private int _activeDirCount;
+    private int _activeFileCount;
+
+    public int DirCount => _activeDirCount;
+    public int FileCount => _activeFileCount;
 
     public FileDirIndexPlugin(string dataDirectory) : base(4096)
     {
@@ -52,6 +64,9 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         }
         else
         {
+            // State loaded for this generation.
+            // Ensure counts are coherent with the current snapshot (state may be older format).
+            EnsureCountsFromSnapshotIfMissing(evt.RepoSnapshotView);
             _lastIndexedGeneration = evt.Generation;
         }
     }
@@ -73,6 +88,28 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         SaveState();
     }
 
+    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    {
+        if (evt.Generation <= _lastIndexedGeneration)
+            return;
+
+        var rootId = evt.ScanRootId;
+
+        // Mark inactive (idempotent)
+        if (_activeScanRoots.Remove(rootId))
+        {
+            // Subtract the removed root's contribution
+            if (_dirCountByRootId.TryGetValue(rootId, out var d))
+                _activeDirCount = Math.Max(0, _activeDirCount - d);
+
+            if (_fileCountByRootId.TryGetValue(rootId, out var f))
+                _activeFileCount = Math.Max(0, _activeFileCount - f);
+        }
+
+        _lastIndexedGeneration = evt.Generation;
+        SaveState();
+    }
+
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)
     // ---------------------------------------------------------------------
@@ -81,10 +118,13 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     {
         using (TimingLog.StartPhase("Rebuilding FileDirIndex"))
         {
-            var liveScanRootIds = repoSnapshot.ScanRoots.Values
-                .Where(r => !r.IsDeleted).Select(r => r.RootId);
+            var activeRootIds = repoSnapshot.ScanRoots.Values
+                .Where(r => !r.IsDeleted)
+                .Select(r => r.RootId)
+                .ToHashSet();
+
             var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(
-                repoSnapshot.Snapshots.Where(kvp => liveScanRootIds.Contains(kvp.Key)));
+                repoSnapshot.Snapshots.Where(kvp => activeRootIds.Contains(kvp.Key)));
 
             // Build fresh dictionaries (no shared state with readers).
             // Capacity hints reduce rehashing.
@@ -99,8 +139,24 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             var newDirs = new Dictionary<long, DirHandle>(capacity: totalDirs);
             var newFiles = new Dictionary<long, FileHandle>(capacity: totalFiles);
 
+            var newDirCounts = new Dictionary<long, int>(capacity: liveSnapshots.Count);
+            var newFileCounts = new Dictionary<long, int>(capacity: liveSnapshots.Count);
+
+            var activeDirCount = 0;
+            var activeFileCount = 0;
+
             foreach (var (rootId, snapshot) in liveSnapshots)
             {
+                // Per-root counts from the snapshot arrays
+                var dirCount = snapshot.Dirs.Count;
+                var fileCount = snapshot.Files.Count;
+
+                newDirCounts[rootId] = dirCount;
+                newFileCounts[rootId] = fileCount;
+
+                activeDirCount += dirCount;
+                activeFileCount += fileCount;
+
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
                     var dir = snapshot.Dirs[i];
@@ -124,11 +180,55 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
             // Publish in a coherent order:
             // 1) publish dictionaries
-            // 2) publish snapshot view last so readers see coherent state for Decode* usage
+            // 2) publish counts + active roots
+            // 3) publish snapshot view last so readers see coherent state for Decode* usage
             _dirsById = newDirs;
             _filesById = newFiles;
+
+            _activeScanRoots = activeRootIds;
+            _dirCountByRootId = newDirCounts;
+            _fileCountByRootId = newFileCounts;
+            _activeDirCount = activeDirCount;
+            _activeFileCount = activeFileCount;
+
             _snapshotView = repoSnapshot;
         }
+    }
+
+    private void EnsureCountsFromSnapshotIfMissing(RepoSnapshotView snapshot)
+    {
+        // If counts dictionaries are empty (e.g., older persisted state), recompute quickly.
+        if (_dirCountByRootId.Count != 0 || _fileCountByRootId.Count != 0)
+            return;
+
+        var activeRootIds = snapshot.ScanRoots.Values
+            .Where(r => !r.IsDeleted)
+            .Select(r => r.RootId)
+            .ToHashSet();
+
+        var dirCounts = new Dictionary<long, int>(capacity: activeRootIds.Count);
+        var fileCounts = new Dictionary<long, int>(capacity: activeRootIds.Count);
+
+        var activeDirCount = 0;
+        var activeFileCount = 0;
+
+        foreach (var rootId in activeRootIds)
+        {
+            if (!snapshot.Snapshots.TryGetValue(rootId, out var sr))
+                continue;
+
+            dirCounts[rootId] = sr.Dirs.Count;
+            fileCounts[rootId] = sr.Files.Count;
+
+            activeDirCount += sr.Dirs.Count;
+            activeFileCount += sr.Files.Count;
+        }
+
+        _activeScanRoots = activeRootIds;
+        _dirCountByRootId = dirCounts;
+        _fileCountByRootId = fileCounts;
+        _activeDirCount = activeDirCount;
+        _activeFileCount = activeFileCount;
     }
 
     // ---------------------------------------------------------------------
@@ -198,9 +298,6 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     public bool TryGetDir(long dirId, out DirHandle handle) => _dirsById.TryGetValue(dirId, out handle);
 
     public bool TryGetFile(long fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
-
-    public int FileCount => _filesById.Count;
-    public int DirCount => _dirsById.Count;
 
     public bool TryGetFilePathById(long fileId, out string relativePath)
     {
