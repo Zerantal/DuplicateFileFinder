@@ -83,11 +83,11 @@ public static class RepoUtil
         }
 
         var rootSnapshot = new ScanRootSnapshotView
-                {
-                    ScanRootId = scanRootId,
-                    StringPool = pool,
-                    Dirs = dirRecs,
-                    Files = fileRecs
+        {
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs = dirRecs,
+            Files = fileRecs
         };
 
         var snapshots = new Dictionary<long, ScanRootSnapshotView>
@@ -100,7 +100,7 @@ public static class RepoUtil
             Snapshots = snapshots,
             ScanRoots = MakeScanRootsFromSnapshots(snapshots)
         };
-                }
+    }
 
     /// <summary>
     /// Builds a usable RepoSnapshotView.ScanRoots map from the provided snapshots.
@@ -135,8 +135,8 @@ public static class RepoUtil
                 DisplayName = displayNameForRoot?.Invoke(rootId),
                 IsDeleted = deleted,
                 CreatedAt = DateTimeOffset.UtcNow
-        };
-    }
+            };
+        }
 
         return dict;
     }

@@ -1,4 +1,5 @@
-﻿using Bench;
+using Bench;
+
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;

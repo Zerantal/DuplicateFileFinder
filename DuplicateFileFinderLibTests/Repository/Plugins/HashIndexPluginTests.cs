@@ -60,7 +60,7 @@ public sealed class HashIndexPluginTests
                 CreatedAt = DateTimeOffset.UtcNow,
                 IsDeleted = false
             };
-    }
+        }
 
         return dict;
     }
@@ -149,9 +149,9 @@ public sealed class HashIndexPluginTests
             var h = new HashKey([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
             var snapshots = new Dictionary<long, ScanRootSnapshotView>
-                    {
-                        [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h, size: 100),
-                        [2] = MakeRoot(scanRootId: 2, dirId: 20, hash: h, size: 100)
+            {
+                [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h, size: 100),
+                [2] = MakeRoot(scanRootId: 2, dirId: 20, hash: h, size: 100)
             };
 
             var snapshot = new RepoSnapshotView

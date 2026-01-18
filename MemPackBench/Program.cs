@@ -1,4 +1,4 @@
-﻿// BenchmarkPackedStringPool.csproj
+// BenchmarkPackedStringPool.csproj
 // <Project Sdk="Microsoft.NET.Sdk">
 //   <PropertyGroup>
 //     <OutputType>Exe</OutputType>
@@ -14,6 +14,7 @@
 // </Project>
 
 using BenchmarkDotNet.Running;
+
 using MemPackBench.FileDirIndexStateBench;
 
 // BenchmarkRunner.Run<PoolBench>();

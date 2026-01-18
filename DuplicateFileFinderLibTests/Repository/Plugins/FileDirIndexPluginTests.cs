@@ -309,12 +309,12 @@ public sealed class FileDirIndexPluginTests
     {
         // Deterministic ordering matters because handles are index-based.
         var snapshots = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [1] = MakeRoot(
+        {
+            [1] = MakeRoot(
                     scanRootId: 1,
                     dirIds: [101L, 102L],
                     fileIds: [1001L]),
-                [2] = MakeRoot(
+            [2] = MakeRoot(
                     scanRootId: 2,
                     dirIds: [201L],
                     fileIds: [2001L])
@@ -330,12 +330,12 @@ public sealed class FileDirIndexPluginTests
     private static RepoSnapshotView MakeDifferentSnapshotSameRoots()
     {
         var snapshots = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [1] = MakeRoot(
+        {
+            [1] = MakeRoot(
                     scanRootId: 1,
                     dirIds: [99901L], // completely different IDs
                     fileIds: [999001L]),
-                [2] = MakeRoot(
+            [2] = MakeRoot(
                     scanRootId: 2,
                     dirIds: [99902L],
                     fileIds: [999002L])
@@ -351,8 +351,8 @@ public sealed class FileDirIndexPluginTests
     private static RepoSnapshotView MakeHierarchicalSnapshot()
     {
         var snapshots = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [1] = MakeHierarchicalRoot(scanRootId: 1)
+        {
+            [1] = MakeHierarchicalRoot(scanRootId: 1)
         };
 
         return new RepoSnapshotView

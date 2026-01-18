@@ -1,4 +1,4 @@
-﻿namespace DupFileUtil.Commands;
+namespace DupFileUtil.Commands;
 
 internal interface ICommand
 {
