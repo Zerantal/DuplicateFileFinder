@@ -5,18 +5,25 @@ using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 // ReSharper disable UnusedParameterInPartialMethod
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
 
-public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
+public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject, IAsyncDisposable
 {
+    private readonly DisposableManager _disposer;
+
     private readonly IScanRootsTreeNodeActions _actions;
     private readonly ScanRootsTreeBuilder _builder;
+
+    // ScanRootId -> index in Rows where the depth-0 root row currently lives
+    private readonly Dictionary<long, int> _rootIndexByScanRootId = new();
 
     // Remember expanded handles so Resort/Rebuild can restore expansion state
     private readonly HashSet<DirHandle> _expanded = new();
@@ -24,7 +31,8 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
     // Handle->row for quick selection
     private readonly Dictionary<DirHandle, ScanRootsFlatRowViewModel> _rowByHandle = new();
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedPath))]
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectedPath))]
     private ScanRootsFlatRowViewModel? _selectedRow;
 
     private RepoSnapshotView? _snapshot;
@@ -33,13 +41,26 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
 
     [ObservableProperty] private bool _sortDescending = true;
 
-    public ScanRootsFlatTreeViewModel(ScanRootsTreeBuilder builder, IScanRootsTreeNodeActions actions)
+    public ScanRootsFlatTreeViewModel(
+        RepoUiEventRelayPlugin repoEvents,
+        ScanRootsTreeBuilder builder,
+        IScanRootsTreeNodeActions actions,
+        DisposableManager disposer)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+        _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
         ToggleExpandedCommand = new RelayCommand<ScanRootsFlatRowViewModel>(ToggleExpanded);
+
+        repoEvents.ScanRootRemoved += ScanRootRemovedEventHandler;
+        disposer.Add(() => repoEvents.ScanRootRemoved -= ScanRootRemovedEventHandler);
+    }
+
+    private void ScanRootRemovedEventHandler(object? sender, RepoScanRootRemovedEvent e)
+    {
+        RemoveScanRootFromRows(e.ScanRootId);
     }
 
     // Visible, virtualized rows
@@ -78,22 +99,20 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
         if (_snapshot is null)
             return;
 
-        var rootModels =
-            _builder.Build(_snapshot); // already size-sorted by builder :contentReference[oaicite:6]{index=6}
+        var rootModels = _builder.Build(_snapshot);
 
         Rows.BeginUpdate();
         try
         {
             Rows.Clear();
             _rowByHandle.Clear();
+            _rootIndexByScanRootId.Clear();
 
             foreach (var model in rootModels)
-            {
-                var row = CreateRow(model, 0);
-                Rows.Add(row);
-            }
+                Rows.Add(CreateRow(model, 0));
 
             ApplyRootSort();
+            RebuildRootIndexMap_NoLock();
         }
         finally
         {
@@ -101,12 +120,33 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
         }
     }
 
+    private void RebuildRootIndexMap_NoLock()
+    {
+        _rootIndexByScanRootId.Clear();
+
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            var r = Rows[i];
+            if (r.Depth != 0)
+                break; // depth-0 block should be at the front
+
+            _rootIndexByScanRootId[r.ScanRootId] = i;
+        }
+    }
+
+
     private ScanRootsFlatRowViewModel CreateRow(ScanRootsTreeNode model, int depth)
     {
         var row = new ScanRootsFlatRowViewModel(model, _actions, depth);
 
         if (model.Dir.IsValid)
             _rowByHandle[model.Dir] = row;
+
+        if (depth == 0)
+        {
+            // optimistic removal to avoid races with user actions while repo work completes
+            row.OnRootRemoved = _ => RemoveScanRootFromRows(model.ScanRootId);
+        }
 
         return row;
     }
@@ -191,6 +231,9 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
             var idx = insertAt + 1;
             foreach (var child in ordered)
                 Rows.Insert(idx++, CreateRow(child, childDepth));
+
+            var inserted = ordered.Count;
+            AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: insertAt + 1, delta: inserted);
         }
         finally
         {
@@ -215,8 +258,23 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
 
             var parentDepth = row.Depth;
             var i = start + 1;
+
+            var removed = 0;
             while (i < Rows.Count && Rows[i].Depth > parentDepth)
+            {
+                var r = Rows[i];
+                if (r.Dir.IsValid)
+                {
+                    _expanded.Remove(r.Dir);
+                    _rowByHandle.Remove(r.Dir);
+                }
+
                 Rows.RemoveAt(i);
+                removed++;
+            }
+
+            if (removed > 0)
+                AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: start + 1, delta: -removed);
         }
         finally
         {
@@ -422,5 +480,97 @@ public sealed partial class ScanRootsFlatTreeViewModel : ObservableObject
             ScanRootsSortColumn.DupBytes => static (a, b) => a.DuplicateBytes.CompareTo(b.DuplicateBytes),
             _ => static (_, _) => 0
         };
+    }
+
+    private void RemoveScanRootFromRows(long scanRootId)
+    {
+        if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out var rootIndex))
+            return; // already removed / not visible
+
+        if (rootIndex < 0 || rootIndex >= Rows.Count)
+        {
+            // Map got stale somehow; fall back to a quick rebuild of the map and retry once.
+            RebuildRootIndexMap_NoLock();
+            if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex))
+                return;
+            if (rootIndex < 0 || rootIndex >= Rows.Count)
+                return;
+        }
+
+        // Verify root at index (defensive)
+        var rootRow = Rows[rootIndex];
+        if (rootRow.Depth != 0 || rootRow.ScanRootId != scanRootId)
+        {
+            // Map stale due to unusual reorder; rebuild and retry once
+            RebuildRootIndexMap_NoLock();
+            if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex))
+                return;
+
+            rootRow = Rows[rootIndex];
+            if (rootRow.Depth != 0 || rootRow.ScanRootId != scanRootId)
+                return;
+        }
+
+        // If selection is inside subtree, clear it
+        if (SelectedRow is not null && SelectedRow.ScanRootId == scanRootId)
+            SelectedRow = null;
+
+        Rows.BeginUpdate();
+        try
+        {
+            // Remove contiguous visible range: root + its descendants until next root (depth 0) or end.
+            var removeAt = rootIndex;
+            var removedCount = 0;
+
+            while (removeAt < Rows.Count)
+            {
+                if (removedCount > 0 && Rows[removeAt].Depth == 0)
+                    break; // next root => stop
+
+                var row = Rows[removeAt];
+
+                // Clear caches for real handles
+                if (row.Dir.IsValid)
+                {
+                    _expanded.Remove(row.Dir);
+                    _rowByHandle.Remove(row.Dir);
+                }
+
+                Rows.RemoveAt(removeAt);
+                removedCount++;
+            }
+
+            // Remove root entry from root-index map
+            _rootIndexByScanRootId.Remove(scanRootId);
+
+            // Adjust cached root indices for roots after the removed region
+            AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: rootIndex, delta: -removedCount);
+        }
+        finally
+        {
+            Rows.EndUpdate();
+        }
+    }
+
+    private void AdjustRootIndicesAfterMutation_NoLock(int startIndexInclusive, int delta)
+    {
+        if (delta == 0 || _rootIndexByScanRootId.Count == 0)
+            return;
+
+        // Only roots whose index is >= startIndexInclusive are affected
+        // (root rows can be anywhere due to expansions above them).
+        var keys = _rootIndexByScanRootId.Keys.ToArray();
+        foreach (var key in keys)
+        {
+            var idx = _rootIndexByScanRootId[key];
+            if (idx >= startIndexInclusive)
+                _rootIndexByScanRootId[key] = idx + delta;
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _disposer.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

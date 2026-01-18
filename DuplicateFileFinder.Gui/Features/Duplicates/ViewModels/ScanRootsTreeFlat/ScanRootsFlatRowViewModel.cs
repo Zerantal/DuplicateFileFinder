@@ -13,7 +13,8 @@ public sealed partial class ScanRootsFlatRowViewModel : ObservableObject
 
     [ObservableProperty] private bool _isExpanded;
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(DisplayName))]
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
     private bool _showFullPath;
 
     public ScanRootsFlatRowViewModel(
