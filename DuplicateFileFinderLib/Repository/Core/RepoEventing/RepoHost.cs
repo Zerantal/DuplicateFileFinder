@@ -164,16 +164,27 @@ public sealed class RepoHost : IRepoHost
             {
                 await foreach (var evt in _channel.Reader.ReadAllAsync(_cts.Token).ConfigureAwait(false))
                 {
-                    if (evt is not ScanRootSnapshotReplacedEvent replaced)
-                        continue;
+                    long gen;
+                    long? scanRootId;
 
-                    var gen = replaced.Generation;
-                    var scanRootId = replaced.ScanRootId;
+                    switch (evt)
+                    {
+                        case ScanRootSnapshotReplacedEvent replaced:
+                            gen = replaced.Generation;
+                            scanRootId = replaced.ScanRootId;
+                            break;
 
-                    // Wait for all index plugins to reach generation
+                        case RepoScanRootRemovedEvent removed:
+                            gen = removed.Generation;
+                            scanRootId = removed.ScanRootId;
+                            break;
+
+                        default:
+                            continue;
+                    }
+
                     foreach (var barrier in _barriers)
-                        await barrier.WhenProcessedGenerationAsync(gen, _cts.Token)
-                                     .ConfigureAwait(false);
+                        await barrier.WhenProcessedGenerationAsync(gen, _cts.Token).ConfigureAwait(false);
 
                     _onIndexesRebuilt(gen, scanRootId);
                 }
