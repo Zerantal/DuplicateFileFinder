@@ -77,7 +77,7 @@ public sealed class RepoHost : IRepoHost
 
     private void RegisterIndexPlugin<TService>(
         ChannelRepoPlugin plugin,
-        Core.Repo repo)
+        Repo repo)
         where TService : class
     {
         Track(plugin);
@@ -86,7 +86,7 @@ public sealed class RepoHost : IRepoHost
         repo.RegisterEventSinkWithBootstrap(plugin);
 
         // Expose as read model
-        RegisterService<TService>((TService)(object)plugin);
+        RegisterService((TService)(object)plugin);
 
         // Track lifecycle interfaces
         if (plugin is IReadyState ready)
@@ -97,7 +97,7 @@ public sealed class RepoHost : IRepoHost
     }
 
     public void RegisterEventSink(IRepoEventSink sink)
-        => ((Core.Repo)Repo).RegisterEventSink(sink);
+        => ((Repo)Repo).RegisterEventSink(sink);
 
     public TService RegisterService<TService>(TService instance)
         where TService : notnull

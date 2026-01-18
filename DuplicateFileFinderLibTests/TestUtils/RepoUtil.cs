@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -81,29 +82,68 @@ public static class RepoUtil
             };
         }
 
-        return new RepoSnapshotView
-        {
-            Snapshots = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [scanRootId] = new ScanRootSnapshotView
+        var rootSnapshot = new ScanRootSnapshotView
                 {
                     ScanRootId = scanRootId,
                     StringPool = pool,
                     Dirs = dirRecs,
                     Files = fileRecs
+        };
+
+        var snapshots = new Dictionary<long, ScanRootSnapshotView>
+        {
+            [scanRootId] = rootSnapshot
+        };
+
+        return new RepoSnapshotView
+        {
+            Snapshots = snapshots,
+            ScanRoots = MakeScanRootsFromSnapshots(snapshots)
+        };
                 }
-            },
-            ScanRoots = null!
+
+    /// <summary>
+    /// Builds a usable RepoSnapshotView.ScanRoots map from the provided snapshots.
+    /// Suitable for plugin/unit-test scenarios where "deleted roots" are not being modeled.
+    /// </summary>
+    internal static Dictionary<long, ScanRoot> MakeScanRootsFromSnapshots(
+        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
+        Func<long, bool>? isDeleted = null,
+        Func<long, long>? dirIdForRoot = null,
+        Func<long, string>? rootPathForRoot = null,
+        Func<long, string?>? volumePathForRoot = null,
+        Func<long, string?>? volumeLabelForRoot = null,
+        Func<long, string?>? displayNameForRoot = null)
+    {
+        var dict = new Dictionary<long, ScanRoot>(snapshots.Count);
+
+        foreach (var (rootId, snapshot) in snapshots)
+        {
+            var deleted = isDeleted?.Invoke(rootId) ?? false;
+
+            // Default: choose the first dir as the scan-root dir, if present.
+            var dirId = dirIdForRoot?.Invoke(rootId)
+                       ?? (snapshot.Dirs.Count > 0 ? snapshot.Dirs[0].DirId : 0);
+
+            dict[rootId] = new ScanRoot
+            {
+                RootId = rootId,
+                DirId = dirId,
+                RootPath = rootPathForRoot?.Invoke(rootId) ?? $"root-{rootId}",
+                VolumePath = volumePathForRoot?.Invoke(rootId),
+                VolumeLabel = volumeLabelForRoot?.Invoke(rootId),
+                DisplayName = displayNameForRoot?.Invoke(rootId),
+                IsDeleted = deleted,
+                CreatedAt = DateTimeOffset.UtcNow
         };
     }
 
-    internal static DirHandle[] Sort(DirHandle[] a)
-    {
-        return a.OrderBy(h => h.ScanRootId).ThenBy(h => h.Index).ToArray();
+        return dict;
     }
 
+    internal static DirHandle[] Sort(DirHandle[] a)
+        => a.OrderBy(h => h.ScanRootId).ThenBy(h => h.Index).ToArray();
+
     internal static FileHandle[] Sort(FileHandle[] a)
-    {
-        return a.OrderBy(h => h.ScanRootId).ThenBy(h => h.Index).ToArray();
-    }
+        => a.OrderBy(h => h.ScanRootId).ThenBy(h => h.Index).ToArray();
 }
