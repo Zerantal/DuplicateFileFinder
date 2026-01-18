@@ -166,7 +166,7 @@ public sealed class HashIndexPluginTests
                 RepoSnapshotView = snapshot
             });
 
-            await plugin.WhenReadyAsync(CancellationToken.None);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal(3, plugin.TotalDuplicateFileCount);
             Assert.Equal(300, plugin.TotalSpaceTakenByDuplicates);
@@ -207,7 +207,7 @@ public sealed class HashIndexPluginTests
             };
 
             plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap1 });
-            await plugin.WhenReadyAsync(CancellationToken.None);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal(1, plugin.TotalDuplicateFileCount);
             Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -270,7 +270,7 @@ public sealed class HashIndexPluginTests
             };
 
             plugin.Post(new BootstrapEvent { Generation = 2, RepoSnapshotView = snap1 });
-            await plugin.WhenReadyAsync(CancellationToken.None);
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
 
             Assert.Equal(1, plugin.TotalDuplicateFileCount);
             Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -292,7 +292,7 @@ public sealed class HashIndexPluginTests
             // Generation does not increase => ignored
             plugin.Post(MakeSnapshotCommittedEvent(gen: 2, scanRootId: 1, snapshot: snap2));
 
-            await Task.Delay(100); // give plugin time (should not change)
+            await Task.Delay(100, TestContext.Current.CancellationToken); // give plugin time (should not change)
 
             Assert.Equal(1, plugin.TotalDuplicateFileCount);
             Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
