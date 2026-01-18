@@ -104,7 +104,10 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         using (TimingLog.StartPhase("Rebuilding TreeIndex"))
         {
-            var snapshotDict = repoSnapshot.Snapshots;
+            var liveScanRootIds = repoSnapshot.ScanRoots.Values
+                .Where(r => !r.IsDeleted).Select(r => r.RootId);
+            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(
+                repoSnapshot.Snapshots.Where(kvp => liveScanRootIds.Contains(kvp.Key)));
 
             // Temp accumulators (lists) to avoid repeated ImmutableArray allocations.
             var childrenDirsTmp = new Dictionary<DirHandle, List<DirHandle>>();
@@ -113,7 +116,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             // Forest roots for stats DFS.
             var rootDirs = new List<DirHandle>();
 
-            foreach (var snapshot in snapshotDict.Values)
+            foreach (var snapshot in liveSnapshots.Values)
             {
                 var rootId = snapshot.ScanRootId;
 
@@ -194,7 +197,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             foreach (var (parent, list) in childrenFilesTmp)
                 newChildFiles[parent] = list.Count == 0 ? ImmutableArray<FileHandle>.Empty : [.. list];
 
-            var newStats = ComputeDirStats(snapshotDict, newChildDirs, newChildFiles, rootDirs);
+            var newStats = ComputeDirStats(liveSnapshots, newChildDirs, newChildFiles, rootDirs);
 
             // Publish in a coherent order (single-writer pattern):
             // 1) children maps

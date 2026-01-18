@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
@@ -79,13 +81,16 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     {
         using (TimingLog.StartPhase("Rebuilding FileDirIndex"))
         {
-            var snapshotDict = repoSnapshot.Snapshots;
+            var liveScanRootIds = repoSnapshot.ScanRoots.Values
+                .Where(r => !r.IsDeleted).Select(r => r.RootId);
+            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(
+                repoSnapshot.Snapshots.Where(kvp => liveScanRootIds.Contains(kvp.Key)));
 
             // Build fresh dictionaries (no shared state with readers).
             // Capacity hints reduce rehashing.
             var totalDirs = 0;
             var totalFiles = 0;
-            foreach (var (_, s) in snapshotDict)
+            foreach (var (_, s) in liveSnapshots)
             {
                 totalDirs += s.Dirs.Count;
                 totalFiles += s.Files.Count;
@@ -94,7 +99,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             var newDirs = new Dictionary<long, DirHandle>(capacity: totalDirs);
             var newFiles = new Dictionary<long, FileHandle>(capacity: totalFiles);
 
-            foreach (var (rootId, snapshot) in snapshotDict)
+            foreach (var (rootId, snapshot) in liveSnapshots)
             {
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {

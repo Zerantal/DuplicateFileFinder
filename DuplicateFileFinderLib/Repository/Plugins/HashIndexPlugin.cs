@@ -103,41 +103,44 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        var snapshotDict = repoSnapshot.Snapshots;
+        var liveScanRoots = repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted);
 
         var tmp = new Dictionary<HashKey, (long size, List<FileHandle> list)>(1024);
 
-        foreach (var snapshot in snapshotDict.Values)
+        foreach (var scanRootId in liveScanRoots.Select(r => r.RootId))
         {
-            for (var i = 0; i < snapshot.Files.Count; i++)
+            var snapshot = repoSnapshot.Snapshots[scanRootId];
             {
-                var file = snapshot.Files[i];
-
-                // Filter deleted/absent
-                if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                    continue;
-
-                if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
-                    continue;
-
-                if (!tmp.TryGetValue(file.Hash, out var group))
+                for (var i = 0; i < snapshot.Files.Count; i++)
                 {
-                    group = (file.Size, new List<FileHandle>());
-                    tmp[file.Hash] = group;
-                }
-                else
-                {
-                    // Robust: size should be identical for equal-content hashes, but keep stable if data is imperfect.
-                    if (file.Size > group.size)
-                        group = (file.Size, group.list);
-                    tmp[file.Hash] = group;
-                }
+                    var file = snapshot.Files[i];
 
-                group.list.Add(new FileHandle(snapshot.ScanRootId, i));
+                    // Filter deleted/absent
+                    if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                        continue;
+
+                    if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
+                        continue;
+
+                    if (!tmp.TryGetValue(file.Hash, out var group))
+                    {
+                        group = (file.Size, new List<FileHandle>());
+                        tmp[file.Hash] = group;
+                    }
+                    else
+                    {
+                        // Robust: size should be identical for equal-content hashes, but keep stable if data is imperfect.
+                        if (file.Size > group.size)
+                            group = (file.Size, group.list);
+                        tmp[file.Hash] = group;
+                    }
+
+                    group.list.Add(new FileHandle(snapshot.ScanRootId, i));
+                }
             }
-        }
 
-        FlattenAndPublish(tmp);
+            FlattenAndPublish(tmp);
+        }
     }
 
     private void FlattenAndPublish(Dictionary<HashKey, (long size, List<FileHandle> list)> tmp)
