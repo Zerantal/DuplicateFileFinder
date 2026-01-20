@@ -35,6 +35,7 @@ public sealed class RepoHost : IRepoHost
     {
         var repo = await Core.Repo.OpenAsync(repoDir, ct).ConfigureAwait(false);
         var host = new RepoHost(repo);
+        var indexDir = Path.Combine(repoDir, "indexes");
 
         // Ensure repo disposed last
         if (repo is IAsyncDisposable ad)
@@ -43,15 +44,15 @@ public sealed class RepoHost : IRepoHost
         // ---- Index plugins ----
 
         host.RegisterIndexPlugin<IFileDirReadModel>(
-            new FileDirIndexPlugin(Path.Combine(repoDir, nameof(FileDirIndexPlugin))),
+            new FileDirIndexPlugin(indexDir),
             repo);
 
         host.RegisterIndexPlugin<IHashIndexReadModel>(
-            new HashIndexPlugin(Path.Combine(repoDir, nameof(HashIndexPlugin))),
+            new HashIndexPlugin(indexDir),
             repo);
 
         host.RegisterIndexPlugin<ITreeIndexReadModel>(
-            new TreeIndexPlugin(Path.Combine(repoDir, nameof(TreeIndexPlugin))),
+            new TreeIndexPlugin(indexDir),
             repo);
 
         // Wait until all plugins processed bootstrap
