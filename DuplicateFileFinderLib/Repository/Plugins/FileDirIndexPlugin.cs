@@ -10,10 +10,10 @@ namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
-    // Published, read-only snapshots (we never mutate these dictionaries after publishing).
+    // Published, read-only snapshots (we never mutate these maps after publishing).
     // We swap the reference atomically when rebuilding.
-    private volatile Dictionary<long, FileHandle> _filesById = new();
-    private volatile Dictionary<long, DirHandle> _dirsById = new();
+    private volatile SegmentedIdMap<FileHandle> _filesById = SegmentedIdMap<FileHandle>.Empty;
+    private volatile SegmentedIdMap<DirHandle> _dirsById = SegmentedIdMap<DirHandle>.Empty;
 
     // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
@@ -182,8 +182,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             // 1) publish dictionaries
             // 2) publish counts + active roots
             // 3) publish snapshot view last so readers see coherent state for Decode* usage
-            _dirsById = newDirs;
-            _filesById = newFiles;
+            _dirsById = SegmentedIdMap<DirHandle>.FromDictionary(newDirs);
+            _filesById = SegmentedIdMap<FileHandle>.FromDictionary(newFiles);
 
             _activeScanRoots = activeRootIds;
             _dirCountByRootId = newDirCounts;
@@ -246,8 +246,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         var state = new FileDirIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            DirsById = dirs.ToDictionary(x => x.Key, x => x.Value),
-            FilesById = files.ToDictionary(x => x.Key, x => x.Value)
+            DirsById = dirs,
+            FilesById = files
         };
 
         var path = GetStateFilePath();
@@ -309,6 +309,9 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     {
         relativePath = string.Empty;
 
+        if (!_activeScanRoots.Contains(fileHandle.ScanRootId))
+            return false;
+
         var view = _snapshotView;
         if (view is null)
             return false;
@@ -363,6 +366,9 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     public bool TryGetDirPathByHandle(DirHandle dirHandle, out string relativePath)
     {
         relativePath = string.Empty;
+
+        if (!_activeScanRoots.Contains(dirHandle.ScanRootId))
+            return false;
 
         var view = _snapshotView;
         if (view is null)
