@@ -222,10 +222,7 @@ public partial class DuplicatesViewModel : ObservableObject
 
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
-        using (TimingLog.StartPhase("BuildScanRootsTree()"))
-        {
-            ScanRootsTree.Rebuild(snapshot);
-        }
+        ScanRootsTree.Rebuild(snapshot);
 
         using (TimingLog.StartPhase("RebuildDuplicatesAndState()"))
         {

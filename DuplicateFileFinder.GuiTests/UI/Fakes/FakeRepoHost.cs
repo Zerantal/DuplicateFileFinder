@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -29,9 +28,9 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
     {
         public DirAggregateStats GetDirStats(DirHandle dirId) => throw new NotImplementedException();
 
-        public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir) => throw new NotImplementedException();
+        public ReadOnlySpan<DirHandle> GetChildDirs(DirHandle dir) => throw new NotImplementedException();
 
-        public ImmutableArray<FileHandle> GetChildFiles(DirHandle dir) => throw new NotImplementedException();
+        public ReadOnlySpan<FileHandle> GetChildFiles(DirHandle dir) => throw new NotImplementedException();
     }
     private sealed class DummyHashIndex : IHashIndexReadModel
     {

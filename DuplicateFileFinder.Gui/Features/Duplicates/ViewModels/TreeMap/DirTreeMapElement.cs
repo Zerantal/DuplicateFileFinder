@@ -20,7 +20,7 @@ public sealed class DirTreeMapElement : RepoTreeMapElement
         Value = value;
     }
 
-    public DirAggregateStats Stats => field ??= Resolver.GetDirStats(Dir);
+    public DirAggregateStats Stats => Resolver.GetDirStats(Dir);
 
     public DirHandle Dir { get; }
 

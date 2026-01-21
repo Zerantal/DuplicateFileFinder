@@ -19,5 +19,12 @@ public sealed class FakeTreeMapDataResolver : ITreeMapDataResolver
 
     public string GetRelativePath(long dirId) => $"rel/{dirId}";
 
-    public DirAggregateStats GetDirStats(DirHandle dir) => null!;
+    public DirAggregateStats GetDirStats(DirHandle dir) => new DirAggregateStats
+    {
+        TotalBytes = 0,
+        FileCount = 0,
+        DirCount = 0,
+        DuplicateFiles = 0,
+        DuplicateBytes = 0
+    };
 }

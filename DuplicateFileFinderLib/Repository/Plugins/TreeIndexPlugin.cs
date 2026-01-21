@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+// DuplicateFileFinderLib/Repository/Plugins/TreeIndexPlugin.cs
 
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -15,16 +15,13 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
     private const string StateFileName = "tree-index.bin";
 
+    // Dir indices are mostly dense per scan root, but some holes exist (Deleted/None).
+    // Allow modest gaps to stay within a single segment.
+    private const int SegmentGapThreshold = 64;
+
     // Published, read-only snapshots (never mutate after publishing).
     // Rebuilt on plugin worker thread; swapped atomically for readers.
-    private volatile Dictionary<DirHandle, ImmutableArray<DirHandle>> _childrenDirsByParentId
-        = new();
-
-    private volatile Dictionary<DirHandle, ImmutableArray<FileHandle>> _childrenFilesByDirId
-        = new();
-
-    private volatile Dictionary<DirHandle, DirAggregateStats> _dirStatsById
-        = new();
+    private volatile Dictionary<long, RootTreeIndexState> _roots = new();
 
     private readonly string _dataDirectory;
     private long _lastIndexedGeneration;
@@ -43,24 +40,47 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // Public query surface (lock-free)
     // ---------------------------------------------------------------------
 
-    public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir)
+    public ReadOnlySpan<DirHandle> GetChildDirs(DirHandle dir)
     {
-        var map = _childrenDirsByParentId;
-        return map.TryGetValue(dir, out var v) ? v : ImmutableArray<DirHandle>.Empty;
+        var roots = _roots;
+
+        if (!roots.TryGetValue(dir.ScanRootId, out var root))
+            return ReadOnlySpan<DirHandle>.Empty;
+
+        if (!root.ChildDirSliceByDirIndex.TryGetValue(dir.Index, out var slice) || slice.IsEmpty)
+            return ReadOnlySpan<DirHandle>.Empty;
+
+        return root.ChildDirsPool.AsSpan(slice.Offset, slice.Length);
     }
 
-    public ImmutableArray<FileHandle> GetChildFiles(DirHandle dir)
+    public ReadOnlySpan<FileHandle> GetChildFiles(DirHandle dir)
     {
-        var map = _childrenFilesByDirId;
-        return map.TryGetValue(dir, out var v) ? v : ImmutableArray<FileHandle>.Empty;
+        var roots = _roots;
+
+        if (!roots.TryGetValue(dir.ScanRootId, out var root))
+            return ReadOnlySpan<FileHandle>.Empty;
+
+        if (!root.ChildFileSliceByDirIndex.TryGetValue(dir.Index, out var slice) || slice.IsEmpty)
+            return ReadOnlySpan<FileHandle>.Empty;
+
+        return root.ChildFilesPool.AsSpan(slice.Offset, slice.Length);
     }
 
     public DirAggregateStats GetDirStats(DirHandle dir)
     {
-        var map = _dirStatsById;
-        return map.TryGetValue(dir, out var s)
+        var roots = _roots;
+
+        return roots.TryGetValue(dir.ScanRootId, out var root) &&
+               root.StatsByDirIndex.TryGetValue(dir.Index, out var s)
             ? s
-            : new DirAggregateStats { DirCount = 0, FileCount = 0, TotalBytes = 0, DuplicateFiles = 0, DuplicateBytes = 0 };
+            : new DirAggregateStats
+            {
+                DirCount = 0,
+                FileCount = 0,
+                TotalBytes = 0,
+                DuplicateFiles = 0,
+                DuplicateBytes = 0
+            };
     }
 
     // ---------------------------------------------------------------------
@@ -103,59 +123,26 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
         var removedRootId = evt.ScanRootId;
 
-        var oldChildDirs = _childrenDirsByParentId;
-        var oldChildFiles = _childrenFilesByDirId;
-        var oldStats = _dirStatsById;
+        var oldRoots = _roots;
 
-        // Remove all keys that belong to the removed scan root.
-        // Values should not contain cross-root handles, but filter defensively anyway.
-        var newChildDirs = new Dictionary<DirHandle, ImmutableArray<DirHandle>>(oldChildDirs.Count);
-        foreach (var (k, v) in oldChildDirs)
+        // remove the per-root entry.
+        if (!oldRoots.ContainsKey(removedRootId))
         {
-            if (k.ScanRootId == removedRootId)
-                continue;
-
-            if (v.IsDefaultOrEmpty)
-            {
-                newChildDirs[k] = ImmutableArray<DirHandle>.Empty;
-                continue;
-            }
-
-            // Defensive filter (should be no-ops in normal conditions)
-            var filtered = v.Where(h => h.ScanRootId != removedRootId).ToImmutableArray();
-            newChildDirs[k] = filtered;
+            _lastIndexedGeneration = evt.Generation;
+            SaveState();
+            return;
         }
 
-        var newChildFiles = new Dictionary<DirHandle, ImmutableArray<FileHandle>>(oldChildFiles.Count);
-        foreach (var (k, v) in oldChildFiles)
-        {
-            if (k.ScanRootId == removedRootId)
-                continue;
+        var newRoots = new Dictionary<long, RootTreeIndexState>(Math.Max(0, oldRoots.Count - 1));
+        foreach (var (k, v) in oldRoots)
+            if (k != removedRootId)
+                newRoots[k] = v;
 
-            if (v.IsDefaultOrEmpty)
-            {
-                newChildFiles[k] = ImmutableArray<FileHandle>.Empty;
-                continue;
-            }
-
-            var filtered = v.Where(h => h.ScanRootId != removedRootId).ToImmutableArray();
-            newChildFiles[k] = filtered;
-        }
-
-        var newStats = new Dictionary<DirHandle, DirAggregateStats>(oldStats.Count);
-        foreach (var (k, s) in oldStats)
-            if (k.ScanRootId != removedRootId)
-                newStats[k] = s;
-
-        // Publish.
-        _childrenDirsByParentId = newChildDirs;
-        _childrenFilesByDirId = newChildFiles;
-        _dirStatsById = newStats;
+        _roots = newRoots;
 
         _lastIndexedGeneration = evt.Generation;
         SaveState();
     }
-
 
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)
@@ -165,24 +152,54 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         using (TimingLog.StartPhase("Rebuilding TreeIndex"))
         {
-            var liveScanRootIds = repoSnapshot.ScanRoots.Values
-                .Where(r => !r.IsDeleted).Select(r => r.RootId);
-            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(
-                repoSnapshot.Snapshots.Where(kvp => liveScanRootIds.Contains(kvp.Key)));
+            var liveRootIds = new HashSet<long>(
+                repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
 
-            // Temp accumulators (lists) to avoid repeated ImmutableArray allocations.
-            var childrenDirsTmp = new Dictionary<DirHandle, List<DirHandle>>();
-            var childrenFilesTmp = new Dictionary<DirHandle, List<FileHandle>>();
+            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(capacity: liveRootIds.Count);
+            foreach (var (rootId, snap) in repoSnapshot.Snapshots)
+                if (liveRootIds.Contains(rootId))
+                    liveSnapshots[rootId] = snap;
 
-            // Forest roots for stats DFS.
-            var rootDirs = new List<DirHandle>();
+            // -----------------------------------------------------------------
+            // 1) Global duplicate detection across ALL live scan roots
+            // -----------------------------------------------------------------
+            var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+
+            foreach (var snap in liveSnapshots.Values)
+            {
+                var files = snap.Files;
+                for (int i = 0; i < files.Count; i++)
+                {
+                    var f = files[i];
+
+                    if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                        continue;
+
+                    if (f.Size <= 0)
+                        continue;
+
+                    if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                        continue;
+
+                    if (globalHashCounts.TryGetValue(f.Hash, out var c))
+                        globalHashCounts[f.Hash] = c + 1;
+                    else
+                        globalHashCounts[f.Hash] = 1;
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // 2) Build per-root pools + slice maps + stats
+            // -----------------------------------------------------------------
+            var newRoots = new Dictionary<long, RootTreeIndexState>(capacity: liveSnapshots.Count);
 
             foreach (var snapshot in liveSnapshots.Values)
             {
                 var rootId = snapshot.ScanRootId;
 
-                // Map: DirId -> DirHandle (ONLY for live dirs)
-                var dirIdToHandle = new Dictionary<long, DirHandle>(capacity: snapshot.Dirs.Count);
+                // Map: DirId -> DirIndex (ONLY for live dirs)
+                var dirIdToIndex = new Dictionary<long, int>(capacity: snapshot.Dirs.Count);
+                var rootDirIndices = new List<int>();
 
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
                 {
@@ -192,12 +209,15 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     if (dir.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
                         continue;
 
-                    var h = new DirHandle(rootId, i);
-                    dirIdToHandle[dir.DirId] = h;
+                    dirIdToIndex[dir.DirId] = i;
 
                     if (dir.ParentDirId < 0)
-                        rootDirs.Add(h);
+                        rootDirIndices.Add(i);
                 }
+
+                // Temp accumulators: per parent dirIndex -> handles list
+                var childrenDirsTmp = new Dictionary<int, List<DirHandle>>();
+                var childrenFilesTmp = new Dictionary<int, List<FileHandle>>();
 
                 // Child dirs (only live parent+child)
                 for (int i = 0; i < snapshot.Dirs.Count; i++)
@@ -211,15 +231,15 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                         continue;
 
                     // Parent must be live too (otherwise ignore this edge)
-                    if (!dirIdToHandle.TryGetValue(dir.ParentDirId, out var parentHandle))
+                    if (!dirIdToIndex.TryGetValue(dir.ParentDirId, out var parentIndex))
                         continue;
 
                     var childHandle = new DirHandle(rootId, i);
 
-                    if (!childrenDirsTmp.TryGetValue(parentHandle, out var list))
+                    if (!childrenDirsTmp.TryGetValue(parentIndex, out var list))
                     {
                         list = new List<DirHandle>(capacity: 4);
-                        childrenDirsTmp[parentHandle] = list;
+                        childrenDirsTmp[parentIndex] = list;
                     }
 
                     list.Add(childHandle);
@@ -233,89 +253,116 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
                         continue;
 
-                    if (!dirIdToHandle.TryGetValue(file.DirId, out var parentDirHandle))
+                    if (!dirIdToIndex.TryGetValue(file.DirId, out var parentIndex))
                         continue;
 
                     var fileHandle = new FileHandle(rootId, i);
 
-                    if (!childrenFilesTmp.TryGetValue(parentDirHandle, out var list))
+                    if (!childrenFilesTmp.TryGetValue(parentIndex, out var list))
                     {
                         list = new List<FileHandle>(capacity: 8);
-                        childrenFilesTmp[parentDirHandle] = list;
+                        childrenFilesTmp[parentIndex] = list;
                     }
 
                     list.Add(fileHandle);
                 }
+
+                // Flatten into pools + slices
+                var (childDirsPool, childDirSlices) = BuildPoolAndSlices(childrenDirsTmp);
+                var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
+
+                var childDirSliceMap = childDirSlices.Length == 0
+                    ? SegmentedIdMap<Slice>.Empty
+                    : SegmentedIdMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
+
+                var childFileSliceMap = childFileSlices.Length == 0
+                    ? SegmentedIdMap<Slice>.Empty
+                    : SegmentedIdMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
+
+                var statsMap = ComputeRootDirStats(
+                    scanRootId: rootId,
+                    snapshot: snapshot,
+                    childDirsPool: childDirsPool,
+                    childDirSliceByDirIndex: childDirSliceMap,
+                    childFilesPool: childFilesPool,
+                    childFileSliceByDirIndex: childFileSliceMap,
+                    rootDirIndices: rootDirIndices,
+                    globalHashCounts: globalHashCounts);
+
+                newRoots[rootId] = new RootTreeIndexState
+                {
+                    ChildDirsPool = childDirsPool,
+                    ChildFilesPool = childFilesPool,
+                    ChildDirSliceByDirIndex = childDirSliceMap,
+                    ChildFileSliceByDirIndex = childFileSliceMap,
+                    StatsByDirIndex = statsMap
+                };
             }
 
-            // Freeze into published dictionaries (values are ImmutableArray for cheap reads).
-            // Capacity hints prevent rehashing.
-            var newChildDirs = new Dictionary<DirHandle, ImmutableArray<DirHandle>>(childrenDirsTmp.Count);
-            foreach (var (parent, list) in childrenDirsTmp)
-                newChildDirs[parent] = list.Count == 0 ? ImmutableArray<DirHandle>.Empty : [.. list];
-
-            var newChildFiles = new Dictionary<DirHandle, ImmutableArray<FileHandle>>(childrenFilesTmp.Count);
-            foreach (var (parent, list) in childrenFilesTmp)
-                newChildFiles[parent] = list.Count == 0 ? ImmutableArray<FileHandle>.Empty : [.. list];
-
-            var newStats = ComputeDirStats(liveSnapshots, newChildDirs, newChildFiles, rootDirs);
-
-            // Publish in a coherent order (single-writer pattern):
-            // 1) children maps
-            // 2) stats
-            _childrenDirsByParentId = newChildDirs;
-            _childrenFilesByDirId = newChildFiles;
-            _dirStatsById = newStats;
+            _roots = newRoots;
         }
     }
 
-    private static Dictionary<DirHandle, DirAggregateStats> ComputeDirStats(
-        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshotDict,
-        Dictionary<DirHandle, ImmutableArray<DirHandle>> childrenDirsByParent,
-        Dictionary<DirHandle, ImmutableArray<FileHandle>> childrenFilesByDir,
-        IReadOnlyList<DirHandle> rootDirs)
+    private static (T[] Pool, KeyValuePair<long, Slice>[] SliceItems) BuildPoolAndSlices<T>(
+        Dictionary<int, List<T>> tmp)
     {
-        // -----------------------------------------------------------------
-        // 1) Global duplicate detection across ALL scan roots
-        // -----------------------------------------------------------------
-        // Count computed hashes for live files (filtered earlier by RebuildFromSnapshot),
-        // but keep the same Size>0 rule as FileCount/TotalBytes for consistency.
-        var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+        if (tmp.Count == 0)
+            return (Array.Empty<T>(), Array.Empty<KeyValuePair<long, Slice>>());
 
-        foreach (var snap in snapshotDict.Values)
+        // Deterministic ordering to keep state stable across rebuilds.
+        var keys = tmp.Keys.ToArray();
+        Array.Sort(keys);
+
+        // Precompute total elements to allocate once.
+        int total = 0;
+        for (int i = 0; i < keys.Length; i++)
+            total += tmp[keys[i]].Count;
+
+        var pool = total == 0 ? Array.Empty<T>() : new T[total];
+        var sliceItems = new KeyValuePair<long, Slice>[keys.Length];
+
+        int write = 0;
+
+        for (int i = 0; i < keys.Length; i++)
         {
-            var files = snap.Files;
-            for (int i = 0; i < files.Count; i++)
+            var dirIndex = keys[i];
+            var list = tmp[dirIndex];
+
+            var offset = write;
+            var len = list.Count;
+
+            if (len > 0)
             {
-                var f = files[i];
-
-                // RebuildFromSnapshot already filtered Deleted/None into childrenFilesByDir,
-                // but be defensive in case of future changes.
-                if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                    continue;
-
-                if (f.Size <= 0)
-                    continue;
-
-                // Only count computed hashes. (NotComputed/CannotCompute are not duplicates)
-                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
-                    continue;
-
-                if (globalHashCounts.TryGetValue(f.Hash, out var c))
-                    globalHashCounts[f.Hash] = c + 1;
-                else
-                    globalHashCounts[f.Hash] = 1;
+                // Copy into pool
+                list.CopyTo(pool, write);
+                write += len;
             }
+
+            sliceItems[i] = new KeyValuePair<long, Slice>(dirIndex, new Slice(offset, len));
         }
 
-        // -----------------------------------------------------------------
-        // 2) Memoized DFS over the directory forest
-        // -----------------------------------------------------------------
-        var memo = new Dictionary<DirHandle, DirAggregateStats>(capacity: Math.Max(1024, rootDirs.Count));
+        // If total was overestimated (shouldn't happen), trim. Otherwise keep as-is.
+        if (write != pool.Length)
+            Array.Resize(ref pool, write);
 
-        DirAggregateStats Dfs(DirHandle dir)
+        return (pool, sliceItems);
+    }
+
+    private static SegmentedIdMap<DirAggregateStats> ComputeRootDirStats(
+        long scanRootId,
+        ScanRootSnapshotView snapshot,
+        DirHandle[] childDirsPool,
+        SegmentedIdMap<Slice> childDirSliceByDirIndex,
+        FileHandle[] childFilesPool,
+        SegmentedIdMap<Slice> childFileSliceByDirIndex,
+        IReadOnlyList<int> rootDirIndices,
+        Dictionary<HashKey, int> globalHashCounts)
+    {
+        var memo = new Dictionary<int, DirAggregateStats>(capacity: Math.Max(1024, rootDirIndices.Count));
+
+        DirAggregateStats Dfs(int dirIndex)
         {
-            if (memo.TryGetValue(dir, out var cached))
+            if (memo.TryGetValue(dirIndex, out var cached))
                 return cached;
 
             long bytes = 0;
@@ -325,15 +372,19 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             long duplicateBytes = 0;
 
             // Files directly under this dir
-            if (childrenFilesByDir.TryGetValue(dir, out var files))
+            if (childFileSliceByDirIndex.TryGetValue(dirIndex, out var fileSlice) && fileSlice.Length > 0)
             {
-                for (int i = 0; i < files.Length; i++)
+                var span = childFilesPool.AsSpan(fileSlice.Offset, fileSlice.Length);
+
+                for (int i = 0; i < span.Length; i++)
                 {
-                    var fh = files[i];
-                    if (!snapshotDict.TryGetValue(fh.ScanRootId, out var snap))
+                    var fh = span[i];
+
+                    // Defensive (should always match).
+                    if (fh.ScanRootId != scanRootId)
                         continue;
 
-                    var f = snap.Files[fh.Index];
+                    var f = snapshot.Files[fh.Index];
 
                     // Should already be live due to childrenFilesByDir build, but keep defensive.
                     if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
@@ -356,16 +407,20 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             }
 
             // Recurse into child dirs
-            if (childrenDirsByParent.TryGetValue(dir, out var childDirs))
+            if (childDirSliceByDirIndex.TryGetValue(dirIndex, out var dirSlice) && dirSlice.Length > 0)
             {
-                for (int i = 0; i < childDirs.Length; i++)
-                {
-                    var child = childDirs[i];
+                var span = childDirsPool.AsSpan(dirSlice.Offset, dirSlice.Length);
 
-                    // Count the child itself
+                for (int i = 0; i < span.Length; i++)
+                {
+                    var child = span[i];
+
+                    if (child.ScanRootId != scanRootId)
+                        continue;
+
                     dirCount++;
 
-                    var childStats = Dfs(child);
+                    var childStats = Dfs(child.Index);
                     bytes += childStats.TotalBytes;
                     fileCount += childStats.FileCount;
                     dirCount += childStats.DirCount;
@@ -383,17 +438,23 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 DuplicateBytes = duplicateBytes
             };
 
-            memo[dir] = stats;
+            memo[dirIndex] = stats;
             return stats;
         }
 
-        // Compute stats for each forest root; DFS will memoize descendants.
-        foreach (var t in rootDirs)
-            _ = Dfs(t);
+        for (int i = 0; i < rootDirIndices.Count; i++)
+            _ = Dfs(rootDirIndices[i]);
 
-        return memo;
+        if (memo.Count == 0)
+            return SegmentedIdMap<DirAggregateStats>.Empty;
+
+        var items = new KeyValuePair<long, DirAggregateStats>[memo.Count];
+        int w = 0;
+        foreach (var (dirIndex, stats) in memo)
+            items[w++] = new KeyValuePair<long, DirAggregateStats>(dirIndex, stats);
+
+        return SegmentedIdMap<DirAggregateStats>.Build(items);
     }
-
 
     // ---------------------------------------------------------------------
     // Persistence
@@ -403,17 +464,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     private void SaveState()
     {
-        // Snapshot the references so the serialized view is consistent.
-        var childDirs = _childrenDirsByParentId;
-        var childFiles = _childrenFilesByDirId;
-        var stats = _dirStatsById;
+        var roots = _roots;
 
         var state = new TreeIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
-            ChildrenDirsByParentId = childDirs,
-            ChildrenFilesByDirId = childFiles,
-            DirStatsById = stats
+            Roots = roots
         };
 
         var path = GetStateFilePath();
@@ -441,19 +497,11 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     return false;
             }
 
-            using (TimingLog.StartPhase("Rehydrating TreeIndex state"))
-            {
-                // Only use the state if it matches the current repo position.
-                if (state.LastIndexedGeneration != expectedGeneration)
-                    return false;
+            if (state.LastIndexedGeneration != expectedGeneration)
+                return false;
 
-                _lastIndexedGeneration = state.LastIndexedGeneration;
-
-                // Publish snapshots (treat deserialized dictionaries as immutable snapshots).
-                _childrenDirsByParentId = state.ChildrenDirsByParentId;
-                _childrenFilesByDirId = state.ChildrenFilesByDirId;
-                _dirStatsById = state.DirStatsById;
-            }
+            _lastIndexedGeneration = state.LastIndexedGeneration;
+            _roots = state.Roots;
 
             return true;
         }

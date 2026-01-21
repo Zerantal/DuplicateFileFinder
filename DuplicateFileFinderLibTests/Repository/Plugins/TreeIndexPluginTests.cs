@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -78,7 +77,7 @@ public sealed class TreeIndexPluginTests
                 RepoUtil.Sort(plugin.GetChildFiles(root).ToArray()));
 
             // subA children
-            Assert.Empty(plugin.GetChildDirs(subA));
+            Assert.True(plugin.GetChildDirs(subA).IsEmpty);
             Assert.Equal(
                 RepoUtil.Sort([fileSubA]),
                 RepoUtil.Sort(plugin.GetChildFiles(subA).ToArray()));
@@ -186,7 +185,7 @@ public sealed class TreeIndexPluginTests
             await plugin.WhenReadyAsync(CancellationToken.None);
 
             var rootHandle = new DirHandle(1, 0);
-            Assert.Single(plugin.GetChildDirs(rootHandle));
+            Assert.Single(plugin.GetChildDirs(rootHandle).ToArray());
 
             // Snapshot 2: replace subA with subB (still child at index 1 but different DirId behind it)
             var snap2 = RepoUtil.MakeSnapshotV2(
