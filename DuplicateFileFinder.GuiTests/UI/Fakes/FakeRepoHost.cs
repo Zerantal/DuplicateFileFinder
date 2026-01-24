@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -34,9 +33,9 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
     }
     private sealed class DummyHashIndex : IHashIndexReadModel
     {
-        public IReadOnlyList<(long size, IReadOnlyList<FileHandle> list)>
-            GetDuplicateGroups(int minDuplicates = 2, long minSize = 1) =>
-            new List<(long size, IReadOnlyList<FileHandle> list)>();
+        public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, int offset, int count) => throw new NotImplementedException();
+
+        public ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group) => throw new NotImplementedException();
 
         public int TotalDuplicateFileCount { get; }
         public long TotalSpaceTakenByDuplicates { get; }

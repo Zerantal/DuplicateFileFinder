@@ -44,7 +44,7 @@
                 <TextBlock Text="{Binding RelativePath, StringFormat=Path: {0}}" />
 
                 <StackPanel Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="Size:" />
+                    <TextBlock Text="TotalSizeBytes:" />
                     <TextBlock Text="{Binding Value, Converter={StaticResource BytesToHuman}}" />
                 </StackPanel>
             </StackPanel>

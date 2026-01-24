@@ -17,7 +17,7 @@
   <UserControl.Resources>
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
                                                SelectedBrush="#FF2D7DFF"
-                                               UnselectedBrush="Transparent"/>
+                                               UnselectedBrush="Transparent" />
   </UserControl.Resources>
 
   <UserControl.Styles>
@@ -31,17 +31,23 @@
     </Style>
 
     <Style Selector="Button.scanroot-header">
+      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+
       <Setter Property="Template">
         <ControlTemplate>
-          <Grid ColumnDefinitions="*,16">
+          <Grid ColumnDefinitions="*,16"
+                HorizontalAlignment="Stretch">
+
             <TextBlock
-              Text="{TemplateBinding (scanRoots:HeaderButton.Text)}"
-              HorizontalAlignment="{TemplateBinding (scanRoots:HeaderButton.TextAlignment)}"
+          Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Text)}"
+              HorizontalAlignment="Stretch"
               VerticalAlignment="Center"
+          TextAlignment="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.TextAlignment)}"
               Foreground="White" />
 
             <TextBlock Grid.Column="1"
-                       Text="{TemplateBinding (scanRoots:HeaderButton.Arrow)}"
+                   Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
                        Foreground="White" />

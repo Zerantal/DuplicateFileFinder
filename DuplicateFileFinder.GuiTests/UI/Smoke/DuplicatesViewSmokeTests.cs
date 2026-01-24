@@ -41,7 +41,7 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             // Assemble graph (DI-style)
             var dupController = new DuplicateGroupsController(host);
             var fakeDeletionService = new FakeDuplicateFileDeletionService();
-            var duplicateGroupsVm = new DuplicateGroupsViewModel(dupController, fakeDeletionService);
+            var duplicateGroupsVm = new DuplicateGroupsViewModel(host, dupController, fakeDeletionService);
             var repoEventRelay = new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher());
 
             // ---- ScanRoots tree: builder + actions + factory + vm ----
