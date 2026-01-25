@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using DuplicateFileFinderLibTests.TestUtils;
@@ -25,14 +28,14 @@ public sealed class HashIndexPluginTests
         return new HashKey(bytes);
     }
 
-    private static RepoEvent MakeBootstrapEvent(RepoSnapshotView snapshot)
+    private static RepoEvent MakeBootstrapEvent(long gen, RepoSnapshotView snapshot)
         => new BootstrapEvent
         {
-            Generation = 1,
+            Generation = gen,
             RepoSnapshotView = snapshot
         };
 
-    private static RepoEvent MakeSnapshotCommittedEvent(long gen, long scanRootId, RepoSnapshotView snapshot)
+    private static RepoEvent MakeSnapshotReplacedEvent(long gen, long scanRootId, RepoSnapshotView snapshot)
         => new ScanRootSnapshotReplacedEvent
         {
             Generation = gen,
@@ -41,7 +44,16 @@ public sealed class HashIndexPluginTests
             Reason = RepoSnapshotCommitReason.ScanCompleted
         };
 
-    private static IReadOnlyDictionary<long, ScanRoot> BuildScanRoots(IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots)
+    private static RepoEvent MakeScanRootRemovedEvent(long gen, long scanRootId)
+        => new RepoScanRootRemovedEvent
+        {
+            Generation = gen,
+            ScanRootId = scanRootId
+        };
+
+    private static IReadOnlyDictionary<long, ScanRoot> BuildScanRoots(
+        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
+        HashSet<long>? deletedScanRoots = null)
     {
         var dict = new Dictionary<long, ScanRoot>(snapshots.Count);
 
@@ -56,270 +68,470 @@ public sealed class HashIndexPluginTests
                 RootPath = $"root-{rootId}",
                 DirId = dirId,
                 CreatedAt = DateTimeOffset.UtcNow,
-                IsDeleted = false
+                IsDeleted = deletedScanRoots?.Contains(rootId) == true
             };
         }
 
         return dict;
     }
 
+    private static RepoSnapshotView BuildRepoSnapshot(params ScanRootSnapshotView[] roots)
+    {
+        var snaps = roots.ToDictionary(x => x.ScanRootId, x => x);
+        return new RepoSnapshotView
+        {
+            Snapshots = snaps,
+            ScanRoots = BuildScanRoots(snaps)
+        };
+    }
+
+    private static RepoSnapshotView BuildRepoSnapshot(
+        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
+        HashSet<long> deletedScanRoots)
+    {
+        return new RepoSnapshotView
+        {
+            Snapshots = snapshots,
+            ScanRoots = BuildScanRoots(snapshots, deletedScanRoots)
+        };
+    }
+
+    // private static async Task PostAndWaitAsync(HashIndexPlugin plugin, RepoEvent evt)
+    // {
+    //     plugin.Post(evt);
+    //     await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+    // }
+
+    private static async Task PostAndWaitAsync(
+        HashIndexPlugin plugin,
+        RepoEvent evt,
+        Func<bool>? predicate = null,
+        int timeoutMs = 2000)
+    {
+        plugin.Post(evt);
+        if (predicate == null)
+        {
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+            return;
+        }
+
+        var stop = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < stop)
+        {
+            if (predicate())
+                return;
+
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+
+        throw new TimeoutException("Timed out waiting for plugin to process event.");
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Core behavioural tests (new read model)
     // ---------------------------------------------------------------------
 
-    // [Fact]
-    // public async Task OpenedEvent_BuildsInitialDuplicateGroups()
-    // {
-    //     var hashDup = NewHash(1);
-    //     var hashUnique = NewHash(2);
-    //
-    //     var snapshot = RepoUtil.MakeSnapshotV2(
-    //         1,
-    //         dirs: [],
-    //         files:
-    //         [
-    //             ("a.bin", dirId: 10L, fileId: 1L, size: 100L, hash: hashDup),
-    //             ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: hashDup),
-    //             ("c.bin", dirId: 12L, fileId: 3L, size: 100L, hash: hashUnique)
-    //         ]);
-    //
-    //     await using var plugin = new HashIndexPlugin(_fs.Root);
-    //
-    //     // Act: simulate repo open
-    //     plugin.Post(MakeBootstrapEvent(snapshot));
-    //
-    //     // Wait until the plugin has processed the event and built the index
-    //     await AsyncUtil.WaitForConditionAsync(
-    //         () => plugin.GetDuplicateGroups().Count > 0,
-    //         TimeSpan.FromSeconds(2));
-    //
-    //     var groups = plugin.GetDuplicateGroups();
-    //
-    //     var fileA = new FileHandle(1, 0);
-    //     var fileB = new FileHandle(1, 1);
-    //
-    //     // We expect exactly one group (hashDup) with f1 + f2
-    //     var group = Assert.Single(groups);
-    //     Assert.Equal(2, group.list.Count);
-    //     Assert.Equal(RepoUtil.Sort([fileA, fileB]), RepoUtil.Sort(group.list.ToArray()));
-    // }
+    [Fact]
+    public async Task Bootstrap_BuildsGroups_AndStats()
+    {
+        var hDup = NewHash(1);
+        var hUnique = NewHash(2);
 
-    // [Fact]
-    // public async Task DefaultHash_IsIgnored_AndDoesNotProduceGroup()
-    // {
-    //     var defaultHash = default(HashKey);
-    //
-    //     var snapshot = RepoUtil.MakeSnapshotV2(
-    //         1,
-    //         dirs: [],
-    //         files:
-    //         [
-    //             ("a.bin", dirId: 10L, fileId: 1L, size: 100L, hash: defaultHash),
-    //             ("b.bin", dirId: 11L, fileId: 2L, size: 100L, hash: defaultHash)
-    //         ]);
-    //
-    //     await using var plugin = new HashIndexPlugin(_fs.Root);
-    //
-    //     plugin.Post(MakeBootstrapEvent(snapshot));
-    //
-    //     // Even though there are two files with the same default hash,
-    //     // the plugin should ignore default hashes and not produce a group.
-    //     await AsyncUtil.WaitForConditionAsync(
-    //         () => plugin.GetDuplicateGroups().Count == 0,
-    //         TimeSpan.FromSeconds(2));
-    //
-    //     Assert.Empty(plugin.GetDuplicateGroups());
-    // }
+        // Root 1:
+        // - hDup appears twice (size 100) => duplicates: 1 file, wasted: 100
+        // - hUnique appears once
+        var r1 = MakeRootFromFiles(
+            scanRootId: 1,
+            dirId: 10,
+            files:
+            [
+                ("a.bin", 100, hDup, ScanEntryStatus.Hashed),
+                ("b.bin", 100, hDup, ScanEntryStatus.Hashed),
+                ("c.bin", 999, hUnique, ScanEntryStatus.Hashed),
+            ]);
 
-    // [Fact]
-    // public async Task RebuildFromSnapshot_DoesNotDoubleCountDuplicates_AcrossMultipleRoots()
-    // {
-    //     var dir = Path.Combine(Path.GetTempPath(), "HashIndexTests_" + Guid.NewGuid());
-    //     Directory.CreateDirectory(dir);
-    //
-    //     try
-    //     {
-    //         await using var plugin = new HashIndexPlugin(dir);
-    //
-    //         // Two roots, both contain the same duplicate group:
-    //         // hash H with size 100 appears twice in each root (2 files per root).
-    //         // Correct total duplicates:
-    //         //  - per root: (2-1)=1 duplicate file, 1*100 bytes
-    //         //  - across 2 roots: 2 duplicates, 200 bytes
-    //         var h = new HashKey([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-    //
-    //         var snapshots = new Dictionary<long, ScanRootSnapshotView>
-    //         {
-    //             [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h, size: 100),
-    //             [2] = MakeRoot(scanRootId: 2, dirId: 20, hash: h, size: 100)
-    //         };
-    //
-    //         var snapshot = new RepoSnapshotView
-    //         {
-    //             Snapshots = snapshots,
-    //             ScanRoots = BuildScanRoots(snapshots)
-    //         };
-    //
-    //         plugin.Post(new BootstrapEvent
-    //         {
-    //             Generation = 1,
-    //             RepoSnapshotView = snapshot
-    //         });
-    //
-    //         await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-    //
-    //         Assert.Equal(3, plugin.TotalDuplicateFileCount);
-    //         Assert.Equal(300, plugin.TotalSpaceTakenByDuplicates);
-    //
-    //         var groups = plugin.GetDuplicateGroups(minDuplicates: 2, minSize: 1);
-    //         Assert.Single(groups);
-    //         Assert.Equal(100, groups[0].size);
-    //         Assert.Equal(4, groups[0].list.Count); // 2 files per root => 4 total handles
-    //     }
-    //     finally
-    //     {
-    //         Directory.Delete(dir, recursive: true);
-    //     }
-    // }
+        var snapshot = BuildRepoSnapshot(r1);
 
-    // [Fact]
-    // public async Task ScanRootSnapshotCommittedEvent_RebuildsIndex_WhenGenerationIncreases()
-    // {
-    //     var dir = Path.Combine(Path.GetTempPath(), "HashIndexTests_" + Guid.NewGuid());
-    //     Directory.CreateDirectory(dir);
-    //
-    //     try
-    //     {
-    //         await using var plugin = new HashIndexPlugin(dir);
-    //
-    //         // Initial snapshot: one duplicate group of size 100 (2 files => 1 duplicate file)
-    //         var h1 = NewHash(1);
-    //
-    //         var snaps1 = new Dictionary<long, ScanRootSnapshotView>
-    //         {
-    //             [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h1, size: 100)
-    //         };
-    //
-    //         var snap1 = new RepoSnapshotView
-    //         {
-    //             Snapshots = snaps1,
-    //             ScanRoots = BuildScanRoots(snaps1)
-    //         };
-    //
-    //         plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap1 });
-    //         await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-    //
-    //         Assert.Equal(1, plugin.TotalDuplicateFileCount);
-    //         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
-    //
-    //         // Committed snapshot: new duplicate group of size 777 (3 files => 2 duplicate files)
-    //         var h2 = NewHash(2);
-    //
-    //         var snaps2 = new Dictionary<long, ScanRootSnapshotView>
-    //         {
-    //             [1] = MakeRoot3Files(scanRootId: 1, dirId: 10, hash: h2, size: 777)
-    //         };
-    //
-    //         var snap2 = new RepoSnapshotView
-    //         {
-    //             Snapshots = snaps2,
-    //             ScanRoots = BuildScanRoots(snaps2)
-    //         };
-    //
-    //         plugin.Post(MakeSnapshotCommittedEvent(gen: 2, scanRootId: 1, snapshot: snap2));
-    //
-    //         await AsyncUtil.WaitForConditionAsync(
-    //             () => plugin is { TotalDuplicateFileCount: 2, TotalSpaceTakenByDuplicates: 2 * 777 },
-    //             TimeSpan.FromSeconds(2));
-    //
-    //         Assert.Equal(2, plugin.TotalDuplicateFileCount);
-    //         Assert.Equal(2 * 777, plugin.TotalSpaceTakenByDuplicates);
-    //
-    //         var groups = plugin.GetDuplicateGroups(minDuplicates: 2, minSize: 1);
-    //         var group = Assert.Single(groups);
-    //         Assert.Equal(777, group.size);
-    //         Assert.Equal(3, group.list.Count);
-    //     }
-    //     finally
-    //     {
-    //         Directory.Delete(dir, recursive: true);
-    //     }
-    // }
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 1, snapshot));
+
+        Assert.Equal(1, plugin.TotalDuplicateFileCount);
+        Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+        var page = plugin.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            offset: 0,
+            count: 10);
+
+        Assert.Equal(1, page.Total);
+        Assert.Equal(0, page.Offset);
+        Assert.Equal(1, page.Count);
+
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(hDup, g.Hash);
+        Assert.Equal(100, g.SizeBytes);
+        Assert.Equal(2, g.Count);
+
+        var handles = plugin.GetGroupFiles(g).ToArray();
+        Assert.Equal(2, handles.Length);
+        Assert.Contains(new FileHandle(1, 0), handles);
+        Assert.Contains(new FileHandle(1, 1), handles);
+    }
+
+    [Fact]
+    public async Task GetGroupsPage_TotalSizeDesc_SortsAndPages()
+    {
+        var hA = NewHash(1); // size 10, count 5 => total 50
+        var hB = NewHash(2); // size 40, count 2 => total 80   (should rank above A)
+        var hC = NewHash(3); // size 30, count 3 => total 90   (should rank above B)
+        var hD = NewHash(4); // size 1,  count 10 => total 10  (should rank last)
+
+        var r1 = MakeRootFromGroups(
+            scanRootId: 1,
+            dirId: 10,
+            groups:
+            [
+                (hA, size: 10, count: 5),
+                (hB, size: 40, count: 2),
+                (hC, size: 30, count: 3),
+                (hD, size: 1,  count: 10),
+            ]);
+
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+
+        var rm = (IHashIndexReadModel)plugin;
+
+        // page 0,2 => expect C then B (90, 80)
+        var page0 = rm.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            offset: 0,
+            count: 2);
+
+        Assert.Equal(4, page0.Total);
+        Assert.Equal(2, page0.Count);
+        Assert.Equal([hC, hB], page0.Groups.ToArray().Select(x => x.Hash).ToArray());
+
+        // page 2,2 => expect A then D (50, 10)
+        var page1 = rm.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            offset: 2,
+            count: 2);
+
+        Assert.Equal(4, page1.Total);
+        Assert.Equal(2, page1.Count);
+        Assert.Equal([hA, hD], page1.Groups.ToArray().Select(x => x.Hash).ToArray());
+    }
+
+    [Fact]
+    public async Task GetGroupsPage_DuplicateCountDesc_SortsByCountThenTotalBytes()
+    {
+        var hA = NewHash(1); // count 5, total 50
+        var hB = NewHash(2); // count 5, total 200 (should win tie on count)
+        var hC = NewHash(3); // count 3
+
+        var r1 = MakeRootFromGroups(
+            scanRootId: 1,
+            dirId: 10,
+            groups:
+            [
+                (hA, size: 10,  count: 5),
+                (hB, size: 40,  count: 5),
+                (hC, size: 999, count: 3),
+            ]);
+
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+
+        var rm = (IHashIndexReadModel)plugin;
+
+        var page = rm.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc},
+            offset: 0,
+            count: 10);
+
+        Assert.Equal(3, page.Total);
+        Assert.Equal([hB, hA, hC], page.Groups.ToArray().Select(x => x.Hash).ToArray());
+    }
+
+    [Fact]
+    public async Task Filters_MinDuplicates_And_MinSize_Work_AndEarlyExitDoesNotMissResults()
+    {
+        // Ensure we have a descending-by-total set where filtering by MinSize
+        // will early-exit once totals dip below threshold.
+        var hBig = NewHash(1);  // total 1000
+        var hMid = NewHash(2);  // total 200
+        var hSmall = NewHash(3); // total 50
+
+        var r1 = MakeRootFromGroups(
+            scanRootId: 1,
+            dirId: 10,
+            groups:
+            [
+                (hBig,   size: 100, count: 10),
+                (hMid,   size: 100, count: 2),
+                (hSmall, size: 10,  count: 5),
+            ]);
+
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+
+        var rm = (IHashIndexReadModel)plugin;
+
+        // MinSize 201 => should include only hBig (1000), exclude hMid (200) and hSmall (50).
+        var page = rm.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 2, MinSize = 201, Sort = DuplicateSort.TotalSizeDesc},
+            offset: 0,
+            count: 10);
+
+        Assert.Equal(1, page.Total);
+        Assert.Single(page.Groups.ToArray());
+        Assert.Equal(hBig, page.Groups.ToArray()[0].Hash);
+
+        // MinDuplicates 6 => only hBig (10) and hSmall (5 excluded) and hMid(2 excluded)
+        var page2 = rm.GetGroupsPage(
+            new DuplicateQuery {MinDuplicates = 6, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc},
+            offset: 0,
+            count: 10);
+
+        Assert.Equal(1, page2.Total);
+        Assert.Single(page2.Groups.ToArray());
+        Assert.Equal(hBig, page2.Groups.ToArray()[0].Hash);
+    }
+
+    [Fact]
+    public async Task GetGroupFiles_ReturnsEmpty_ForInvalidDescriptor()
+    {
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot())); // empty repo
+
+        var rm = (IHashIndexReadModel)plugin;
+
+        // nonsense descriptor
+        var d = new HashGroupDescriptor(Hash: NewHash(1), SizeBytes: 1, Offset: -1, Count: 2, FirstFile: FileHandle.Invalid);
+        Assert.Empty(rm.GetGroupFiles(d).ToArray());
+    }
+
+    [Fact]
+    public async Task Ignores_NotComputed_CannotCompute_Deleted_And_None_Status()
+    {
+        var h = NewHash(1);
+
+        var r1 = MakeRootFromFiles(
+            scanRootId: 1,
+            dirId: 10,
+            files:
+            [
+                ("a.bin", 100, h, ScanEntryStatus.Hashed),                // keep
+                ("b.bin", 100, HashKey.NotComputed, ScanEntryStatus.Hashed), // ignore
+                ("c.bin", 100, HashKey.CannotCompute, ScanEntryStatus.Hashed), // ignore
+                ("d.bin", 100, h, ScanEntryStatus.Deleted),              // ignore
+                ("e.bin", 100, h, ScanEntryStatus.None),                 // ignore
+                ("f.bin", 100, h, ScanEntryStatus.Hashed),               // keep (duplicate w/ a)
+            ]);
+
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+
+        Assert.Equal(1, plugin.TotalDuplicateFileCount);
+        Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+        var rm = (IHashIndexReadModel)plugin;
+        var page = rm.GetGroupsPage(new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            0, 10);
+
+        Assert.Equal(1, page.Total);
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(2, g.Count);
+        Assert.Equal(h, g.Hash);
+
+        var handles = rm.GetGroupFiles(g).ToArray();
+        Assert.Equal(2, handles.Length);
+        Assert.Contains(new FileHandle(1, 0), handles);
+        Assert.Contains(new FileHandle(1, 5), handles);
+    }
+
+    // ---------------------------------------------------------------------
+    // Generation gating & scan root removal
+    // ---------------------------------------------------------------------
 
     [Fact]
     public async Task ScanRootSnapshotCommittedEvent_IsIgnored_WhenGenerationDoesNotIncrease()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "HashIndexTests_" + Guid.NewGuid());
-        Directory.CreateDirectory(dir);
+        await using var plugin = new HashIndexPlugin(_fs.Root);
 
-        try
+        var h1 = NewHash(1);
+        var snap1 = BuildRepoSnapshot(MakeRootFromGroups(
+            scanRootId: 1,
+            dirId: 10,
+            groups: [(h1, size: 100, count: 2)]));
+
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 2, snap1));
+
+        Assert.Equal(1, plugin.TotalDuplicateFileCount);
+        Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+        // Different snapshot but stale generation (2 again) => ignored
+        var h2 = NewHash(2);
+        var snap2 = BuildRepoSnapshot(MakeRootFromGroups(
+            scanRootId: 1,
+            dirId: 10,
+            groups: [(h2, size: 777, count: 3)]));
+
+        plugin.Post(MakeSnapshotReplacedEvent(gen: 2, scanRootId: 1, snapshot: snap2));
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, plugin.TotalDuplicateFileCount);
+        Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+        var rm = (IHashIndexReadModel)plugin;
+        var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
+        Assert.Single(page.Groups.ToArray());
+        Assert.Equal(h1, page.Groups.ToArray()[0].Hash);
+    }
+
+    [Fact]
+    public async Task RepoScanRootRemovedEvent_RebuildsExcludingRemovedRoot()
+    {
+        // Two roots share same hash group: 2 files per root => 4 handles total
+        // duplicates: (4-1)=3, space: 3*100=300
+        var h = NewHash(1);
+
+        var r1 = MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(h, 100, 2)]);
+        var r2 = MakeRootFromGroups(scanRootId: 2, dirId: 20, groups: [(h, 100, 2)]);
+
+        var snaps = new Dictionary<long, ScanRootSnapshotView> { [1] = r1, [2] = r2 };
+        var snapshot = new RepoSnapshotView { Snapshots = snaps, ScanRoots = BuildScanRoots(snaps) };
+
+        await using var plugin = new HashIndexPlugin(_fs.Root);
+
+        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, snapshot));
+
+        Assert.Equal(3, plugin.TotalDuplicateFileCount);
+        Assert.Equal(300, plugin.TotalSpaceTakenByDuplicates);
+
+        // Remove root 2: remaining group has count 2 => duplicates: 1, space: 100
+        await PostAndWaitAsync(
+            plugin,
+            MakeScanRootRemovedEvent(gen: 2, scanRootId: 2),
+            predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 100 });
+
+        Assert.Equal(1, plugin.TotalDuplicateFileCount);
+        Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+
+        var rm = (IHashIndexReadModel)plugin;
+        var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(2, g.Count);
+
+        var files = rm.GetGroupFiles(g).ToArray();
+        Assert.Equal(2, files.Length);
+        Assert.All(files, fh => Assert.Equal(1, fh.ScanRootId));
+    }
+
+    // ---------------------------------------------------------------------
+    // Persistence
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task State_IsPersisted_And_Rehydrated_OnBootstrap_WhenGenerationMatches()
+    {
+        var stateDir = Path.Combine(_fs.Root, "persist");
+        Directory.CreateDirectory(stateDir);
+
+        var h = NewHash(1);
+        var snapshot = BuildRepoSnapshot(MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(h, 123, 4)]));
+
+        // Build + persist
+        await using (var plugin = new HashIndexPlugin(stateDir))
         {
-            await using var plugin = new HashIndexPlugin(dir);
+            await PostAndWaitAsync(plugin, MakeBootstrapEvent(5, snapshot));
 
-            var h1 = NewHash(1);
-
-            var snaps1 = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [1] = MakeRoot(scanRootId: 1, dirId: 10, hash: h1, size: 100)
-            };
-
-            var snap1 = new RepoSnapshotView
-            {
-                Snapshots = snaps1,
-                ScanRoots = BuildScanRoots(snaps1)
-            };
-
-            plugin.Post(new BootstrapEvent { Generation = 2, RepoSnapshotView = snap1 });
-            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-
-            Assert.Equal(1, plugin.TotalDuplicateFileCount);
-            Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
-
-            // Create a different snapshot but send event with stale generation (1)
-            var h2 = NewHash(2);
-
-            var snaps2 = new Dictionary<long, ScanRootSnapshotView>
-            {
-                [1] = MakeRoot3Files(scanRootId: 1, dirId: 10, hash: h2, size: 777)
-            };
-
-            var snap2 = new RepoSnapshotView
-            {
-                Snapshots = snaps2,
-                ScanRoots = BuildScanRoots(snaps2)
-            };
-
-            // Generation does not increase => ignored
-            plugin.Post(MakeSnapshotCommittedEvent(gen: 2, scanRootId: 1, snapshot: snap2));
-
-            await Task.Delay(100, TestContext.Current.CancellationToken); // give plugin time (should not change)
-
-            Assert.Equal(1, plugin.TotalDuplicateFileCount);
-            Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
+            Assert.Equal(3, plugin.TotalDuplicateFileCount);          // (4-1)
+            Assert.Equal(3 * 123, plugin.TotalSpaceTakenByDuplicates);
         }
-        finally
+
+        // New instance should load state on bootstrap (gen must match)
+        await using (var plugin2 = new HashIndexPlugin(stateDir))
         {
-            Directory.Delete(dir, recursive: true);
+            await PostAndWaitAsync(plugin2, MakeBootstrapEvent(5, snapshot));
+
+            Assert.Equal(3, plugin2.TotalDuplicateFileCount);
+            Assert.Equal(3 * 123, plugin2.TotalSpaceTakenByDuplicates);
+
+            var rm = (IHashIndexReadModel)plugin2;
+            var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
+            var g = Assert.Single(page.Groups.ToArray());
+            Assert.Equal(4, g.Count);
+            Assert.Equal(123, g.SizeBytes);
+
+            var files = rm.GetGroupFiles(g).ToArray();
+            Assert.Equal(4, files.Length);
         }
     }
 
-    // ---------------- Local snapshot builders  ----------------
+    // ---------------------------------------------------------------------
+    // Local snapshot builders
+    // ---------------------------------------------------------------------
 
-    private static ScanRootSnapshotView MakeRoot(long scanRootId, long dirId, HashKey hash, long size)
+    private static ScanRootSnapshotView MakeRootFromGroups(
+        long scanRootId,
+        long dirId,
+        (HashKey hash, long size, int count)[] groups)
     {
-        // Minimal root:
-        // - one directory (index 0)
-        // - two files in that directory (indices 0,1) with the same hash/size
+        var files = new List<(string name, long size, HashKey hash, ScanEntryStatus status)>();
 
-
-        var pool = PackedStringPool.FromStrings(["a.bin", "b.bin", ""]);
-        var files = new[]
+        var i = 0;
+        foreach (var g in groups)
         {
-            new FileRecordV2 { FileId = scanRootId * 100 + 1, DirId = dirId, NameStrIdx = 0, ErrorMessageStrIdx = 2, Size = size, Hash = hash, Status = ScanEntryStatus.Hashed },
-            new FileRecordV2 { FileId = scanRootId * 100 + 2, DirId = dirId, NameStrIdx = 1, ErrorMessageStrIdx = 2, Size = size, Hash = hash, Status = ScanEntryStatus.Hashed }
-        };
+            for (var j = 0; j < g.count; j++)
+            {
+                files.Add(($"f{i++}.bin", g.size, g.hash, ScanEntryStatus.Hashed));
+            }
+        }
+
+        return MakeRootFromFiles(scanRootId, dirId, files.ToArray());
+    }
+
+    private static ScanRootSnapshotView MakeRootFromFiles(
+        long scanRootId,
+        long dirId,
+        (string name, long size, HashKey hash, ScanEntryStatus status)[] files)
+    {
+        // String pool: all file names + a single "" entry at end used as ErrorMessageStrIdx and Dir name
+        var strings = files.Select(f => f.name).Concat([""]).ToArray();
+        var emptyIdx = strings.Length - 1;
+
+        var pool = PackedStringPool.FromStrings(strings);
+
+        var fileRecords = new FileRecordV2[files.Length];
+        for (var i = 0; i < files.Length; i++)
+        {
+            var f = files[i];
+            fileRecords[i] = new FileRecordV2
+            {
+                FileId = scanRootId * 1000 + i + 1,
+                DirId = dirId,
+                NameStrIdx = i,
+                ErrorMessageStrIdx = emptyIdx,
+                Size = f.size,
+                Hash = f.hash,
+                Status = f.status
+            };
+        }
 
         var dirs = new[]
+        {
+            new DirRecordV2
             {
-            new DirRecordV2 { DirId = dirId, ParentDirId = -1, NameStrIdx = 2, ErrorMessageStrIdx = 2, Status = ScanEntryStatus.Enumerated }
+                DirId = dirId,
+                ParentDirId = -1,
+                NameStrIdx = emptyIdx,
+                ErrorMessageStrIdx = emptyIdx,
+                Status = ScanEntryStatus.Enumerated
+            }
         };
 
         return new ScanRootSnapshotView
@@ -327,31 +539,7 @@ public sealed class HashIndexPluginTests
             ScanRootId = scanRootId,
             StringPool = pool,
             Dirs = dirs,
-            Files = files
-        };
-    }
-
-    private static ScanRootSnapshotView MakeRoot3Files(long scanRootId, long dirId, HashKey hash, long size)
-    {
-        var pool = PackedStringPool.FromStrings(["a.bin", "b.bin", "c.bin", ""]);
-        var files = new[]
-        {
-            new FileRecordV2 { FileId = scanRootId * 100 + 1, DirId = dirId, NameStrIdx = 0, ErrorMessageStrIdx = 3, Size = size, Hash = hash, Status = ScanEntryStatus.Hashed },
-            new FileRecordV2 { FileId = scanRootId * 100 + 2, DirId = dirId, NameStrIdx = 1, ErrorMessageStrIdx = 3, Size = size, Hash = hash, Status = ScanEntryStatus.Hashed },
-            new FileRecordV2 { FileId = scanRootId * 100 + 3, DirId = dirId, NameStrIdx = 2, ErrorMessageStrIdx = 3, Size = size, Hash = hash, Status = ScanEntryStatus.Hashed }
-        };
-
-        var dirs = new[]
-            {
-            new DirRecordV2 { DirId = dirId, ParentDirId = -1, NameStrIdx = 3, ErrorMessageStrIdx = 3, Status = ScanEntryStatus.Enumerated }
-        };
-
-        return new ScanRootSnapshotView
-        {
-            ScanRootId = scanRootId,
-            StringPool = pool,
-            Dirs = dirs,
-            Files = files
+            Files = fileRecords
         };
     }
 }

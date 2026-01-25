@@ -28,7 +28,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 
     public PagingList<DuplicateSetRow> PagedSets { get; }
 
-    private DuplicateQuery _query = new(MinDuplicates: 2, MinSize: 1, Sort: DuplicateSort.TotalSizeDesc);
+    private DuplicateQuery _query = new();
 
     public DuplicateGroupsViewModel(
         IRepoHost repoHost,

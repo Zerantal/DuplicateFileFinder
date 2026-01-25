@@ -1,5 +1,6 @@
 // DuplicateFileFinderLib/Repository/Plugins/HashIndexPlugin.cs
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 using DuplicateFileFinderLib.Logging;
@@ -49,6 +50,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // ---------------------------------------------------------------------
     // IHashIndexReadModel
     // ---------------------------------------------------------------------
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long TotalBytes(in HashGroupDescriptor d) => d.SizeBytes * d.Count;
 
     public ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group)
     {
@@ -144,15 +148,14 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private static bool Matches(in HashGroupDescriptor d, in DuplicateQuery q)
     {
-        var totalSize = d.SizeBytes * d.Count;
-        return d.Count >= q.MinDuplicates && totalSize >= q.MinSize;
+        return d.Count >= q.MinDuplicates && TotalBytes(d) >= q.MinSize;
     }
 
     private static bool CanEarlyExit(in HashGroupDescriptor d, in DuplicateQuery q)
     {
         return q.Sort switch
         {
-            DuplicateSort.TotalSizeDesc => (d.SizeBytes * d.Count) < q.MinSize,
+            DuplicateSort.TotalSizeDesc => TotalBytes(d) < q.MinSize,
             DuplicateSort.DuplicateCountDesc => d.Count < q.MinDuplicates,
             _ => false
         };
@@ -164,16 +167,13 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     protected override void OnBootstrapEvent(BootstrapEvent evt)
     {
-        if (!TryLoadState(evt.Generation))
-        {
-            RebuildFromSnapshot(evt.RepoSnapshotView);
-            _lastIndexedGeneration = evt.Generation;
-            SaveState();
-        }
-        else
+        if (TryLoadState(evt.Generation))
         {
             _lastIndexedGeneration = evt.Generation;
+            return;
         }
+
+        RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
     }
 
     protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
@@ -182,9 +182,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (evt.Generation <= _lastIndexedGeneration)
             return;
 
-        RebuildFromSnapshot(evt.RepoSnapshotView);
-        _lastIndexedGeneration = evt.Generation;
-        SaveState();
+        RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
     }
 
     protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
@@ -193,9 +191,13 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (evt.Generation <= _lastIndexedGeneration)
             return;
 
-        RebuildExcludingScanRoot(evt.ScanRootId);
+        RebuildAndCommit(evt.Generation, () => RebuildExcludingScanRoot(evt.ScanRootId));
+    }
 
-        _lastIndexedGeneration = evt.Generation;
+    private void RebuildAndCommit(long generation, Action rebuild)
+    {
+        rebuild();
+        _lastIndexedGeneration = generation;
         SaveState();
     }
 
@@ -521,8 +523,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             var a = groups[x];
             var b = groups[y];
 
-            var aTotal = a.SizeBytes * a.Count;
-            var bTotal = b.SizeBytes * b.Count;
+            var aTotal = TotalBytes(a);
+            var bTotal = TotalBytes(b);
             var c = bTotal.CompareTo(aTotal);
             if (c != 0) return c;
 
@@ -543,8 +545,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             var c = b.Count.CompareTo(a.Count);
             if (c != 0) return c;
 
-            var aTotal = a.SizeBytes * a.Count;
-            var bTotal = b.SizeBytes * b.Count;
+            var aTotal = TotalBytes(a);
+            var bTotal = TotalBytes(b);
             c = bTotal.CompareTo(aTotal);
             if (c != 0) return c;
 

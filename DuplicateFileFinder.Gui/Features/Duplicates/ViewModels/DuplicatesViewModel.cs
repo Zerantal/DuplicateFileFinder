@@ -43,7 +43,7 @@ public partial class DuplicatesViewModel : ObservableObject
         {
             if (e.PropertyName == nameof(ScanRootsFlatTreeViewModel.SelectedPath))
                 Console.WriteLine($"Selected path changed to {ScanRootsTree.SelectedPath}: TODO: Implement DuplicateGroups Filter");
-                // DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
+            // DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
         };
 
         // treemap selection drives navigation

@@ -9,10 +9,12 @@ public enum DuplicateSort
     DuplicateCountDesc
 }
 
-public readonly record struct DuplicateQuery(
-    int MinDuplicates = 2,
-    long MinSize = 1,
-    DuplicateSort Sort = DuplicateSort.TotalSizeDesc);
+public readonly record struct DuplicateQuery()
+{
+    public int MinDuplicates { get; init; } = 2;
+    public long MinSize { get; init; } = 1;
+    public DuplicateSort Sort { get; init; } = DuplicateSort.TotalSizeDesc;
+}
 
 public readonly record struct DuplicateGroupPage(
     int Total,
