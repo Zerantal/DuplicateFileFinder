@@ -30,7 +30,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     private volatile int[] _byCountDesc = [];
 
     // Published stats snapshot
-    private volatile StatsSnapshot _stats = new(0, 0);
+    private volatile StatsSnapshot _stats = StatsSnapshot.Empty;
 
     private long _lastIndexedGeneration;
 
@@ -147,9 +147,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     }
 
     private static bool Matches(in HashGroupDescriptor d, in DuplicateQuery q)
-    {
-        return d.Count >= q.MinDuplicates && TotalBytes(d) >= q.MinSize;
-    }
+        => d.Count >= q.MinDuplicates && TotalBytes(d) >= q.MinSize;
 
     private static bool CanEarlyExit(in HashGroupDescriptor d, in DuplicateQuery q)
     {
@@ -187,7 +185,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
     {
-        // Keep existing behaviour for now (rare path). Still correct, just not optimal.
         if (evt.Generation <= _lastIndexedGeneration)
             return;
 
@@ -215,15 +212,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         public int Cursor;
     }
 
-    private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
+    private static IEnumerable<(ScanRootSnapshotView snapshot, int index, FileRecordV2 file)> EnumerateEligibleFiles(
+        RepoSnapshotView repoSnapshot)
     {
-        using var _ = TimingLog.StartPhase("HashIndex.Rebuild");
-
-        // Pass 1: count per hash + sizeBytes (no per-group allocations)
-        var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
-
-        var totalHandles = 0;
-
         foreach (var scanRoot in repoSnapshot.ScanRoots.Values)
         {
             if (scanRoot.IsDeleted)
@@ -241,25 +232,40 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
                     continue;
 
-                totalHandles++;
+                yield return (snapshot, i, file);
+            }
+        }
+    }
 
-                ref var meta = ref CollectionsMarshal.GetValueRefOrAddDefault(metaByHash, file.Hash, out var exists);
+    private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
+    {
+        using var _ = TimingLog.StartPhase("HashIndex.Rebuild");
 
-                if (!exists)
+        // Pass 1: count per hash + sizeBytes (no per-group allocations)
+        var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
+
+        var totalHandles = 0;
+
+        foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
+        {
+            totalHandles++;
+
+            ref var meta = ref CollectionsMarshal.GetValueRefOrAddDefault(metaByHash, file.Hash, out var exists);
+
+            if (!exists)
+            {
+                meta = new GroupMeta
                 {
-                    meta = new GroupMeta
-                    {
-                        Count = 1,
-                        SizeBytes = file.Size,
-                        FirstFile = new FileHandle(snapshot.ScanRootId, i),
-                        Offset = 0,
-                        Cursor = 0
-                    };
-                }
-                else
-                {
-                    meta.Count++;
-                }
+                    Count = 1,
+                    SizeBytes = file.Size,
+                    FirstFile = new FileHandle(snapshot.ScanRootId, index),
+                    Offset = 0,
+                    Cursor = 0
+                };
+            }
+            else
+            {
+                meta.Count++;
             }
         }
 
@@ -304,33 +310,17 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             }
         }
 
-        // Pass 3: fill allFiles using per-hash cursors
-        foreach (var scanRoot in repoSnapshot.ScanRoots.Values)
+        // Pass 3: fill allFiles using per-hash cursors (same eligibility rules as pass 1)
+        foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
         {
-            if (scanRoot.IsDeleted)
+            if (!metaByHash.TryGetValue(file.Hash, out var meta))
                 continue;
 
-            var snapshot = repoSnapshot.Snapshots[scanRoot.RootId];
+            var writeIndex = meta.Offset + meta.Cursor;
+            meta.Cursor++;
+            metaByHash[file.Hash] = meta;
 
-            for (var i = 0; i < snapshot.Files.Count; i++)
-            {
-                var file = snapshot.Files[i];
-
-                if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                    continue;
-
-                if (file.Hash == HashKey.NotComputed || file.Hash == HashKey.CannotCompute)
-                    continue;
-
-                if (!metaByHash.TryGetValue(file.Hash, out var meta))
-                    continue;
-
-                var writeIndex = meta.Offset + meta.Cursor;
-                meta.Cursor++;
-                metaByHash[file.Hash] = meta;
-
-                allFiles[writeIndex] = new FileHandle(snapshot.ScanRootId, i);
-            }
+            allFiles[writeIndex] = new FileHandle(snapshot.ScanRootId, index);
         }
 
         var (bySize, byCount) = BuildSortedViews(groups);
@@ -339,8 +329,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     }
 
     // ---------------------------------------------------------------------
-    // Rebuild: allocation-free exclusion of a scan-root from current index
+    // Rebuild: exclusion of a scan-root from current index (3-pass compaction)
     // ---------------------------------------------------------------------
+
+    private readonly record struct RemovalPlan(int[] Counts, FileHandle[] Reps, int NewGroupCount, int NewTotalHandles);
 
     private void RebuildExcludingScanRoot(long removedScanRootId)
     {
@@ -355,13 +347,37 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             return;
         }
 
-        // Pass 1: compute new counts + new total handle count + how many groups survive.
-        var newTotalHandles = 0;
-        var newGroupCount = 0;
+        // Pass 1: build plan (counts + representatives + totals)
+        var plan = BuildRemovalPlan(oldGroups, oldAll, removedScanRootId);
 
-        // Per-old-group newCount and representative handle.
+        if (plan.NewGroupCount == 0 || plan.NewTotalHandles == 0)
+        {
+            PublishEmpty();
+            return;
+        }
+
+        // Pass 2: allocate outputs + build newGroups with offsets (compacting away empty groups)
+        var newAll = new FileHandle[plan.NewTotalHandles];
+        var newGroups = new HashGroupDescriptor[plan.NewGroupCount];
+
+        BuildGroupsFromPlan(oldGroups, plan, newGroups);
+
+        // Pass 3: fill newAll by copying survivors into each group segment
+        FillAllFilesFromPlan(oldGroups, oldAll, plan, removedScanRootId, newAll);
+
+        PublishComputed(newAll, newGroups, ComputeStats(newGroups));
+    }
+
+    private static RemovalPlan BuildRemovalPlan(
+        HashGroupDescriptor[] oldGroups,
+        FileHandle[] oldAll,
+        long removedScanRootId)
+    {
         var newCounts = new int[oldGroups.Length];
         var newReps = new FileHandle[oldGroups.Length];
+
+        var newTotalHandles = 0;
+        var newGroupCount = 0;
 
         for (var g = 0; g < oldGroups.Length; g++)
         {
@@ -402,25 +418,20 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             newGroupCount++;
         }
 
-        if (newGroupCount == 0 || newTotalHandles == 0)
-        {
-            PublishEmpty();
-            return;
-        }
+        return new RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
+    }
 
-        // Pass 2: allocate output arrays and compute offsets (compact groups: drop empties)
-        var newAll = new FileHandle[newTotalHandles];
-        var newGroups = new HashGroupDescriptor[newGroupCount];
-
+    private static void BuildGroupsFromPlan(
+        HashGroupDescriptor[] oldGroups,
+        RemovalPlan plan,
+        HashGroupDescriptor[] newGroups)
+    {
         var wGroup = 0;
         var wOffset = 0;
 
-        var totalDupCount = 0;
-        long totalSpaceDup = 0;
-
         for (var g = 0; g < oldGroups.Length; g++)
         {
-            var newCount = newCounts[g];
+            var newCount = plan.Counts[g];
             if (newCount <= 0)
                 continue;
 
@@ -431,28 +442,31 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 SizeBytes: old.SizeBytes,
                 Offset: wOffset,
                 Count: newCount,
-                FirstFile: newReps[g]);
-
-            if (newCount > 1)
-            {
-                totalDupCount += newCount - 1;
-                totalSpaceDup += (newCount - 1) * old.SizeBytes;
-            }
+                FirstFile: plan.Reps[g]);
 
             wOffset += newCount;
             wGroup++;
         }
+    }
 
-        // Pass 3: fill newAll by slicing oldAll and copying survivors into assigned segments.
+    private static void FillAllFilesFromPlan(
+        HashGroupDescriptor[] oldGroups,
+        FileHandle[] oldAll,
+        RemovalPlan plan,
+        long removedScanRootId,
+        FileHandle[] newAll)
+    {
         var dstOffset = 0;
 
         for (var g = 0; g < oldGroups.Length; g++)
         {
-            var newCount = newCounts[g];
+            var newCount = plan.Counts[g];
             if (newCount <= 0)
                 continue;
 
             var d = oldGroups[g];
+
+            // Bounds already validated in the plan, so no repeated checks here.
             var end = d.Offset + d.Count;
 
             var wrote = 0;
@@ -471,9 +485,37 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
             dstOffset += newCount;
         }
+    }
 
-        var (bySize, byCount) = BuildSortedViews(newGroups);
-        Publish(newAll, newGroups, bySize, byCount, new StatsSnapshot(totalDupCount, totalSpaceDup));
+    // ---------------------------------------------------------------------
+    // Consolidated “finalize + publish”
+    // ---------------------------------------------------------------------
+
+    private static StatsSnapshot ComputeStats(HashGroupDescriptor[] groups)
+    {
+        var dupCount = 0;
+        long space = 0;
+
+        for (var i = 0; i < groups.Length; i++)
+        {
+            var g = groups[i];
+            if (g.Count <= 1)
+                continue;
+
+            dupCount += g.Count - 1;
+            space += (g.Count - 1) * g.SizeBytes;
+        }
+
+        return dupCount == 0 ? StatsSnapshot.Empty : new StatsSnapshot(dupCount, space);
+    }
+
+    private void PublishComputed(
+        FileHandle[] allFiles,
+        HashGroupDescriptor[] groups,
+        StatsSnapshot stats)
+    {
+        var (bySize, byCount) = BuildSortedViews(groups);
+        Publish(allFiles, groups, bySize, byCount, stats);
     }
 
     // ---------------------------------------------------------------------
@@ -492,7 +534,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     }
 
     private void PublishEmpty()
-        => Publish([], [], [], [], new StatsSnapshot(0, 0));
+        => Publish([], [], [], [], StatsSnapshot.Empty);
 
     private void Publish(
         FileHandle[] allFiles,
@@ -593,24 +635,26 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
             using (TimingLog.StartPhase("Rehydrating hash index"))
             {
-                var allFiles = state.AllFiles ?? [];
-                var groups = state.Groups ?? [];
+                // Build locals first, then publish once (atomic-ish for readers).
+                var allFiles = state.AllFiles;
+                var groups = state.Groups;
 
-                // Prefer persisted views; if missing, rebuild (but still load is fast-ish)
+                if (groups.Length == 0 || allFiles.Length == 0)
+                    return false;
+
+                // Prefer persisted views; if missing/invalid, rebuild.
                 var bySize = state.BySizeDesc;
                 var byCount = state.ByCountDesc;
 
-                if (bySize == null || byCount == null ||
-                    bySize.Length != groups.Length || byCount.Length != groups.Length)
-                {
+                if (bySize.Length != groups.Length || byCount.Length != groups.Length)
                     (bySize, byCount) = BuildSortedViews(groups);
-                }
 
-                _allFiles = allFiles;
-                _groups = groups;
-                _bySizeDesc = bySize;
-                _byCountDesc = byCount;
-                _stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
+
+                var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
+
+                Publish(allFiles, groups, bySize, byCount, stats);
+
+                // Not part of read-model publication, but keep consistent here too.
                 _lastIndexedGeneration = state.LastIndexedGeneration;
             }
 
@@ -626,5 +670,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Internal types
     // ---------------------------------------------------------------------
 
-    private sealed record StatsSnapshot(int DuplicateFileCount, long SpaceTakenByDuplicates);
+    private sealed record StatsSnapshot(int DuplicateFileCount, long SpaceTakenByDuplicates)
+    {
+        internal static StatsSnapshot Empty => new(0, 0);
+    }
 }

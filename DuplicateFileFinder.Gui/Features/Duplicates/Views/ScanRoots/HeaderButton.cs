@@ -14,7 +14,7 @@ public static class HeaderButton
 
     public static readonly AttachedProperty<TextAlignment> TextAlignmentProperty =
         AvaloniaProperty.RegisterAttached<Control, Control, TextAlignment>(
-            "TextAlignment", TextAlignment.Left);
+            "TextAlignment");
 
     public static void SetText(Control element, string? value) =>
         element.SetValue(TextProperty, value);

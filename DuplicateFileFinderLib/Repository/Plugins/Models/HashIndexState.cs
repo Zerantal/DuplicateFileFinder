@@ -15,12 +15,12 @@ public sealed partial record HashIndexState
     public long TotalSpaceTakenByDuplicates { get; init; }
 
     // Flat blob: concatenation of all groups’ handles
-    public FileHandle[]? AllFiles { get; init; }
+    public FileHandle[] AllFiles { get; init; } = [];
 
     // Dense descriptors (unsorted)
-    public HashGroupDescriptor[]? Groups { get; init; }
+    public HashGroupDescriptor[] Groups { get; init; } = [];
 
     // Persisted sorted “views” (indices into Groups[])
-    public int[]? BySizeDesc { get; init; }
-    public int[]? ByCountDesc { get; init; }
+    public int[] BySizeDesc { get; init; } = [];
+    public int[] ByCountDesc { get; init; } = [];
 }

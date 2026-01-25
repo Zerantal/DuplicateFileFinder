@@ -31,7 +31,7 @@
     </Style>
 
     <Style Selector="Button.scanroot-header">
-      <Setter Property="HorizontalAlignment" Value="Right"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
       <Setter Property="VerticalContentAlignment" Value="Center" />
 
       <Setter Property="Template">
@@ -83,7 +83,7 @@
         <Button Grid.Column="1"
                 Classes="scanroot-header"
                 scanRoots:HeaderButton.Text="Subtree %"
-                IsEnabled="False"
+                IsHitTestVisible="False"
                 MinWidth="100"
                 MaxWidth="400" />
 

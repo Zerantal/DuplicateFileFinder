@@ -85,23 +85,6 @@ public sealed class HashIndexPluginTests
         };
     }
 
-    private static RepoSnapshotView BuildRepoSnapshot(
-        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
-        HashSet<long> deletedScanRoots)
-    {
-        return new RepoSnapshotView
-        {
-            Snapshots = snapshots,
-            ScanRoots = BuildScanRoots(snapshots, deletedScanRoots)
-        };
-    }
-
-    // private static async Task PostAndWaitAsync(HashIndexPlugin plugin, RepoEvent evt)
-    // {
-    //     plugin.Post(evt);
-    //     await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-    // }
-
     private static async Task PostAndWaitAsync(
         HashIndexPlugin plugin,
         RepoEvent evt,
@@ -161,7 +144,7 @@ public sealed class HashIndexPluginTests
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
 
         var page = plugin.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
             offset: 0,
             count: 10);
 
@@ -206,7 +189,7 @@ public sealed class HashIndexPluginTests
 
         // page 0,2 => expect C then B (90, 80)
         var page0 = rm.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
             offset: 0,
             count: 2);
 
@@ -216,7 +199,7 @@ public sealed class HashIndexPluginTests
 
         // page 2,2 => expect A then D (50, 10)
         var page1 = rm.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
             offset: 2,
             count: 2);
 
@@ -248,7 +231,7 @@ public sealed class HashIndexPluginTests
         var rm = (IHashIndexReadModel)plugin;
 
         var page = rm.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc},
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc },
             offset: 0,
             count: 10);
 
@@ -282,7 +265,7 @@ public sealed class HashIndexPluginTests
 
         // MinSize 201 => should include only hBig (1000), exclude hMid (200) and hSmall (50).
         var page = rm.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 2, MinSize = 201, Sort = DuplicateSort.TotalSizeDesc},
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 201, Sort = DuplicateSort.TotalSizeDesc },
             offset: 0,
             count: 10);
 
@@ -292,7 +275,7 @@ public sealed class HashIndexPluginTests
 
         // MinDuplicates 6 => only hBig (10) and hSmall (5 excluded) and hMid(2 excluded)
         var page2 = rm.GetGroupsPage(
-            new DuplicateQuery {MinDuplicates = 6, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc},
+            new DuplicateQuery { MinDuplicates = 6, MinSize = 1, Sort = DuplicateSort.DuplicateCountDesc },
             offset: 0,
             count: 10);
 
@@ -339,7 +322,7 @@ public sealed class HashIndexPluginTests
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
 
         var rm = (IHashIndexReadModel)plugin;
-        var page = rm.GetGroupsPage(new DuplicateQuery {MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc},
+        var page = rm.GetGroupsPage(new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
             0, 10);
 
         Assert.Equal(1, page.Total);
