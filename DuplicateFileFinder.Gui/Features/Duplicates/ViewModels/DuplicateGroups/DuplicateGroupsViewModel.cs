@@ -29,7 +29,8 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 
     private DuplicateQuery _query = DuplicateQuery.Default;
 
-    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
     private FileItem? _selectedDuplicateFile;
 
     [ObservableProperty] private DirHandle? _selectedSubtreeDir;
