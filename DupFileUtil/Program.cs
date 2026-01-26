@@ -1,5 +1,7 @@
-﻿using CommandLine;
+using CommandLine;
+
 using DupFileUtil.Commands;
+
 using NLog;
 using NLog.Config;
 using NLog.Targets;

@@ -21,16 +21,17 @@
           <Grid ColumnDefinitions="2*,80,140">
             <TextBlock Text="Name" Grid.Column="0" FontWeight="Bold" Foreground="White" />
             <TextBlock Text="Files" Grid.Column="1" FontWeight="Bold" HorizontalAlignment="Right" Foreground="White" />
-            <TextBlock Text="Total Size" Grid.Column="2" FontWeight="Bold" HorizontalAlignment="Right" Foreground="White" />
+            <TextBlock Text="Size" Grid.Column="2" FontWeight="Bold" HorizontalAlignment="Right" Foreground="White" />
           </Grid>
         </Border>
 
               <!-- Virtualized rows -->
-        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+        <ScrollViewer x:Name="DuplicateSetsScroll"
+                      HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
                       FontFamily="monospace">
           <ItemsRepeater x:Name="DuplicateSetsRepeater"
-                         ItemsSource="{Binding FilteredSets}">
+                         ItemsSource="{Binding PagedSets}">
             <ItemsRepeater.Layout>
               <StackLayout Orientation="Vertical"
                            DisableVirtualization="False" />

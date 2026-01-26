@@ -10,6 +10,7 @@ using DuplicateFileFinder.Gui.Infrastructure.Services;
 
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
+using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
 
 using Xunit;
@@ -146,7 +147,7 @@ public sealed class ScanRootsTreeNodeActionsTests
     {
         public bool IsScanning => false;
 
-        public event EventHandler<DuplicateFileFinderLib.Core.DuplicateFileFinderProgressReport>? ProgressChanged;
+        public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
         public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
 
         public readonly List<long> RescannedScanRoots = [];

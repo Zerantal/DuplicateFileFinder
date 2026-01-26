@@ -292,7 +292,7 @@ public static class TreeMapBuilder
             if (otherCount > 0 && otherValue > 0)
                 childrenOut.Add(new TreeMapNode<ITreeMapNodeElement>
                 {
-                    Element = BuildSyntheticOtherDirs(otherCount, otherValue),
+                    Element = BuildSyntheticOtherDirs(parentDir, otherCount, otherValue),
                     Children = [],
                     Fill = null
                 });
@@ -385,7 +385,7 @@ public static class TreeMapBuilder
             {
                 childrenOut.Add(new TreeMapNode<ITreeMapNodeElement>
                 {
-                    Element = BuildSyntheticOtherFiles(otherCount, otherValue),
+                    Element = BuildSyntheticOtherFiles(dir, otherCount, otherValue),
                     Children = [],
                     Fill = null
                 });
@@ -443,7 +443,8 @@ public static class TreeMapBuilder
                 [
                     ("ScanRootId", dir.ScanRootId.ToString()),
                     ("Index", dir.Index.ToString())
-                ]);
+                ])
+            { ParentDir = dir };
 
             return new TreeMapNode<ITreeMapNodeElement>
             {
@@ -469,7 +470,7 @@ public static class TreeMapBuilder
             };
         }
 
-        private ITreeMapNodeElement BuildSyntheticOtherDirs(int count, double value)
+        private ITreeMapNodeElement BuildSyntheticOtherDirs(DirHandle parentDir, int count, double value)
         {
             return new SyntheticTreeMapElement(
                 _resolver,
@@ -479,10 +480,11 @@ public static class TreeMapBuilder
                 lines:
                 [
                     ("Total", FormatMetric(value))
-                ]);
+                ])
+            { ParentDir = parentDir };
         }
 
-        private ITreeMapNodeElement BuildSyntheticOtherFiles(int count, double value)
+        private ITreeMapNodeElement BuildSyntheticOtherFiles(DirHandle parentDir, int count, double value)
         {
             return new SyntheticTreeMapElement(
                 _resolver,
@@ -492,7 +494,8 @@ public static class TreeMapBuilder
                 lines:
                 [
                     ("Total", FormatMetric(value))
-                ]);
+                ])
+            { ParentDir = parentDir };
         }
 
         private string FormatMetric(double value)

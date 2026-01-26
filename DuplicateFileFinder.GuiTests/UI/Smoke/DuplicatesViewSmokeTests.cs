@@ -9,10 +9,11 @@ using Avalonia.VisualTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views;
 using DuplicateFileFinder.Gui.Features.Duplicates.Views.DuplicateGroups;
+using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinder.GuiTests.UI.Fakes;
@@ -40,7 +41,8 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             // Assemble graph (DI-style)
             var dupController = new DuplicateGroupsController(host);
             var fakeDeletionService = new FakeDuplicateFileDeletionService();
-            var duplicateGroupsVm = new DuplicateGroupsViewModel(dupController, fakeDeletionService);
+            var duplicateGroupsVm = new DuplicateGroupsViewModel(host, dupController, fakeDeletionService);
+            var repoEventRelay = new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher());
 
             // ---- ScanRoots tree: builder + actions + factory + vm ----
             var scanRootsBuilder = new ScanRootsTreeBuilder(host);
@@ -51,13 +53,11 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
                 dialogs: dialogs,
                 deleter: deleter);
 
-            var folderVmFactory = new FolderNodeViewModelFactory(
-                actions: scanRootsActions,
-                builder: scanRootsBuilder);
-
-            var scanRootsVm = new ScanRootsTreeViewModel(
+            var scanRootsVm = new ScanRootsFlatTreeViewModel(
+                repoEvents: repoEventRelay,
                 builder: scanRootsBuilder,
-                factory: folderVmFactory);
+                actions: scanRootsActions,
+                disposer: new DisposableManager());
 
             // ---- TreeMap ----
             var treeMapController = new TreeMapController(host)

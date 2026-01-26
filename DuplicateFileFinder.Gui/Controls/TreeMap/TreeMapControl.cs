@@ -98,6 +98,8 @@ public sealed class TreeMapControl : Control
             ctrl._layout.Clear();
             ctrl._rectByNode.Clear();
             ctrl._valueCache.Clear();
+            ctrl._cacheBitmap?.Dispose();
+            ctrl._cacheBitmap = null;
             ctrl._cacheDirty = true;
 
             ctrl.InvalidateMeasure();
@@ -120,6 +122,7 @@ public sealed class TreeMapControl : Control
         SelectedNodeProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
         SelectionBorderBrushProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
         SelectionBorderThicknessProperty.Changed.AddClassHandler<TreeMapControl>((ctrl, _) => ctrl.InvalidateVisual());
+
     }
 
     public TreeMapControl()

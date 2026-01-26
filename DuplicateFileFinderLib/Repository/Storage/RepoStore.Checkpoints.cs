@@ -49,7 +49,7 @@ internal static partial class RepoStore
 
         var tmp = NewUniqueTmpPath(path);
 
-        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        await s_writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             try
@@ -81,7 +81,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            _writeGate.Release();
+            s_writeGate.Release();
         }
     }
 
@@ -92,7 +92,7 @@ internal static partial class RepoStore
     {
         var dir = GetCheckpointDir(repoPath);
         if (!Directory.Exists(dir))
-            return Array.Empty<ScanCheckpoint>();
+            return [];
 
         // Load all matching files; sort by CreatedAtUtcTicks (embedded as D19)
         var paths = Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk")
@@ -100,7 +100,7 @@ internal static partial class RepoStore
             .ToArray();
 
         if (paths.Length == 0)
-            return Array.Empty<ScanCheckpoint>();
+            return [];
 
         var result = new List<ScanCheckpoint>(paths.Length);
 
@@ -134,7 +134,7 @@ internal static partial class RepoStore
         if (!Directory.Exists(dir))
             return;
 
-        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        await s_writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             try
@@ -153,7 +153,7 @@ internal static partial class RepoStore
         }
         finally
         {
-            _writeGate.Release();
+            s_writeGate.Release();
         }
     }
 }

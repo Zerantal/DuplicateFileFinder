@@ -17,6 +17,13 @@ public partial class TreeMapController : ObservableObject
 
     private RepoSnapshotView? _lastSnapshot;
 
+    // Fast lookup tables for selection sync (flat tree -> treemap)
+    private readonly Dictionary<DirHandle, TreeMapNode<ITreeMapNodeElement>> _dirNodeByHandle = new();
+    private readonly Dictionary<FileHandle, TreeMapNode<ITreeMapNodeElement>> _fileNodeByHandle = new();
+
+    public IReadOnlyDictionary<DirHandle, TreeMapNode<ITreeMapNodeElement>> DirNodeByHandle => _dirNodeByHandle;
+    public IReadOnlyDictionary<FileHandle, TreeMapNode<ITreeMapNodeElement>> FileNodeByHandle => _fileNodeByHandle;
+
     [ObservableProperty] private TreeMapMetric _metric = TreeMapMetric.TotalBytes;
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _root;
 
@@ -92,12 +99,13 @@ public partial class TreeMapController : ObservableObject
             _fileDirIndex,
             Metric,
             Options,
-            (dirId) =>
+            dirId =>
             {
                 _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
                 return dirPath;
             });
 
+        RebuildLookups();
         SelectedNode = null;
     }
 
@@ -113,17 +121,46 @@ public partial class TreeMapController : ObservableObject
             _fileDirIndex,
             value,
             Options,
-            (dirId) =>
+            dirId =>
             {
                 _fileDirIndex.TryGetDirPathById(dirId, out var dirPath);
                 return dirPath;
             });
 
+        RebuildLookups();
         SelectedNode = null;
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));
         OnPropertyChanged(nameof(IsMetricDuplicateFiles));
         OnPropertyChanged(nameof(IsMetricDuplicateBytes));
+    }
+
+    private void RebuildLookups()
+    {
+        _dirNodeByHandle.Clear();
+        _fileNodeByHandle.Clear();
+
+        if (Root is null)
+            return;
+
+        var stack = new Stack<TreeMapNode<ITreeMapNodeElement>>();
+        stack.Push(Root);
+
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+
+            if (n.Element is DirTreeMapElement d)
+                _dirNodeByHandle[d.Dir] = n;
+            else if (n.Element is FileTreeMapElement f)
+                _fileNodeByHandle[f.File] = n;
+
+            if (n.Children is { Count: > 0 })
+            {
+                for (var i = 0; i < n.Children.Count; i++)
+                    stack.Push(n.Children[i]);
+            }
+        }
     }
 }

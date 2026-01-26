@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
+
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 // Used to hold ScanRoots or as a summary node when total node count becomes excessive
@@ -33,6 +35,7 @@ public sealed class SyntheticTreeMapElement : RepoTreeMapElement
 
     public string TypeLabel { get; }
     public IReadOnlyList<KeyValuePair<string, string>> ToolTipLines { get; }
+    public DirHandle? ParentDir { get; init; }
 
     protected override string ResolveName() => _label;
     protected override string ResolveRelativePath() => _relativePath;

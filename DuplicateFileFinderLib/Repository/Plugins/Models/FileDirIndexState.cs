@@ -8,6 +8,6 @@ namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 public sealed partial record FileDirIndexState
 {
     public long LastIndexedGeneration { get; init; }
-    public required Dictionary<long, DirHandle> DirsById { get; init; }
-    public required Dictionary<long, FileHandle> FilesById { get; init; }
+    public required SegmentedIdMap<DirHandle> DirsById { get; init; }
+    public required SegmentedIdMap<FileHandle> FilesById { get; init; }
 }

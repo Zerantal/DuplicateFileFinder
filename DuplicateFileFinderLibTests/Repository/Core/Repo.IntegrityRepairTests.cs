@@ -106,7 +106,7 @@ public sealed class RepoIntegrityRepairTests
         var repo = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
         try
         {
-            await repo.RepairMigratedRepoAsync(TestContext.Current.CancellationToken);
+            await repo.RepairRepoAsync(TestContext.Current.CancellationToken);
 
             // Assert: snapshot updated in-memory
             var view = repo.TryGetScanRootView(scanRootId);
@@ -205,7 +205,7 @@ public sealed class RepoIntegrityRepairTests
         var repo = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
         try
         {
-            await repo.RepairMigratedRepoAsync(TestContext.Current.CancellationToken);
+            await repo.RepairRepoAsync(TestContext.Current.CancellationToken);
 
             var roots = repo.ScanRootsView.Where(r => !r.IsDeleted).ToList();
             Assert.Single(roots);
@@ -278,7 +278,7 @@ public sealed class RepoIntegrityRepairTests
         var repo = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
         try
         {
-            await repo.RepairMigratedRepoAsync(TestContext.Current.CancellationToken);
+            await repo.RepairRepoAsync(TestContext.Current.CancellationToken);
 
             var seqs = repo.ScanRunsView.Select(r => r.ScanSequence).OrderBy(x => x).ToArray();
             Assert.Equal(new[] { 101L }, seqs);
@@ -347,7 +347,7 @@ public sealed class RepoIntegrityRepairTests
         var repo = await Repo.OpenAsync(repoDir, TestContext.Current.CancellationToken);
         try
         {
-            await repo.RepairMigratedRepoAsync(TestContext.Current.CancellationToken);
+            await repo.RepairRepoAsync(TestContext.Current.CancellationToken);
 
             var repairedRoot = Assert.Single(repo.ScanRootsView, r => r.RootId == 1);
             Assert.True(repairedRoot.DirId > 0);

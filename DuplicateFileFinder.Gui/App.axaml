@@ -13,6 +13,8 @@
     <Application.Resources>
         <conv:BytesToHumanConverter x:Key="BytesToHuman" />
         <conv:OneThirdConverter x:Key="OneThirdConverter"/>
+        <conv:DepthToIndentWidthConverter x:Key="DepthToIndentWidthConverter"/>
+        <conv:ExpandedToGlyphConverter x:Key="ExpandedToGlyphConverter"/>
     </Application.Resources>
 
     <Application.DataTemplates>
@@ -42,7 +44,7 @@
                 <TextBlock Text="{Binding RelativePath, StringFormat=Path: {0}}" />
 
                 <StackPanel Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="Size:" />
+                    <TextBlock Text="TotalSizeBytes:" />
                     <TextBlock Text="{Binding Value, Converter={StaticResource BytesToHuman}}" />
                 </StackPanel>
             </StackPanel>

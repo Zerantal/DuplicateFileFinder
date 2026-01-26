@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
@@ -71,7 +72,7 @@ public sealed class Repo_ScanLifecycleTests
             await internalRepo.CommitScanRootSnapshotV2Async(snap, CancellationToken.None);
 
             Assert.True(sink.TryDequeue(out var evt, TimeSpan.FromSeconds(2)));
-            var committed = Assert.IsType<ScanRootSnapshotCommittedEvent>(evt);
+            var committed = Assert.IsType<ScanRootSnapshotReplacedEvent>(evt);
 
             Assert.Equal(ctx.ScanRoot.RootId, committed.ScanRootId);
             Assert.NotNull(committed.RepoSnapshotView);

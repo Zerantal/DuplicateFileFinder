@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -29,15 +27,19 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
     {
         public DirAggregateStats GetDirStats(DirHandle dirId) => throw new NotImplementedException();
 
-        public ImmutableArray<DirHandle> GetChildDirs(DirHandle dir) => throw new NotImplementedException();
+        public ReadOnlySpan<DirHandle> GetChildDirs(DirHandle dir) => throw new NotImplementedException();
 
-        public ImmutableArray<FileHandle> GetChildFiles(DirHandle dir) => throw new NotImplementedException();
+        public ReadOnlySpan<FileHandle> GetChildFiles(DirHandle dir) => throw new NotImplementedException();
+        public bool TryGetSubtreeRange(DirHandle dir, out SubtreeRange range) => throw new NotImplementedException();
+
+        public bool TryGetFileDirPreorder(FileHandle file, out int preorder) => throw new NotImplementedException();
     }
     private sealed class DummyHashIndex : IHashIndexReadModel
     {
-        public IReadOnlyList<(long size, IReadOnlyList<FileHandle> list)>
-            GetDuplicateGroups(int minDuplicates = 2, long minSize = 1) =>
-            new List<(long size, IReadOnlyList<FileHandle> list)>();
+        public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, int offset, int count) => throw new NotImplementedException();
+        public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, in SubtreeFilter filter, int offset, int count) => throw new NotImplementedException();
+
+        public ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group) => throw new NotImplementedException();
 
         public int TotalDuplicateFileCount { get; }
         public long TotalSpaceTakenByDuplicates { get; }

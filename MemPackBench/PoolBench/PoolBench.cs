@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+
 using MemoryPack;
 
 namespace MemPackBench.PoolBench;

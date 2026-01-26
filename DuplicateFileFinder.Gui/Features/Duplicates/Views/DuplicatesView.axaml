@@ -18,13 +18,9 @@
     <Grid Grid.Row="0"
           x:Name="ScanRootsHost">
 
-      <ScrollViewer
-        VerticalScrollBarVisibility="Auto"
-        HorizontalScrollBarVisibility="Disabled">
-        <scanRoots:ScanRootsTreeView
-          x:Name="ScanRootsTree"
-          DataContext="{Binding ScanRootsTree}" />
-      </ScrollViewer>
+      <scanRoots:ScanRootsFlatTreeView
+        x:Name="ScanRootsTree"
+        DataContext="{Binding ScanRootsTree}" />
     </Grid>
 
     <!-- Divider -->
@@ -40,7 +36,7 @@
     <TabControl Grid.Row="2" x:Name="MainTabs">
 
       <!-- Tab 1: existing duplicates view -->
-      <TabItem Header="Controller">
+      <TabItem Header="Duplicate Files">
         <dupPane:DuplicateGroupsView DataContext="{Binding DuplicateGroups}" />
       </TabItem>
 

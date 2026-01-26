@@ -14,7 +14,7 @@ public static class RepoTreeDumper
 
     private static string GetNextDumpPath()
     {
-        var dir = App.AppDir;
+        var dir = Path.Combine(App.AppDir, "dump");
         Directory.CreateDirectory(dir);
 
         lock (s_dumpLock)

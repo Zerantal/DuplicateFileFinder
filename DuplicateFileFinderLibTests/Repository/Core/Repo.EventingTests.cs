@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 using Xunit;

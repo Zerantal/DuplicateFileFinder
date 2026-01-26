@@ -3,12 +3,12 @@
 using System.Threading.Channels;
 
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
-public abstract class ChannelRepoPlugin : IRepoPlugin
+public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenerationBarrier
 {
     private readonly Channel<RepoEvent> _channel;
     private readonly CancellationTokenSource _cts = new();
@@ -17,7 +17,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
     private readonly TaskCompletionSource _readyTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private readonly object _processedSync = new();
+    private readonly Lock _processedSync = new();
     private long _lastProcessedGeneration;
     private readonly List<GenerationWaiter> _generationWaiters = new();
 
@@ -78,24 +78,40 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
                 OnScanRunFinalisedEvent(finalised);
                 break;
 
-            case ScanRootSnapshotCommittedEvent snapCommitted:
-                using (TimingLog.Start($"Processing OnScanRootSnapshotCommittedEvent ({GetType().Name})"))
+            case ScanRootSnapshotReplacedEvent replaced:
+                using (TimingLog.Start($"Processing ScanRootSnapshotReplacedEvent ({GetType().Name})"))
                 {
-                    OnScanRootSnapshotCommittedEvent(snapCommitted);
+                    OnScanRootSnapshotReplacedEvent(replaced);
                 }
+                break;
+
+            case RepoFileDeletedEvent fileDeleted:
+                OnRepoFileDeletedEvent(fileDeleted);
+                break;
+
+            case RepoDirDeletedEvent dirDeleted:
+                OnRepoDirDeletedEvent(dirDeleted);
+                break;
+
+            case RepoScanRootRemovedEvent rootRemoved:
+                OnRepoScanRootRemovedEvent(rootRemoved);
+                break;
+            case ScanRootMetaChangedEvent metaChanged:
+                OnScanRootMetaChangedEvent(metaChanged);
                 break;
         }
 
-        // Record that we have fully processed this event's generation.
-        // This enables callers (e.g., RepoHost) to wait until indexes have rebuilt.
         UpdateLastProcessedGeneration(evt.Generation);
-
         return ValueTask.CompletedTask;
     }
 
+    protected virtual void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt) { }
+    protected virtual void OnRepoFileDeletedEvent(RepoFileDeletedEvent evt) { }
+    protected virtual void OnRepoDirDeletedEvent(RepoDirDeletedEvent evt) { }
+    protected virtual void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt) { }
     protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
     protected virtual void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt) { }
-    protected virtual void OnScanRootSnapshotCommittedEvent(ScanRootSnapshotCommittedEvent evt) { }
+    protected virtual void OnScanRootMetaChangedEvent(ScanRootMetaChangedEvent evt) { }
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
     {
@@ -187,7 +203,9 @@ public abstract class ChannelRepoPlugin : IRepoPlugin
 
     private readonly record struct GenerationWaiter(long TargetGeneration, TaskCompletionSource Tcs);
 
-    public async ValueTask DisposeAsync()
+    protected virtual ValueTask DisposeAsyncCore() => ValueTask.CompletedTask;
+
+    public virtual async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();
         _channel.Writer.TryComplete();

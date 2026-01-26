@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+// DuplicateFileFinderLib/Repository/Plugins/Models/TreeIndexState.cs
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 
@@ -6,14 +6,52 @@ using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
-[MemoryPackable]
+/// <summary>
+///     Packed representation of the tree index:
+///     - Per-root: a single backing array for all child-dir handles and all child-file handles
+///     - Per-dir: a Slice (Offset, Length) into the backing array
+///     This avoids deserialising large numbers of ImmutableArray instances.
+/// </summary>
+[MemoryPackable(SerializeLayout.Sequential)]
 internal sealed partial record TreeIndexState
 {
-    [MemoryPackOrder(0)] public required long LastIndexedGeneration { get; init; }
+    public required long LastIndexedGeneration { get; init; }
 
-    // Regular dictionaries for fast load + low allocation overhead.
-    // Values are ImmutableArray<T> so reads are allocation-free and safe to share.
-    [MemoryPackOrder(1)] public required Dictionary<DirHandle, ImmutableArray<DirHandle>> ChildrenDirsByParentId { get; init; }
-    [MemoryPackOrder(2)] public required Dictionary<DirHandle, ImmutableArray<FileHandle>> ChildrenFilesByDirId { get; init; }
-    [MemoryPackOrder(3)] public required Dictionary<DirHandle, DirAggregateStats> DirStatsById { get; init; }
+    // Keyed by ScanRootId
+    public required Dictionary<long, RootTreeIndexState> Roots { get; init; }
+}
+
+[MemoryPackable(SerializeLayout.Sequential)]
+internal sealed partial record RootTreeIndexState
+{
+    // One backing pool per element type per root.
+    public required DirHandle[] ChildDirsPool { get; init; }
+    public required FileHandle[] ChildFilesPool { get; init; }
+
+    // Keyed by DirHandle.Index (per root) -> slice into the corresponding pool.
+    public required SegmentedIdMap<Slice> ChildDirSliceByDirIndex { get; init; }
+    public required SegmentedIdMap<Slice> ChildFileSliceByDirIndex { get; init; }
+
+    public required SegmentedIdMap<DirAggregateStats> StatsByDirIndex { get; init; }
+
+    // keyed by DirHandle.Index -> subtree preorder interval
+    public required SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex { get; init; }
+
+    // per-file (FileHandle.Index) -> preorder of parent directory (or -1 if unknown)
+    public required int[] DirPreorderByFileIndex { get; init; }
+}
+
+[MemoryPackable(SerializeLayout.Sequential)]
+public readonly partial record struct Slice
+{
+    public int Offset { get; init; }
+    public int Length { get; init; }
+
+    public Slice(int offset, int length)
+    {
+        Offset = offset;
+        Length = length;
+    }
+
+    public bool IsEmpty => Length <= 0;
 }

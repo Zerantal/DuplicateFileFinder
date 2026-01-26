@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
@@ -210,41 +211,139 @@ public sealed partial class Repo
     }
 
     Task IRepoInternal.CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
-        => CommitScanRootSnapshotV2Async(snapshot, cancellationToken);
+        => CommitAndPublishSnapshotAsync(snapshot, RepoSnapshotCommitReason.Maintenance, cancellationToken);
 
-    private async Task CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken ct)
+    async Task IRepoInternal.FinaliseCompletedScanAsync(long scanSequence, ScanRootSnapshotV2 completedSnapshot, CancellationToken ct)
     {
-        long generation;
-        RepoSnapshotView snapshotView;
+        var (generation, snapshotView, updatedRun) =
+            await FinaliseCompletedScanAsync(scanSequence, completedSnapshot, ct).ConfigureAwait(false);
 
-        lock (_sync)
-        {
-            _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
-
-            generation = _meta.Generation + 1;
-            _meta = _meta with { Generation = generation };
-            MarkMetaDirty_NoLock();
-
-            // Capture a coherent view that corresponds to this in-memory state.
-            snapshotView = GetRepoSnapshotView();
-        }
-
-        // Persist only the changed scanroot snapshot (RepoStore is gated + tmp unique)
-        await PersistScanRootSnapshotV2Async(snapshot, ct).ConfigureAwait(false);
-        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
-
-        PublishEvent(new ScanRootSnapshotCommittedEvent
+        PublishEvent(new ScanRunFinalisedEvent
         {
             Generation = generation,
-            ScanRootId = snapshot.ScanRootId,
-            RepoSnapshotView = snapshotView
+            Run = updatedRun
+        });
+
+        PublishEvent(new ScanRootSnapshotReplacedEvent
+        {
+            Generation = generation,
+            ScanRootId = completedSnapshot.ScanRootId,
+            RepoSnapshotView = snapshotView,
+            Reason = RepoSnapshotCommitReason.ScanCompleted
         });
     }
 
-    async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
+    private async Task CommitAndPublishSnapshotAsync(ScanRootSnapshotV2 snapshot, RepoSnapshotCommitReason reason, CancellationToken ct)
     {
-        await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
+        var (generation, snapshotView) = await CommitSnapshot_NoEventAsync(snapshot, ct).ConfigureAwait(false);
+
+        PublishEvent(new ScanRootSnapshotReplacedEvent
+        {
+            Generation = generation,
+            ScanRootId = snapshot.ScanRootId,
+            RepoSnapshotView = snapshotView,
+            Reason = reason
+        });
     }
+
+    // Caller must lock _sync
+    private (long Generation, RepoSnapshotView SnapshotView) CommitSnapshotInMemory_NoLock(
+        ScanRootSnapshotV2 snapshot,
+        Action? additionalInMemoryChanges = null)
+    {
+        _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
+
+        additionalInMemoryChanges?.Invoke();
+
+        var generation = _meta.Generation + 1;
+        _meta = _meta with { Generation = generation };
+        MarkMetaDirty_NoLock();
+
+        var view = GetRepoSnapshotView();
+        return (generation, view);
+    }
+
+    private async Task PersistCommittedSnapshotAsync(ScanRootSnapshotV2 snapshot, CancellationToken ct)
+    {
+        await PersistScanRootSnapshotV2Async(snapshot, ct).ConfigureAwait(false);
+        await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
+    }
+
+
+    private async Task<(long Generation, RepoSnapshotView SnapshotView)> CommitSnapshot_NoEventAsync(
+        ScanRootSnapshotV2 snapshot,
+        CancellationToken ct)
+    {
+        long gen;
+        RepoSnapshotView view;
+
+        lock (_sync)
+        {
+            (gen, view) = CommitSnapshotInMemory_NoLock(snapshot);
+        }
+
+        await PersistCommittedSnapshotAsync(snapshot, ct).ConfigureAwait(false);
+        return (gen, view);
+    }
+
+
+    private async Task<(long Generation, RepoSnapshotView SnapshotView, ScanRun UpdatedRun)> FinaliseCompletedScanAsync(
+        long scanSequence,
+        ScanRootSnapshotV2 completedSnapshot,
+        CancellationToken ct)
+    {
+        long gen;
+        RepoSnapshotView view;
+        ScanRun updatedRun;
+
+        lock (_sync)
+        {
+            updatedRun = MarkScanCompleted_NoLock(scanSequence);
+
+            (gen, view) = CommitSnapshotInMemory_NoLock(completedSnapshot);
+        }
+
+        await PersistCommittedSnapshotAsync(completedSnapshot, ct).ConfigureAwait(false);
+
+        // Successful completion => checkpoint is no longer needed (best effort)
+        try
+        {
+            await RepoStore.DeleteScanCheckpointAsync(_repoPath, completedSnapshot.ScanRootId, ct)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // best effort
+        }
+
+        return (gen, view, updatedRun);
+    }
+
+    private ScanRun MarkScanCompleted_NoLock(long sequence)
+    {
+        if (!_scanRunIndex.TryGetValue(sequence, out var run))
+            throw new InvalidOperationException($"ScanRun {sequence} was not found.");
+
+        var updated = run with
+        {
+            Status = ScanRunStatus.Completed,
+            FinishedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = null
+        };
+
+        _scanRunIndex[sequence] = updated;
+
+        var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
+        if (idx >= 0)
+            _scanRuns[idx] = updated;
+        else
+            _scanRuns.Add(updated);
+
+        return updated;
+    }
+
+    async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
+        => await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
 
     public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
         => RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct);

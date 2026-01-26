@@ -2,7 +2,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
@@ -21,8 +21,10 @@ public static class GuiBootstrapper
     {
         var services = new ServiceCollection();
 
-        // ---- Repo host ----
+        // ---- Repo host / UI Repo Eventing ----
         services.AddSingleton(host);
+        services.AddSingleton<IUiDispatcher, AvaloniaUiDispatcher>();
+        services.AddSingleton<RepoUiEventRelayPlugin>();
 
         // ---- Infrastructure services ----
         services.AddSingleton<IDialogService, DialogService>();
@@ -53,10 +55,9 @@ public static class GuiBootstrapper
         services.AddSingleton<DuplicateGroupsController>();
 
         // Scan roots tree + builder
-        services.AddSingleton<FolderNodeViewModelFactory>();
         services.AddSingleton<IScanRootsTreeNodeActions, ScanRootsTreeNodeActions>();
         services.AddSingleton<ScanRootsTreeBuilder>();
-        services.AddSingleton<ScanRootsTreeViewModel>();
+        services.AddSingleton<ScanRootsFlatTreeViewModel>();
 
         // Tree map + actions (+ builder if you have one)
         services.AddSingleton<TreeMapActionsViewModel>();

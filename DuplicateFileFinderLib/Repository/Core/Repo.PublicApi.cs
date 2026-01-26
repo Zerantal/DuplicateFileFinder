@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage;
@@ -102,7 +103,6 @@ public sealed partial class Repo
     public async Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
         long generation;
-        RepoSnapshotView snapshotView;
 
         lock (_sync)
         {
@@ -124,8 +124,6 @@ public sealed partial class Repo
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };
             MarkMetaDirty_NoLock();
-
-            snapshotView = GetRepoSnapshotView_NoLock();
         }
 
         // Persist outside lock; RepoStore is gated.
@@ -137,11 +135,10 @@ public sealed partial class Repo
         // NOTE: We intentionally do NOT delete the on-disk scanroot snapshot file here.
         // A later prune/compaction operation can reclaim these files.
 
-        PublishEvent(new ScanRootSnapshotCommittedEvent
+        PublishEvent(new RepoScanRootRemovedEvent
         {
             Generation = generation,
-            ScanRootId = scanRootId,
-            RepoSnapshotView = snapshotView
+            ScanRootId = scanRootId
         });
     }
 
@@ -496,10 +493,13 @@ public sealed partial class Repo
         var updated = snap with { Files = newFiles };
 
         // Commit + publish ScanRootSnapshotCommittedEvent (full rebuild)
-        await CommitScanRootSnapshotV2Async(updated, ct).ConfigureAwait(false);
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
-        long gen;
-        lock (_sync) gen = _meta.Generation;
+        PublishEvent(new RepoFileDeletedEvent
+        {
+            Generation = gen,
+            File = file
+        });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
     }
@@ -568,10 +568,15 @@ public sealed partial class Repo
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
 
-        await CommitScanRootSnapshotV2Async(updated, ct).ConfigureAwait(false);
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
-        long gen;
-        lock (_sync) gen = _meta.Generation;
+        PublishEvent(new RepoDirDeletedEvent
+        {
+            Generation = gen,
+            Dir = dir,
+            DeletedDirs = deletedDirs,
+            DeletedFiles = deletedFiles
+        });
 
         return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles, deletedDirs);
     }

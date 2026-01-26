@@ -69,7 +69,7 @@ public sealed class DuplicateGroupsViewModelDeletionTests
 
         var deleteSvc = new FakeDuplicateFileDeletionService();
 
-        var vm = new DuplicateGroupsViewModel(controller, deleteSvc);
+        var vm = new DuplicateGroupsViewModel(host, controller, deleteSvc);
 
         return new Sut(vm, deleteSvc);
     }

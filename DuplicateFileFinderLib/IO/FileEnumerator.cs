@@ -23,9 +23,9 @@ public interface IFileEnumerator
 
 public sealed class FileEnumerator : IFileEnumerator
 {
-    private static readonly Logger _log = LogManager.GetCurrentClassLogger();
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
-    private static readonly EnumerationOptions _enumOpts = new()
+    private static readonly EnumerationOptions s_enumOpts = new()
     {
         IgnoreInaccessible = true,
         RecurseSubdirectories = false,
@@ -42,7 +42,7 @@ public sealed class FileEnumerator : IFileEnumerator
     {
         if (IsVirtualOrEphemeralRoot(dir))
         {
-            _log.Info("Skipping ephemeral directory: {dir}", dir);
+            s_log.Info("Skipping ephemeral directory: {dir}", dir);
             yield break;
         }
 
@@ -76,7 +76,7 @@ public sealed class FileEnumerator : IFileEnumerator
                     fe.Length,
                     fe.CreationTimeUtc,
                     fe.LastWriteTimeUtc),
-                _enumOpts)
+                s_enumOpts)
             {
                 ShouldIncludePredicate = (ref fe) =>
                 {
@@ -108,7 +108,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
         {
-            _log.Warn(ex, "Aborting enumeration of {path}", dir);
+            s_log.Warn(ex, "Aborting enumeration of {path}", dir);
             return true;
         }
 
@@ -126,7 +126,7 @@ public sealed class FileEnumerator : IFileEnumerator
             }
             catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
             {
-                _log.Warn(ex, "Aborting fast enumeration of {path}", dir);
+                s_log.Warn(ex, "Aborting fast enumeration of {path}", dir);
                 return false;
             }
 
@@ -142,7 +142,7 @@ public sealed class FileEnumerator : IFileEnumerator
     {
         buffer.Clear();
 
-        _log.Info("Attempting fallback directory enumeration of {path}", dir);
+        s_log.Info("Attempting fallback directory enumeration of {path}", dir);
 
         // Step 1: directories
         string[] dirs;
@@ -152,7 +152,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex)
         {
-            _log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
+            s_log.Warn(ex, "Unable to retrieve directory listing. Aborting enumeration of {path}", dir);
             return;
         }
 
@@ -178,7 +178,7 @@ public sealed class FileEnumerator : IFileEnumerator
         }
         catch (Exception ex)
         {
-            _log.Warn(ex, "Unable to retrieve file listing. Skipping file enumeration of {path}", dir);
+            s_log.Warn(ex, "Unable to retrieve file listing. Skipping file enumeration of {path}", dir);
             return;
         }
 
@@ -200,7 +200,7 @@ public sealed class FileEnumerator : IFileEnumerator
             }
             catch (Exception ex)
             {
-                _log.Warn(ex, "Skipping file {path}", f);
+                s_log.Warn(ex, "Skipping file {path}", f);
 
                 // Some NTFS special files throw or report -1; skip them
                 continue;

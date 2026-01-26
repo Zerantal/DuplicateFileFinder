@@ -1,11 +1,10 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using DuplicateFileFinderLib.Repository.Core;
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins;
 
 using DuplicateFileFinderLibTests.TestUtils;
@@ -78,7 +77,7 @@ public sealed class TreeIndexPluginTests
                 RepoUtil.Sort(plugin.GetChildFiles(root).ToArray()));
 
             // subA children
-            Assert.Empty(plugin.GetChildDirs(subA));
+            Assert.True(plugin.GetChildDirs(subA).IsEmpty);
             Assert.Equal(
                 RepoUtil.Sort([fileSubA]),
                 RepoUtil.Sort(plugin.GetChildFiles(subA).ToArray()));
@@ -186,7 +185,7 @@ public sealed class TreeIndexPluginTests
             await plugin.WhenReadyAsync(CancellationToken.None);
 
             var rootHandle = new DirHandle(1, 0);
-            Assert.Single(plugin.GetChildDirs(rootHandle));
+            Assert.Single(plugin.GetChildDirs(rootHandle).ToArray());
 
             // Snapshot 2: replace subA with subB (still child at index 1 but different DirId behind it)
             var snap2 = RepoUtil.MakeSnapshotV2(
@@ -198,11 +197,12 @@ public sealed class TreeIndexPluginTests
                 ],
                 files: Array.Empty<(string name, long dirId, long fileId, long size)>());
 
-            plugin.Post(new ScanRootSnapshotCommittedEvent
+            plugin.Post(new ScanRootSnapshotReplacedEvent
             {
                 Generation = 2,
                 ScanRootId = 1,
-                RepoSnapshotView = snap2
+                RepoSnapshotView = snap2,
+                Reason = RepoSnapshotCommitReason.ScanCompleted
             });
 
             await AsyncUtil.WaitForConditionAsync(
@@ -213,6 +213,70 @@ public sealed class TreeIndexPluginTests
             var childDirs2 = plugin.GetChildDirs(rootHandle).ToArray();
             Assert.Single(childDirs2);
             Assert.Equal(new DirHandle(1, 1), childDirs2[0]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task TryGetSubtreeRange_And_TryGetFileDirPreorder_ReturnExpectedMappings()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            await using var plugin = new TreeIndexPlugin(tempDir);
+
+            // root(0) -> subA(1), subB(2)
+            // file_subA under subA (file index 1)
+            var snap = RepoUtil.MakeSnapshotV2(
+                scanRootId: 1,
+                dirs:
+                [
+                    ("root", parentDirId: -1L, dirId: 1L),
+                    ("subA", parentDirId: 1L, dirId: 2L),
+                    ("subB", parentDirId: 1L, dirId: 3L)
+                ],
+                files:
+                [
+                    ("file_root.txt", dirId: 1L, fileId: 10L, size: 123L),
+                    ("file_subA.txt", dirId: 2L, fileId: 20L, size: 456L)
+                ]);
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap });
+            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
+
+            var root = new DirHandle(1, 0);
+            var subA = new DirHandle(1, 1);
+            var subB = new DirHandle(1, 2);
+
+            Assert.True(plugin.TryGetSubtreeRange(root, out var rRoot));
+            Assert.True(plugin.TryGetSubtreeRange(subA, out var rA));
+            Assert.True(plugin.TryGetSubtreeRange(subB, out var rB));
+
+            // Deterministic DFS order based on dir enumeration order:
+            Assert.Equal(0, rRoot.Start);
+            Assert.Equal(1, rA.Start);
+            Assert.Equal(2, rB.Start);
+
+            Assert.True(rRoot.Contains(rA.Start));
+            Assert.True(rRoot.Contains(rB.Start));
+
+            // File -> parent dir preorder
+            var fileRoot = new FileHandle(1, 0);
+            var fileSubA = new FileHandle(1, 1);
+
+            Assert.True(plugin.TryGetFileDirPreorder(fileRoot, out var preRootFile));
+            Assert.True(plugin.TryGetFileDirPreorder(fileSubA, out var preSubAFile));
+
+            Assert.Equal(rRoot.Start, preRootFile);
+            Assert.Equal(rA.Start, preSubAFile);
+
+            Assert.True(rRoot.Contains(preRootFile));
+            Assert.True(rRoot.Contains(preSubAFile));
+            Assert.True(rA.Contains(preSubAFile));
+            Assert.False(rB.Contains(preSubAFile));
         }
         finally
         {

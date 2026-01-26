@@ -1,7 +1,9 @@
-﻿using Bench;
+using Bench;
+
 using DuplicateFileFinderLib.Core;
 using DuplicateFileFinderLib.Logging;
-using DuplicateFileFinderLib.Repository.Core;
+using DuplicateFileFinderLib.Repository.Core.RepoEventing;
+
 using NLog;
 
 var log = LogManager.GetCurrentClassLogger();
