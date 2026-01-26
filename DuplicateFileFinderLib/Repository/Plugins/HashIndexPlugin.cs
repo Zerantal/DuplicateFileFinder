@@ -34,7 +34,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private long _lastIndexedGeneration;
 
-    public HashIndexPlugin(string dataDirectory)
+    // Needed for filtering duplicate files within a subtree
+    private readonly ITreeIndexReadModel _treeIndex;
+
+    public HashIndexPlugin(string dataDirectory, ITreeIndexReadModel treeIndex)
         : base(4096)
     {
         if (string.IsNullOrWhiteSpace(dataDirectory))
@@ -42,6 +45,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         _dataDirectory = dataDirectory;
         Directory.CreateDirectory(_dataDirectory);
+
+        _treeIndex = treeIndex ?? throw new ArgumentNullException(nameof(treeIndex));
     }
 
     public int TotalDuplicateFileCount => _stats.DuplicateFileCount;
@@ -52,7 +57,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // ---------------------------------------------------------------------
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static long TotalBytes(in HashGroupDescriptor d) => d.SizeBytes * d.Count;
+    private static long TotalBytes(in HashGroupDescriptor d) => d.FileSizeBytes * d.Count;
 
     public ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group)
     {
@@ -72,42 +77,68 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     }
 
     public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, int offset, int count)
+        => GetGroupsPageCore(in query, offset, count, hasFilter: false, default);
+
+    public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, in SubtreeFilter filter, int offset, int count)
+        => GetGroupsPageCore(in query, offset, count, hasFilter: true, in filter);
+
+    private DuplicateGroupPage GetGroupsPageCore(
+        in DuplicateQuery query,
+        int offset,
+        int count,
+        bool hasFilter,
+        in SubtreeFilter filter)
     {
         if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
         if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
         if (query.MinDuplicates < 2) throw new ArgumentOutOfRangeException(nameof(query.MinDuplicates));
         if (query.MinSize < 1) throw new ArgumentOutOfRangeException(nameof(query.MinSize));
 
+        if (hasFilter && (!filter.RootDir.IsValid || filter.Range.IsEmpty))
+            return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
+
         var groups = _groups;
         if (groups.Length == 0)
-            return new DuplicateGroupPage(0, offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
+            return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
 
         var order = query.Sort == DuplicateSort.TotalSizeDesc ? _bySizeDesc : _byCountDesc;
         if (order.Length == 0)
-            return new DuplicateGroupPage(0, offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
+            return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
 
-        // Count matches with early-exit for the active sort
-        var total = CountMatches(groups, order, query);
+        var minDup = query.MinDuplicates;
+        var minSize = query.MinSize;
+        var sort = query.Sort;
 
-        if (total == 0 || offset >= total)
-            return new DuplicateGroupPage(total, offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
+        var scanRootId = hasFilter ? filter.RootDir.ScanRootId : -1;
+        var range = hasFilter ? filter.Range : default;
 
-        var wanted = Math.Min(count, total - offset);
-        var page = new HashGroupDescriptor[wanted];
+        var all = _allFiles;
 
-        var seen = 0;
+        var page = new HashGroupDescriptor[count];
         var w = 0;
+        var seen = 0;
 
         for (var i = 0; i < order.Length; i++)
         {
             var d = groups[order[i]];
 
-            if (!Matches(d, query))
+            // Early exit only makes sense in the sorted dimension.
+            if (d.Count < minDup)
             {
-                if (CanEarlyExit(d, query))
+                if (sort == DuplicateSort.DuplicateCountDesc)
                     break;
                 continue;
             }
+
+            if (TotalBytes(d) < minSize)
+            {
+                if (sort == DuplicateSort.TotalSizeDesc)
+                    break;
+                continue;
+            }
+
+            if (hasFilter && !GroupIntersectsSubtree(all, d, scanRootId, range))
+                continue;
 
             if (seen < offset)
             {
@@ -116,47 +147,45 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             }
 
             page[w++] = d;
-            seen++;
 
-            if (w == wanted)
+            if (w == count)
                 break;
         }
 
-        return new DuplicateGroupPage(total, offset, w, page);
+        if (w == 0)
+            return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
+
+        if (w != page.Length)
+            Array.Resize(ref page, w);
+
+        return new DuplicateGroupPage(offset, w, page);
     }
 
-    private static int CountMatches(HashGroupDescriptor[] groups, int[] order, in DuplicateQuery q)
+    private bool GroupIntersectsSubtree(
+        FileHandle[] all,
+        in HashGroupDescriptor group,
+        long scanRootId,
+        SubtreeRange range)
     {
-        var total = 0;
+        if (group.Count <= 0 || group.Offset < 0)
+            return false;
 
-        for (var i = 0; i < order.Length; i++)
+        var end = group.Offset + group.Count;
+        if ((uint)end > (uint)all.Length)
+            return false;
+
+        for (var i = group.Offset; i < end; i++)
         {
-            var d = groups[order[i]];
+            var fh = all[i];
 
-            if (!Matches(d, q))
-            {
-                if (CanEarlyExit(d, q))
-                    break;
+            if (fh.ScanRootId != scanRootId)
                 continue;
-            }
 
-            total++;
+            if (_treeIndex.TryGetFileDirPreorder(fh, out var pre) && range.Contains(pre))
+                return true;
         }
 
-        return total;
-    }
-
-    private static bool Matches(in HashGroupDescriptor d, in DuplicateQuery q)
-        => d.Count >= q.MinDuplicates && TotalBytes(d) >= q.MinSize;
-
-    private static bool CanEarlyExit(in HashGroupDescriptor d, in DuplicateQuery q)
-    {
-        return q.Sort switch
-        {
-            DuplicateSort.TotalSizeDesc => TotalBytes(d) < q.MinSize,
-            DuplicateSort.DuplicateCountDesc => d.Count < q.MinDuplicates,
-            _ => false
-        };
+        return false;
     }
 
     // ---------------------------------------------------------------------
@@ -205,7 +234,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     private struct GroupMeta
     {
         public int Count;
-        public long SizeBytes;
+        public long FileSizeBytes;
         public FileHandle FirstFile;
 
         public int Offset;
@@ -226,6 +255,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             {
                 var file = snapshot.Files[i];
 
+                if (file.Size <= 0)
+                    continue;
+
                 if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
                     continue;
 
@@ -241,9 +273,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     {
         using var _ = TimingLog.StartPhase("HashIndex.Rebuild");
 
-        // Pass 1: count per hash + sizeBytes (no per-group allocations)
+        // Pass 1: count per hash + record per-file size (no per-group allocations)
         var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
-
         var totalHandles = 0;
 
         foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
@@ -257,16 +288,15 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 meta = new GroupMeta
                 {
                     Count = 1,
-                    SizeBytes = file.Size,
+                    FileSizeBytes = file.Size,
                     FirstFile = new FileHandle(snapshot.ScanRootId, index),
                     Offset = 0,
                     Cursor = 0
                 };
+                continue;
             }
-            else
-            {
-                meta.Count++;
-            }
+
+            meta.Count++;
         }
 
         if (metaByHash.Count == 0 || totalHandles == 0)
@@ -282,32 +312,21 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var offset = 0;
         var gi = 0;
 
-        var totalDupCount = 0;
-        long totalSpaceDup = 0;
-
-        foreach (var kv in metaByHash)
+        foreach (var (hash, meta0) in metaByHash)
         {
-            var hash = kv.Key;
-            var meta = kv.Value;
-
+            var meta = meta0;
             meta.Offset = offset;
             meta.Cursor = 0;
             metaByHash[hash] = meta;
 
             groups[gi++] = new HashGroupDescriptor(
                 Hash: hash,
-                SizeBytes: meta.SizeBytes,
+                FileSizeBytes: meta.FileSizeBytes,
                 Offset: offset,
                 Count: meta.Count,
                 FirstFile: meta.FirstFile);
 
             offset += meta.Count;
-
-            if (meta.Count > 1)
-            {
-                totalDupCount += meta.Count - 1;
-                totalSpaceDup += (meta.Count - 1) * meta.SizeBytes;
-            }
         }
 
         // Pass 3: fill allFiles using per-hash cursors (same eligibility rules as pass 1)
@@ -323,9 +342,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             allFiles[writeIndex] = new FileHandle(snapshot.ScanRootId, index);
         }
 
-        var (bySize, byCount) = BuildSortedViews(groups);
-
-        Publish(allFiles, groups, bySize, byCount, new StatsSnapshot(totalDupCount, totalSpaceDup));
+        PublishComputed(allFiles, groups);
     }
 
     // ---------------------------------------------------------------------
@@ -365,7 +382,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         // Pass 3: fill newAll by copying survivors into each group segment
         FillAllFilesFromPlan(oldGroups, oldAll, plan, removedScanRootId, newAll);
 
-        PublishComputed(newAll, newGroups, ComputeStats(newGroups));
+        PublishComputed(newAll, newGroups);
     }
 
     private static RemovalPlan BuildRemovalPlan(
@@ -383,10 +400,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         {
             var d = oldGroups[g];
 
-            if (d.Count <= 0)
-                continue;
-
-            if (d.Offset < 0)
+            if (d.Count <= 0 || d.Offset < 0)
                 continue;
 
             var end = d.Offset + d.Count;
@@ -439,7 +453,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
             newGroups[wGroup] = new HashGroupDescriptor(
                 Hash: old.Hash,
-                SizeBytes: old.SizeBytes,
+                FileSizeBytes: old.FileSizeBytes,
                 Offset: wOffset,
                 Count: newCount,
                 FirstFile: plan.Reps[g]);
@@ -491,6 +505,16 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Consolidated “finalize + publish”
     // ---------------------------------------------------------------------
 
+    private void PublishEmpty()
+        => Publish([], [], [], [], StatsSnapshot.Empty);
+
+    private void PublishComputed(FileHandle[] allFiles, HashGroupDescriptor[] groups)
+    {
+        var (bySize, byCount) = BuildSortedViews(groups);
+        var stats = ComputeStats(groups);
+        Publish(allFiles, groups, bySize, byCount, stats);
+    }
+
     private static StatsSnapshot ComputeStats(HashGroupDescriptor[] groups)
     {
         var dupCount = 0;
@@ -503,24 +527,11 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 continue;
 
             dupCount += g.Count - 1;
-            space += (g.Count - 1) * g.SizeBytes;
+            space += (g.Count - 1) * g.FileSizeBytes;
         }
 
         return dupCount == 0 ? StatsSnapshot.Empty : new StatsSnapshot(dupCount, space);
     }
-
-    private void PublishComputed(
-        FileHandle[] allFiles,
-        HashGroupDescriptor[] groups,
-        StatsSnapshot stats)
-    {
-        var (bySize, byCount) = BuildSortedViews(groups);
-        Publish(allFiles, groups, bySize, byCount, stats);
-    }
-
-    // ---------------------------------------------------------------------
-    // Sorting / publishing
-    // ---------------------------------------------------------------------
 
     private static (int[] bySize, int[] byCount) BuildSortedViews(HashGroupDescriptor[] groups)
     {
@@ -532,9 +543,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         return (bySize, byCount);
     }
-
-    private void PublishEmpty()
-        => Publish([], [], [], [], StatsSnapshot.Empty);
 
     private void Publish(
         FileHandle[] allFiles,
@@ -565,9 +573,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             var a = groups[x];
             var b = groups[y];
 
-            var aTotal = TotalBytes(a);
-            var bTotal = TotalBytes(b);
-            var c = bTotal.CompareTo(aTotal);
+            var c = TotalBytes(b).CompareTo(TotalBytes(a));
             if (c != 0) return c;
 
             c = b.Count.CompareTo(a.Count);
@@ -587,9 +593,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             var c = b.Count.CompareTo(a.Count);
             if (c != 0) return c;
 
-            var aTotal = TotalBytes(a);
-            var bTotal = TotalBytes(b);
-            c = bTotal.CompareTo(aTotal);
+            c = TotalBytes(b).CompareTo(TotalBytes(a));
             if (c != 0) return c;
 
             return x.CompareTo(y);
@@ -640,7 +644,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 var groups = state.Groups;
 
                 if (groups.Length == 0 || allFiles.Length == 0)
-                    return false;
+                {
+                    PublishEmpty();
+                    return true;
+                }
 
                 // Prefer persisted views; if missing/invalid, rebuild.
                 var bySize = state.BySizeDesc;
@@ -672,6 +679,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private sealed record StatsSnapshot(int DuplicateFileCount, long SpaceTakenByDuplicates)
     {
-        internal static StatsSnapshot Empty => new(0, 0);
+        public static readonly StatsSnapshot Empty = new(0, 0);
     }
 }

@@ -33,6 +33,12 @@ internal sealed partial record RootTreeIndexState
     public required SegmentedIdMap<Slice> ChildFileSliceByDirIndex { get; init; }
 
     public required SegmentedIdMap<DirAggregateStats> StatsByDirIndex { get; init; }
+
+    // keyed by DirHandle.Index -> subtree preorder interval
+    public required SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex { get; init; }
+
+    // per-file (FileHandle.Index) -> preorder of parent directory (or -1 if unknown)
+    public required int[] DirPreorderByFileIndex { get; init; }
 }
 
 [MemoryPackable(SerializeLayout.Sequential)]

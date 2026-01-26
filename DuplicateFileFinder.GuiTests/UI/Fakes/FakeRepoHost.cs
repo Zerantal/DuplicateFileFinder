@@ -30,10 +30,14 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
         public ReadOnlySpan<DirHandle> GetChildDirs(DirHandle dir) => throw new NotImplementedException();
 
         public ReadOnlySpan<FileHandle> GetChildFiles(DirHandle dir) => throw new NotImplementedException();
+        public bool TryGetSubtreeRange(DirHandle dir, out SubtreeRange range) => throw new NotImplementedException();
+
+        public bool TryGetFileDirPreorder(FileHandle file, out int preorder) => throw new NotImplementedException();
     }
     private sealed class DummyHashIndex : IHashIndexReadModel
     {
         public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, int offset, int count) => throw new NotImplementedException();
+        public DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, in SubtreeFilter filter, int offset, int count) => throw new NotImplementedException();
 
         public ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group) => throw new NotImplementedException();
 

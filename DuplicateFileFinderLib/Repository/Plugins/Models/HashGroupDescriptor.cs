@@ -7,7 +7,7 @@ namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 public readonly record struct HashGroupDescriptor(
     HashKey Hash,
-    long SizeBytes,   // Size in bytes of each file in the group
+    long FileSizeBytes,   // Size in bytes of each file in the group
     int Offset,
     int Count,
     FileHandle FirstFile)

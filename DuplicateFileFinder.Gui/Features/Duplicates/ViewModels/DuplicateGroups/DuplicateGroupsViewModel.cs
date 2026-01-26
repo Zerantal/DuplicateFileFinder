@@ -12,6 +12,7 @@ using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Status;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
+using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
@@ -20,15 +21,18 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups
 
 public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvider
 {
-    private readonly IHashIndexReadModel _hashIndex;
+    private static readonly ReadOnlyObservableCollection<FileItem> s_emptyItems = new([]);
     private readonly DuplicateGroupsController _controller;
     private readonly IDuplicateFileDeletionService _deleteService;
+    private readonly IHashIndexReadModel _hashIndex;
+    private readonly ITreeIndexReadModel _treeIndex;
 
-    private static readonly ReadOnlyObservableCollection<FileItem> s_emptyItems = new([]);
+    private DuplicateQuery _query = DuplicateQuery.Default;
 
-    public PagingList<DuplicateSetRow> PagedSets { get; }
+    [ObservableProperty] [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
+    private FileItem? _selectedDuplicateFile;
 
-    private DuplicateQuery _query = new();
+    [ObservableProperty] private DirHandle? _selectedSubtreeDir;
 
     public DuplicateGroupsViewModel(
         IRepoHost repoHost,
@@ -38,6 +42,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         ArgumentNullException.ThrowIfNull(repoHost);
 
         _hashIndex = repoHost.HashIndex;
+        _treeIndex = repoHost.TreeIndex;
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _deleteService = deleteService ?? throw new ArgumentNullException(nameof(deleteService));
 
@@ -55,31 +60,14 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         };
 
         PagedSets = new PagingList<DuplicateSetRow>(
-            pageSize: 300,
-            fetchPage: FetchSetsPage);
+            300,
+            FetchSetsPage);
 
         // initial load
         PagedSets.EnsureLoadedThroughIndex(0);
     }
 
-    // Called by parent VM when snapshot changes
-    public void Rebuild(RepoSnapshotView snapshot)
-    {
-        _controller.Rebuild(snapshot);
-
-        // Clear selection (old rows may be stale).
-        SelectedSet = null;
-
-        // Re-query pages.
-        PagedSets.Reset();
-        PagedSets.EnsureLoadedThroughIndex(0);
-
-        // Update status bar.
-        OnPropertyChanged(nameof(DuplicatesFound));
-        OnPropertyChanged(nameof(FilesScanned));
-        OnPropertyChanged(nameof(WastedBytes));
-        StatusChanged?.Invoke(this, EventArgs.Empty);
-    }
+    public PagingList<DuplicateSetRow> PagedSets { get; }
 
     public int DuplicatesFound => _controller.DuplicatesFound;
     public int FilesScanned => _controller.FilesScanned;
@@ -100,31 +88,6 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
             PagedSets.EnsureLoadedThroughIndex(0);
         }
     }
-
-    private (int total, DuplicateSetRow[] items) FetchSetsPage(int offset, int count)
-    {
-        var page = _hashIndex.GetGroupsPage(_query, offset, count);
-        if (page.Count == 0)
-            return (page.Total, Array.Empty<DuplicateSetRow>());
-
-        var rows = new DuplicateSetRow[page.Count];
-        var span = page.Groups.Span;
-
-        for (int i = 0; i < page.Count; i++)
-        {
-            var d = span[i];
-            rows[i] = new DuplicateSetRow(
-                descriptor: d,
-                nameResolver: _controller.ResolveFileName
-                );
-        }
-
-        return (page.Total, rows);
-    }
-
-    // Called by view when scrolling approaches end
-    public void OnNearEnd(int lastRealizedIndex)
-        => PagedSets.EnsureLoadedThroughIndex(lastRealizedIndex);
 
     public DuplicateSetRow? SelectedSet
     {
@@ -158,9 +121,108 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
     public ReadOnlyObservableCollection<FileItem> SelectedItems
         => SelectedSet?.Items ?? s_emptyItems;
 
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
-    private FileItem? _selectedDuplicateFile;
+    public event EventHandler? StatusChanged;
+
+    public IReadOnlyList<StatusItem> GetStatusItems()
+    {
+        // Format here so MainWindowVM stays dumb.
+        return
+        [
+            new StatusItem("Files scanned", FilesScanned.ToString("N0", CultureInfo.CurrentUICulture)),
+            new StatusItem("Duplicates", DuplicatesFound.ToString("N0", CultureInfo.CurrentUICulture)),
+            new StatusItem("Space wasted", BytesToHuman(WastedBytes))
+        ];
+    }
+
+    // ReSharper disable once UnusedParameterInPartialMethod
+    partial void OnSelectedSubtreeDirChanged(DirHandle? value)
+    {
+        SelectedSet = null;
+        PagedSets.Reset();
+        PagedSets.EnsureLoadedThroughIndex(0);
+    }
+
+    // Called by parent VM when snapshot changes
+    public void Rebuild(RepoSnapshotView snapshot)
+    {
+        _controller.Rebuild(snapshot);
+
+        // Clear selection (old rows may be stale).
+        SelectedSet = null;
+
+        // Re-query pages.
+        PagedSets.Reset();
+        PagedSets.EnsureLoadedThroughIndex(0);
+
+        // Update status bar.
+        OnPropertyChanged(nameof(DuplicatesFound));
+        OnPropertyChanged(nameof(FilesScanned));
+        OnPropertyChanged(nameof(WastedBytes));
+        StatusChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private (int total, DuplicateSetRow[] items) FetchSetsPage(int offset, int count)
+    {
+        if (SelectedSubtreeDir is not { IsValid: true } subtree)
+            return FetchSetsPage_Unfiltered(offset, count);
+
+        if (!_treeIndex.TryGetSubtreeRange(subtree, out var range) || range.IsEmpty)
+            return (-1, Array.Empty<DuplicateSetRow>());
+
+        var filter = new SubtreeFilter(subtree, range);
+        return FetchSetsPage_Filtered(filter, offset, count);
+    }
+
+    private (int total, DuplicateSetRow[] items) FetchSetsPage_Unfiltered(int offset, int count)
+    {
+        DuplicateSetRow[] rows;
+
+        using (TimingLog.Start("FetchSetsPage_Unfiltered"))
+        {
+            var page = _hashIndex.GetGroupsPage(_query, offset, count);
+            if (page.Count == 0)
+                return (-1, Array.Empty<DuplicateSetRow>());
+
+            rows = new DuplicateSetRow[page.Count];
+            var span = page.Groups.Span;
+
+            for (var i = 0; i < page.Count; i++)
+                rows[i] = new DuplicateSetRow(
+                    span[i],
+                    _controller.ResolveFileName);
+        }
+
+        return (-1, rows);
+    }
+
+    private (int total, DuplicateSetRow[] items) FetchSetsPage_Filtered(
+        in SubtreeFilter filter,
+        int offset,
+        int count)
+    {
+        DuplicateSetRow[] rows;
+
+        using (TimingLog.Start("FetchSetsPage_Filtered"))
+        {
+            var page = _hashIndex.GetGroupsPage(_query, filter, offset, count);
+            if (page.Count == 0)
+                return (-1, Array.Empty<DuplicateSetRow>());
+
+            rows = new DuplicateSetRow[page.Count];
+            var span = page.Groups.Span;
+
+            for (var i = 0; i < page.Count; i++)
+                rows[i] = new DuplicateSetRow(
+                    span[i],
+                    _controller.ResolveFileName);
+        }
+
+        return (-1, rows);
+    }
+
+    // Called by view when scrolling approaches end
+    public void OnNearEnd(int lastRealizedIndex)
+        => PagedSets.EnsureLoadedThroughIndex(lastRealizedIndex);
 
     private bool CanDeleteSelectedDuplicateFile() => SelectedDuplicateFile is not null;
 
@@ -185,19 +247,6 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 
         if (SelectedSet is { Count: < 2 })
             SelectedSet = null;
-    }
-
-    public event EventHandler? StatusChanged;
-
-    public IReadOnlyList<StatusItem> GetStatusItems()
-    {
-        // Format here so MainWindowVM stays dumb.
-        return
-        [
-            new StatusItem("Files scanned", FilesScanned.ToString("N0", CultureInfo.CurrentUICulture)),
-            new StatusItem("Duplicates", DuplicatesFound.ToString("N0", CultureInfo.CurrentUICulture)),
-            new StatusItem("Space wasted", BytesToHuman(WastedBytes))
-        ];
     }
 
     private static string BytesToHuman(long bytes)

@@ -9,15 +9,17 @@ public enum DuplicateSort
     DuplicateCountDesc
 }
 
-public readonly record struct DuplicateQuery()
+public readonly record struct DuplicateQuery(int MinDuplicates, long MinSize, DuplicateSort Sort)
 {
-    public int MinDuplicates { get; init; } = 2;
-    public long MinSize { get; init; } = 1;
-    public DuplicateSort Sort { get; init; } = DuplicateSort.TotalSizeDesc;
+    public static DuplicateQuery Default => new();
+    public DuplicateQuery() : this(MinDuplicates: 2, MinSize: 1, Sort: DuplicateSort.TotalSizeDesc) { }
 }
 
+public readonly record struct SubtreeFilter(
+    DirHandle RootDir,
+    SubtreeRange Range);
+
 public readonly record struct DuplicateGroupPage(
-    int Total,
     int Offset,
     int Count,
     ReadOnlyMemory<HashGroupDescriptor> Groups);
@@ -25,6 +27,8 @@ public readonly record struct DuplicateGroupPage(
 public interface IHashIndexReadModel
 {
     DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, int offset, int count);
+
+    DuplicateGroupPage GetGroupsPage(in DuplicateQuery query, in SubtreeFilter filter, int offset, int count);
 
     ReadOnlySpan<FileHandle> GetGroupFiles(in HashGroupDescriptor group);
 

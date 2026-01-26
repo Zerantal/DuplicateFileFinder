@@ -29,7 +29,7 @@ public sealed partial class DuplicateSetRow : ObservableObject
         _nameResolver = nameResolver;
         _fileRepresentative = descriptor.FirstFile;
         Count = descriptor.Count;
-        TotalBytes = descriptor.SizeBytes * descriptor.Count;
+        TotalBytes = descriptor.FileSizeBytes * descriptor.Count;
 
         Items = new ReadOnlyObservableCollection<FileItem>(_items);
     }

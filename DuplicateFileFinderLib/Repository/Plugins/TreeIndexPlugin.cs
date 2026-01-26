@@ -83,6 +83,40 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             };
     }
 
+    public bool TryGetSubtreeRange(DirHandle dir, out SubtreeRange range)
+    {
+        var roots = _roots;
+
+        if (!roots.TryGetValue(dir.ScanRootId, out var root))
+        {
+            range = default;
+            return false;
+        }
+
+        return root.SubtreeRangeByDirIndex.TryGetValue(dir.Index, out range);
+    }
+
+    public bool TryGetFileDirPreorder(FileHandle file, out int preorder)
+    {
+        var roots = _roots;
+
+        if (!roots.TryGetValue(file.ScanRootId, out var root))
+        {
+            preorder = -1;
+            return false;
+        }
+
+        var arr = root.DirPreorderByFileIndex;
+        if ((uint)file.Index >= (uint)arr.Length)
+        {
+            preorder = -1;
+            return false;
+        }
+
+        preorder = arr[file.Index];
+        return preorder >= 0;
+    }
+
     // ---------------------------------------------------------------------
     // Event handlers
     // ---------------------------------------------------------------------
@@ -189,7 +223,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             }
 
             // -----------------------------------------------------------------
-            // 2) Build per-root pools + slice maps + stats
+            // 2) Build per-root pools + slice maps + stats + preorder subtree data
             // -----------------------------------------------------------------
             var newRoots = new Dictionary<long, RootTreeIndexState>(capacity: liveSnapshots.Count);
 
@@ -289,18 +323,128 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     rootDirIndices: rootDirIndices,
                     globalHashCounts: globalHashCounts);
 
+                // compute preorder subtree intervals + file->dir preorder mapping (Option A)
+                var (subtreeRangeMap, dirPreorderByFileIndex) = BuildPreorderData(snapshot: snapshot,
+                    rootDirIndices: rootDirIndices,
+                    childrenDirsTmp: childrenDirsTmp,
+                    dirIdToIndex: dirIdToIndex);
+
                 newRoots[rootId] = new RootTreeIndexState
                 {
                     ChildDirsPool = childDirsPool,
                     ChildFilesPool = childFilesPool,
                     ChildDirSliceByDirIndex = childDirSliceMap,
                     ChildFileSliceByDirIndex = childFileSliceMap,
-                    StatsByDirIndex = statsMap
+                    StatsByDirIndex = statsMap,
+                    SubtreeRangeByDirIndex = subtreeRangeMap,
+                    DirPreorderByFileIndex = dirPreorderByFileIndex
                 };
             }
 
             _roots = newRoots;
         }
+    }
+
+    private static (SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
+        ScanRootSnapshotView snapshot,
+        IReadOnlyList<int> rootDirIndices,
+        Dictionary<int, List<DirHandle>> childrenDirsTmp,
+        Dictionary<long, int> dirIdToIndex)
+    {
+        // preorderByDirIndex[dirIndex] == preorder, or -1 if not visited/live
+        var preorderByDirIndex = new int[snapshot.Dirs.Count];
+        var exitByDirIndex = new int[snapshot.Dirs.Count];
+
+        Array.Fill(preorderByDirIndex, -1);
+        Array.Fill(exitByDirIndex, -1);
+
+        var clock = 0;
+
+        for (int r = 0; r < rootDirIndices.Count; r++)
+        {
+            var root = rootDirIndices[r];
+            if ((uint)root >= (uint)preorderByDirIndex.Length)
+                continue;
+
+            if (preorderByDirIndex[root] >= 0)
+                continue;
+
+            // Iterative DFS: stack of (dirIndex, nextChildIdx)
+            var stack = new Stack<(int dir, int nextChild)>(capacity: 64);
+
+            preorderByDirIndex[root] = clock++;
+            stack.Push((root, 0));
+
+            while (stack.Count > 0)
+            {
+                var (d, next) = stack.Pop();
+
+                if (!childrenDirsTmp.TryGetValue(d, out var kids) || kids.Count == 0)
+                {
+                    exitByDirIndex[d] = clock;
+                    continue;
+                }
+
+                if (next < kids.Count)
+                {
+                    // Resume this node later with next child
+                    stack.Push((d, next + 1));
+
+                    var childIndex = kids[next].Index;
+                    if ((uint)childIndex >= (uint)preorderByDirIndex.Length)
+                        continue;
+
+                    if (preorderByDirIndex[childIndex] >= 0)
+                        continue;
+
+                    preorderByDirIndex[childIndex] = clock++;
+                    stack.Push((childIndex, 0));
+                }
+                else
+                {
+                    exitByDirIndex[d] = clock;
+                }
+            }
+        }
+
+        // Build ranges for visited dirs
+        var rangeItems = new List<KeyValuePair<long, SubtreeRange>>(capacity: 1024);
+
+        for (int i = 0; i < preorderByDirIndex.Length; i++)
+        {
+            var pre = preorderByDirIndex[i];
+            if (pre < 0)
+                continue;
+
+            var end = exitByDirIndex[i] >= 0 ? exitByDirIndex[i] : pre + 1;
+            rangeItems.Add(new KeyValuePair<long, SubtreeRange>(i, new SubtreeRange(pre, end)));
+        }
+
+        var subtreeRangeMap = rangeItems.Count == 0
+            ? SegmentedIdMap<SubtreeRange>.Empty
+            : SegmentedIdMap<SubtreeRange>.Build(rangeItems.ToArray(), gapThreshold: SegmentGapThreshold);
+
+        // Per-file mapping: fileIndex -> preorder(parent dir), or -1
+        var dirPreorderByFileIndex = new int[snapshot.Files.Count];
+        Array.Fill(dirPreorderByFileIndex, -1);
+
+        for (int fi = 0; fi < snapshot.Files.Count; fi++)
+        {
+            var f = snapshot.Files[fi];
+
+            if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                continue;
+
+            if (!dirIdToIndex.TryGetValue(f.DirId, out var parentDirIndex))
+                continue;
+
+            if ((uint)parentDirIndex >= (uint)preorderByDirIndex.Length)
+                continue;
+
+            dirPreorderByFileIndex[fi] = preorderByDirIndex[parentDirIndex];
+        }
+
+        return (subtreeRangeMap, dirPreorderByFileIndex);
     }
 
     private static (T[] Pool, KeyValuePair<long, Slice>[] SliceItems) BuildPoolAndSlices<T>(

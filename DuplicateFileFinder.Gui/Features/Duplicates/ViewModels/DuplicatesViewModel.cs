@@ -38,27 +38,34 @@ public partial class DuplicatesViewModel : ObservableObject
         TreeMapActions = treeMapActions ?? throw new ArgumentNullException(nameof(treeMapActions));
         DuplicateGroups = duplicateGroups ?? throw new ArgumentNullException(nameof(duplicateGroups));
 
-        // folder selection drives duplicate-filter prefix
-        ScanRootsTree.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(ScanRootsFlatTreeViewModel.SelectedPath))
-                Console.WriteLine($"Selected path changed to {ScanRootsTree.SelectedPath}: TODO: Implement DuplicateGroups Filter");
-            // DuplicateGroups.SelectedFolderPrefix = ScanRootsTree.SelectedPath;
-        };
-
         // treemap selection drives navigation
         _treeMap.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TreeMapController.SelectedNode))
                 OnTreeMapSelectionChanged();
         };
+
+        // scan-roots selection drives treemap sync + duplicates subtree filter
         ScanRootsTree.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ScanRootsTree.SelectedRow))
+            {
                 OnScanRootsTreeSelectionChanged();
+                OnScanRootsTreeSelectionChanged_DuplicatesFilter();
+            }
         };
 
         LoadFromRepo();
+    }
+
+    private void OnScanRootsTreeSelectionChanged_DuplicatesFilter()
+    {
+        var row = ScanRootsTree.SelectedRow;
+
+        if (row?.Dir is { IsValid: true } dir)
+            DuplicateGroups.SelectedSubtreeDir = dir;
+        else
+            DuplicateGroups.SelectedSubtreeDir = null;
     }
 
     private void OnScanRootsTreeSelectionChanged()

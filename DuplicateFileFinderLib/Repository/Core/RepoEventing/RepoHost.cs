@@ -47,13 +47,16 @@ public sealed class RepoHost : IRepoHost
             new FileDirIndexPlugin(indexDir),
             repo);
 
-        host.RegisterIndexPlugin<IHashIndexReadModel>(
-            new HashIndexPlugin(indexDir),
+        var treeIndex = new TreeIndexPlugin(indexDir);
+        host.RegisterIndexPlugin<ITreeIndexReadModel>(
+            treeIndex,
             repo);
 
-        host.RegisterIndexPlugin<ITreeIndexReadModel>(
-            new TreeIndexPlugin(indexDir),
+        host.RegisterIndexPlugin<IHashIndexReadModel>(
+            new HashIndexPlugin(indexDir, treeIndex),
             repo);
+
+
 
         // Wait until all plugins processed bootstrap
         foreach (var ready in host._readyStates)

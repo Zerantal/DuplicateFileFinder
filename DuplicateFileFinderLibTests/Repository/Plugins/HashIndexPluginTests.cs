@@ -21,6 +21,32 @@ public sealed class HashIndexPluginTests
 {
     private readonly TempFsFixture _fs = new("hash-index");
 
+    private sealed class StubTreeIndex : ITreeIndexReadModel
+    {
+        public ReadOnlySpan<DirHandle> GetChildDirs(DirHandle dir) => ReadOnlySpan<DirHandle>.Empty;
+        public ReadOnlySpan<FileHandle> GetChildFiles(DirHandle dir) => ReadOnlySpan<FileHandle>.Empty;
+        public DirAggregateStats GetDirStats(DirHandle dir) => new()
+        {
+            DirCount = 0,
+            FileCount = 0,
+            TotalBytes = 0,
+            DuplicateFiles = 0,
+            DuplicateBytes = 0
+        };
+
+        public bool TryGetSubtreeRange(DirHandle dir, out SubtreeRange range)
+        {
+            range = default;
+            return false;
+        }
+
+        public bool TryGetFileDirPreorder(FileHandle file, out int preorder)
+        {
+            preorder = -1;
+            return false;
+        }
+    }
+
     private static HashKey NewHash(int seed)
     {
         var bytes = new byte[16];
@@ -110,9 +136,8 @@ public sealed class HashIndexPluginTests
         throw new TimeoutException("Timed out waiting for plugin to process event.");
     }
 
-
     // ---------------------------------------------------------------------
-    // Core behavioural tests (new read model)
+    // Core behavioural tests (read model)
     // ---------------------------------------------------------------------
 
     [Fact]
@@ -136,7 +161,7 @@ public sealed class HashIndexPluginTests
 
         var snapshot = BuildRepoSnapshot(r1);
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
 
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 1, snapshot));
 
@@ -148,13 +173,12 @@ public sealed class HashIndexPluginTests
             offset: 0,
             count: 10);
 
-        Assert.Equal(1, page.Total);
         Assert.Equal(0, page.Offset);
         Assert.Equal(1, page.Count);
 
         var g = Assert.Single(page.Groups.ToArray());
         Assert.Equal(hDup, g.Hash);
-        Assert.Equal(100, g.SizeBytes);
+        Assert.Equal(100, g.FileSizeBytes);
         Assert.Equal(2, g.Count);
 
         var handles = plugin.GetGroupFiles(g).ToArray();
@@ -182,7 +206,7 @@ public sealed class HashIndexPluginTests
                 (hD, size: 1,  count: 10),
             ]);
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
@@ -193,7 +217,6 @@ public sealed class HashIndexPluginTests
             offset: 0,
             count: 2);
 
-        Assert.Equal(4, page0.Total);
         Assert.Equal(2, page0.Count);
         Assert.Equal([hC, hB], page0.Groups.ToArray().Select(x => x.Hash).ToArray());
 
@@ -203,7 +226,6 @@ public sealed class HashIndexPluginTests
             offset: 2,
             count: 2);
 
-        Assert.Equal(4, page1.Total);
         Assert.Equal(2, page1.Count);
         Assert.Equal([hA, hD], page1.Groups.ToArray().Select(x => x.Hash).ToArray());
     }
@@ -225,7 +247,7 @@ public sealed class HashIndexPluginTests
                 (hC, size: 999, count: 3),
             ]);
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
@@ -235,7 +257,6 @@ public sealed class HashIndexPluginTests
             offset: 0,
             count: 10);
 
-        Assert.Equal(3, page.Total);
         Assert.Equal([hB, hA, hC], page.Groups.ToArray().Select(x => x.Hash).ToArray());
     }
 
@@ -258,7 +279,7 @@ public sealed class HashIndexPluginTests
                 (hSmall, size: 10,  count: 5),
             ]);
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
@@ -269,9 +290,8 @@ public sealed class HashIndexPluginTests
             offset: 0,
             count: 10);
 
-        Assert.Equal(1, page.Total);
-        Assert.Single(page.Groups.ToArray());
-        Assert.Equal(hBig, page.Groups.ToArray()[0].Hash);
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(hBig, g.Hash);
 
         // MinDuplicates 6 => only hBig (10) and hSmall (5 excluded) and hMid(2 excluded)
         var page2 = rm.GetGroupsPage(
@@ -279,26 +299,31 @@ public sealed class HashIndexPluginTests
             offset: 0,
             count: 10);
 
-        Assert.Equal(1, page2.Total);
-        Assert.Single(page2.Groups.ToArray());
-        Assert.Equal(hBig, page2.Groups.ToArray()[0].Hash);
+        var g2 = Assert.Single(page2.Groups.ToArray());
+        Assert.Equal(hBig, g2.Hash);
     }
 
     [Fact]
     public async Task GetGroupFiles_ReturnsEmpty_ForInvalidDescriptor()
     {
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot())); // empty repo
 
         var rm = (IHashIndexReadModel)plugin;
 
         // nonsense descriptor
-        var d = new HashGroupDescriptor(Hash: NewHash(1), SizeBytes: 1, Offset: -1, Count: 2, FirstFile: FileHandle.Invalid);
+        var d = new HashGroupDescriptor(
+            Hash: NewHash(1),
+            FileSizeBytes: 1,
+            Offset: -1,
+            Count: 2,
+            FirstFile: FileHandle.Invalid);
+
         Assert.Empty(rm.GetGroupFiles(d).ToArray());
     }
 
     [Fact]
-    public async Task Ignores_NotComputed_CannotCompute_Deleted_And_None_Status()
+    public async Task Ignores_NotComputed_CannotCompute_Deleted_None_And_ZeroSize()
     {
         var h = NewHash(1);
 
@@ -312,20 +337,21 @@ public sealed class HashIndexPluginTests
                 ("c.bin", 100, HashKey.CannotCompute, ScanEntryStatus.Hashed), // ignore
                 ("d.bin", 100, h, ScanEntryStatus.Deleted),              // ignore
                 ("e.bin", 100, h, ScanEntryStatus.None),                 // ignore
-                ("f.bin", 100, h, ScanEntryStatus.Hashed),               // keep (duplicate w/ a)
+                ("f.bin", 0,   h, ScanEntryStatus.Hashed),                  // ignore (size <= 0)
+                ("g.bin", 100, h, ScanEntryStatus.Hashed),                  // keep (duplicate w/ a)
             ]);
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
 
         var rm = (IHashIndexReadModel)plugin;
-        var page = rm.GetGroupsPage(new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
+        var page = rm.GetGroupsPage(
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
             0, 10);
 
-        Assert.Equal(1, page.Total);
         var g = Assert.Single(page.Groups.ToArray());
         Assert.Equal(2, g.Count);
         Assert.Equal(h, g.Hash);
@@ -333,7 +359,90 @@ public sealed class HashIndexPluginTests
         var handles = rm.GetGroupFiles(g).ToArray();
         Assert.Equal(2, handles.Length);
         Assert.Contains(new FileHandle(1, 0), handles);
-        Assert.Contains(new FileHandle(1, 5), handles);
+        Assert.Contains(new FileHandle(1, 6), handles);
+    }
+
+    // ---------------------------------------------------------------------
+    // Subtree filtering (owned by HashIndexPlugin)
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetGroupsPage_FilteredBySubtree_ReturnsOnlyGroupsIntersectingThatSubtree()
+    {
+        // Tree: root(0) -> subA(1), subB(2)
+        // - Group hA has one file under subA and one under subB => intersects subA
+        // - Group hB has both files under subB only => does NOT intersect subA
+        var hA = NewHash(1);
+        var hB = NewHash(2);
+
+        var rootId = 1L;
+        var dirRootId = 10L;
+        var dirAId = 11L;
+        var dirBId = 12L;
+
+        // String pool: file names + "" terminator
+        var strings = new[] { "a1.bin", "a2.bin", "b1.bin", "b2.bin", "" };
+        var emptyIdx = strings.Length - 1;
+        var pool = PackedStringPool.FromStrings(strings);
+
+        var dirs = new[]
+        {
+            new DirRecordV2 { DirId = dirRootId, ParentDirId = -1, NameStrIdx = emptyIdx, ErrorMessageStrIdx = emptyIdx, Status = ScanEntryStatus.Enumerated },
+            new DirRecordV2 { DirId = dirAId, ParentDirId = dirRootId, NameStrIdx = emptyIdx, ErrorMessageStrIdx = emptyIdx, Status = ScanEntryStatus.Enumerated },
+            new DirRecordV2 { DirId = dirBId, ParentDirId = dirRootId, NameStrIdx = emptyIdx, ErrorMessageStrIdx = emptyIdx, Status = ScanEntryStatus.Enumerated },
+        };
+
+        var files = new[]
+        {
+            // hA: one in subA (index 0), one in subB (index 1)
+            new FileRecordV2 { FileId = 100, DirId = dirAId, NameStrIdx = 0, ErrorMessageStrIdx = emptyIdx, Size = 100, Hash = hA, Status = ScanEntryStatus.Hashed },
+            new FileRecordV2 { FileId = 101, DirId = dirBId, NameStrIdx = 1, ErrorMessageStrIdx = emptyIdx, Size = 100, Hash = hA, Status = ScanEntryStatus.Hashed },
+
+            // hB: both in subB (index 2,3)
+            new FileRecordV2 { FileId = 200, DirId = dirBId, NameStrIdx = 2, ErrorMessageStrIdx = emptyIdx, Size = 50, Hash = hB, Status = ScanEntryStatus.Hashed },
+            new FileRecordV2 { FileId = 201, DirId = dirBId, NameStrIdx = 3, ErrorMessageStrIdx = emptyIdx, Size = 50, Hash = hB, Status = ScanEntryStatus.Hashed },
+        };
+
+        var snap = new ScanRootSnapshotView
+        {
+            ScanRootId = rootId,
+            StringPool = pool,
+            Dirs = dirs,
+            Files = files
+        };
+
+        var repo = BuildRepoSnapshot(snap);
+
+        var treeDir = Path.Combine(_fs.Root, "tree_" + Guid.NewGuid());
+        Directory.CreateDirectory(treeDir);
+
+        var hashDir = Path.Combine(_fs.Root, "hash_" + Guid.NewGuid());
+        Directory.CreateDirectory(hashDir);
+
+        await using var tree = new TreeIndexPlugin(treeDir);
+        tree.Post(MakeBootstrapEvent(1, repo));
+        await tree.WhenReadyAsync(TestContext.Current.CancellationToken);
+
+        // subA is dir index 1 in dirs[]
+        var subAHandle = new DirHandle(rootId, 1);
+        Assert.True(tree.TryGetSubtreeRange(subAHandle, out var range));
+        Assert.False(range.IsEmpty);
+
+        var filter = new SubtreeFilter(subAHandle, range);
+
+        await using var hash = new HashIndexPlugin(hashDir, tree);
+        await PostAndWaitAsync(hash, MakeBootstrapEvent(1, repo));
+
+        var page = hash.GetGroupsPage(
+            new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
+            filter,
+            offset: 0,
+            count: 10);
+
+        // Only hA intersects subA
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(hA, g.Hash);
+        Assert.Equal(2, g.Count);
     }
 
     // ---------------------------------------------------------------------
@@ -343,7 +452,7 @@ public sealed class HashIndexPluginTests
     [Fact]
     public async Task ScanRootSnapshotCommittedEvent_IsIgnored_WhenGenerationDoesNotIncrease()
     {
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
 
         var h1 = NewHash(1);
         var snap1 = BuildRepoSnapshot(MakeRootFromGroups(
@@ -371,8 +480,8 @@ public sealed class HashIndexPluginTests
 
         var rm = (IHashIndexReadModel)plugin;
         var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
-        Assert.Single(page.Groups.ToArray());
-        Assert.Equal(h1, page.Groups.ToArray()[0].Hash);
+        var g = Assert.Single(page.Groups.ToArray());
+        Assert.Equal(h1, g.Hash);
     }
 
     [Fact]
@@ -388,7 +497,7 @@ public sealed class HashIndexPluginTests
         var snaps = new Dictionary<long, ScanRootSnapshotView> { [1] = r1, [2] = r2 };
         var snapshot = new RepoSnapshotView { Snapshots = snaps, ScanRoots = BuildScanRoots(snaps) };
 
-        await using var plugin = new HashIndexPlugin(_fs.Root);
+        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
 
         await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, snapshot));
 
@@ -421,14 +530,14 @@ public sealed class HashIndexPluginTests
     [Fact]
     public async Task State_IsPersisted_And_Rehydrated_OnBootstrap_WhenGenerationMatches()
     {
-        var stateDir = Path.Combine(_fs.Root, "persist");
+        var stateDir = Path.Combine(_fs.Root, "persist_" + Guid.NewGuid());
         Directory.CreateDirectory(stateDir);
 
         var h = NewHash(1);
         var snapshot = BuildRepoSnapshot(MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(h, 123, 4)]));
 
         // Build + persist
-        await using (var plugin = new HashIndexPlugin(stateDir))
+        await using (var plugin = new HashIndexPlugin(stateDir, new StubTreeIndex()))
         {
             await PostAndWaitAsync(plugin, MakeBootstrapEvent(5, snapshot));
 
@@ -437,7 +546,7 @@ public sealed class HashIndexPluginTests
         }
 
         // New instance should load state on bootstrap (gen must match)
-        await using (var plugin2 = new HashIndexPlugin(stateDir))
+        await using (var plugin2 = new HashIndexPlugin(stateDir, new StubTreeIndex()))
         {
             await PostAndWaitAsync(plugin2, MakeBootstrapEvent(5, snapshot));
 
@@ -448,7 +557,7 @@ public sealed class HashIndexPluginTests
             var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
             var g = Assert.Single(page.Groups.ToArray());
             Assert.Equal(4, g.Count);
-            Assert.Equal(123, g.SizeBytes);
+            Assert.Equal(123, g.FileSizeBytes);
 
             var files = rm.GetGroupFiles(g).ToArray();
             Assert.Equal(4, files.Length);
@@ -470,9 +579,7 @@ public sealed class HashIndexPluginTests
         foreach (var g in groups)
         {
             for (var j = 0; j < g.count; j++)
-            {
                 files.Add(($"f{i++}.bin", g.size, g.hash, ScanEntryStatus.Hashed));
-            }
         }
 
         return MakeRootFromFiles(scanRootId, dirId, files.ToArray());
