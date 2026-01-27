@@ -1,3 +1,5 @@
+using System.Runtime;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;

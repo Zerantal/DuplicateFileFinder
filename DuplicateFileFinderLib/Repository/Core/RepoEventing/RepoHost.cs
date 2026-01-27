@@ -23,6 +23,7 @@ public sealed class RepoHost : IRepoHost
     public IHashIndexReadModel HashIndex => Get<IHashIndexReadModel>();
     public ITreeIndexReadModel TreeIndex => Get<ITreeIndexReadModel>();
     public IFileDirReadModel FileDirIndex => Get<IFileDirReadModel>();
+    public IFolderHashIndexReadModel FolderHashIndex => Get<IFolderHashIndexReadModel>();
 
     public event EventHandler<RepoIndexesRebuiltEventArgs>? IndexesRebuilt;
 
@@ -56,7 +57,9 @@ public sealed class RepoHost : IRepoHost
             new HashIndexPlugin(indexDir, treeIndex),
             repo);
 
-
+        host.RegisterIndexPlugin<IFolderHashIndexReadModel>(
+            new FolderHashIndexPlugin(indexDir, treeIndex),
+            repo);
 
         // Wait until all plugins processed bootstrap
         foreach (var ready in host._readyStates)

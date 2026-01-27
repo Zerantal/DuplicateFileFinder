@@ -111,30 +111,7 @@ public sealed class HashIndexPluginTests
         };
     }
 
-    private static async Task PostAndWaitAsync(
-        HashIndexPlugin plugin,
-        RepoEvent evt,
-        Func<bool>? predicate = null,
-        int timeoutMs = 2000)
-    {
-        plugin.Post(evt);
-        if (predicate == null)
-        {
-            await plugin.WhenReadyAsync(TestContext.Current.CancellationToken);
-            return;
-        }
 
-        var stop = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (DateTime.UtcNow < stop)
-        {
-            if (predicate())
-                return;
-
-            await Task.Delay(10, TestContext.Current.CancellationToken);
-        }
-
-        throw new TimeoutException("Timed out waiting for plugin to process event.");
-    }
 
     // ---------------------------------------------------------------------
     // Core behavioural tests (read model)
@@ -163,7 +140,7 @@ public sealed class HashIndexPluginTests
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
 
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 1, snapshot));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 1, snapshot));
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -207,7 +184,7 @@ public sealed class HashIndexPluginTests
             ]);
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
 
@@ -248,7 +225,7 @@ public sealed class HashIndexPluginTests
             ]);
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
 
@@ -280,7 +257,7 @@ public sealed class HashIndexPluginTests
             ]);
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         var rm = (IHashIndexReadModel)plugin;
 
@@ -307,7 +284,7 @@ public sealed class HashIndexPluginTests
     public async Task GetGroupFiles_ReturnsEmpty_ForInvalidDescriptor()
     {
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot())); // empty repo
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot())); // empty repo
 
         var rm = (IHashIndexReadModel)plugin;
 
@@ -342,7 +319,7 @@ public sealed class HashIndexPluginTests
             ]);
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, BuildRepoSnapshot(r1)));
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -431,7 +408,7 @@ public sealed class HashIndexPluginTests
         var filter = new SubtreeFilter(subAHandle, range);
 
         await using var hash = new HashIndexPlugin(hashDir, tree);
-        await PostAndWaitAsync(hash, MakeBootstrapEvent(1, repo));
+        await PluginTestUtil.PostAndWaitAsync(hash, MakeBootstrapEvent(1, repo));
 
         var page = hash.GetGroupsPage(
             new DuplicateQuery { MinDuplicates = 2, MinSize = 1, Sort = DuplicateSort.TotalSizeDesc },
@@ -460,7 +437,7 @@ public sealed class HashIndexPluginTests
             dirId: 10,
             groups: [(h1, size: 100, count: 2)]));
 
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 2, snap1));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(gen: 2, snap1));
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -499,13 +476,13 @@ public sealed class HashIndexPluginTests
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
 
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, snapshot));
+        await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(1, snapshot));
 
         Assert.Equal(3, plugin.TotalDuplicateFileCount);
         Assert.Equal(300, plugin.TotalSpaceTakenByDuplicates);
 
         // Remove root 2: remaining group has count 2 => duplicates: 1, space: 100
-        await PostAndWaitAsync(
+        await PluginTestUtil.PostAndWaitAsync(
             plugin,
             MakeScanRootRemovedEvent(gen: 2, scanRootId: 2),
             predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 100 });
@@ -539,7 +516,7 @@ public sealed class HashIndexPluginTests
         // Build + persist
         await using (var plugin = new HashIndexPlugin(stateDir, new StubTreeIndex()))
         {
-            await PostAndWaitAsync(plugin, MakeBootstrapEvent(5, snapshot));
+            await PluginTestUtil.PostAndWaitAsync(plugin, MakeBootstrapEvent(5, snapshot));
 
             Assert.Equal(3, plugin.TotalDuplicateFileCount);          // (4-1)
             Assert.Equal(3 * 123, plugin.TotalSpaceTakenByDuplicates);
@@ -548,7 +525,7 @@ public sealed class HashIndexPluginTests
         // New instance should load state on bootstrap (gen must match)
         await using (var plugin2 = new HashIndexPlugin(stateDir, new StubTreeIndex()))
         {
-            await PostAndWaitAsync(plugin2, MakeBootstrapEvent(5, snapshot));
+            await PluginTestUtil.PostAndWaitAsync(plugin2, MakeBootstrapEvent(5, snapshot));
 
             Assert.Equal(3, plugin2.TotalDuplicateFileCount);
             Assert.Equal(3 * 123, plugin2.TotalSpaceTakenByDuplicates);

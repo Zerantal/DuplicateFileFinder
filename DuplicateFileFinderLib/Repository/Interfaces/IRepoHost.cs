@@ -10,6 +10,8 @@ public interface IRepoHost : IAsyncDisposable
     IHashIndexReadModel HashIndex { get; }
     ITreeIndexReadModel TreeIndex { get; }
     IFileDirReadModel FileDirIndex { get; }
+    public IFolderHashIndexReadModel FolderHashIndex { get; }
+
 
     /// <summary>
     /// Fired after all index plugins have processed a repo generation change (e.g., after a scan commit).

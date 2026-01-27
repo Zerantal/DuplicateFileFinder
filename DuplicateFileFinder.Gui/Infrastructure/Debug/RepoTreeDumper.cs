@@ -1,7 +1,11 @@
+// DuplicateFileFinder.Gui/Infrastructure/Debug/RepoTreeDumper.cs
+
 using System.Text;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 namespace DuplicateFileFinder.Gui.Infrastructure.Debug;
@@ -47,7 +51,6 @@ public static class RepoTreeDumper
         return outputPath;
     }
 
-
     public static async Task<string> DumpAsync(
         IRepoHost host,
         string outputPath,
@@ -76,6 +79,10 @@ public static class RepoTreeDumper
         }
         else
         {
+            // Build a lookup of (scanRootId -> bool[dirIndex]) where true means that dir participates
+            // in any duplicate-folder group in FolderHashIndex.
+            var dupFolderLookup = BuildDuplicateFolderLookup(host, roots, ct);
+
             foreach (var root in roots)
             {
                 ct.ThrowIfCancellationRequested();
@@ -90,7 +97,9 @@ public static class RepoTreeDumper
                     continue;
                 }
 
-                DumpScanRoot(view, sb);
+                dupFolderLookup.TryGetValue(root.RootId, out var isDupFolderByDirIndex);
+
+                DumpScanRoot(view, isDupFolderByDirIndex, sb);
 
                 sb.AppendLine();
             }
@@ -104,7 +113,77 @@ public static class RepoTreeDumper
         return outputPath;
     }
 
-    private static void DumpScanRoot(ScanRootSnapshotView view, StringBuilder sb)
+    private static Dictionary<long, bool[]> BuildDuplicateFolderLookup(
+        IRepoHost host,
+        ScanRoot[] roots,
+        CancellationToken ct)
+    {
+        // Lazily create arrays sized to each scan root snapshot's dir count.
+        var lookup = new Dictionary<long, bool[]>(capacity: roots.Length);
+
+        bool[] GetOrCreate(long scanRootId)
+        {
+            if (lookup.TryGetValue(scanRootId, out var existing))
+                return existing;
+
+            var view = host.Repo.TryGetScanRootView(scanRootId);
+            if (view is null)
+            {
+                // If a snapshot isn't loaded, we can't size the array; just store an empty placeholder.
+                existing = [];
+                lookup[scanRootId] = existing;
+                return existing;
+            }
+
+            existing = new bool[view.Dirs.Count];
+            lookup[scanRootId] = existing;
+            return existing;
+        }
+
+        // FolderHashIndex contains only duplicate groups; every handle in every group is "dup-folder".
+        // We page until the index returns an empty page.
+        const int PageSize = 512;
+        var offset = 0;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var page = host.FolderHashIndex.GetGroupsPage(offset, PageSize, FolderDuplicateSort.DuplicateCountDesc);
+            if (page.Count <= 0)
+                break;
+
+            var groups = page.Groups.Span;
+
+            for (var i = 0; i < groups.Length; i++)
+            {
+                var g = groups[i];
+                var dirs = host.FolderHashIndex.GetGroupDirs(g);
+
+                for (var j = 0; j < dirs.Length; j++)
+                {
+                    var h = dirs[j];
+
+                    // Defensive: skip invalid
+                    if (!h.IsValid)
+                        continue;
+
+                    var arr = GetOrCreate(h.ScanRootId);
+                    if ((uint)h.Index < (uint)arr.Length)
+                        arr[h.Index] = true;
+                }
+            }
+
+            // PagingList-style: when fewer than requested are returned, we're at the end.
+            offset += page.Count;
+            if (page.Count < PageSize)
+                break;
+        }
+
+        return lookup;
+    }
+
+    private static void DumpScanRoot(ScanRootSnapshotView view, bool[]? isDupFolderByDirIndex, StringBuilder sb)
     {
         // Build indices
         var dirs = view.Dirs;
@@ -141,8 +220,7 @@ public static class RepoTreeDumper
         // duplicates: file hash -> count (ignore Deleted by default)
         var dupCounts = BuildDuplicateCounts(view);
 
-        // Find root dir record (DirId stored in ScanRootsView; if not available here, pick top-level ParentDirId < 0)
-        // SnapshotView usually includes root dir as a record with ParentDirId < 0; we dump its children.
+        // Root dir record(s)
         var rootIndices = Enumerable.Range(0, dirs.Count)
             .Where(i => dirs[i].ParentDirId < 0)
             .ToArray();
@@ -157,7 +235,8 @@ public static class RepoTreeDumper
         {
             var rootDir = dirs[rootIdx];
             var rootName = SafeDirName(view, rootDir);
-            sb.AppendLine($"  {rootName}{FormatDeleted(rootDir.Status)}");
+
+            sb.AppendLine($"  {rootName}{FormatDeleted(rootDir.Status)}{FormatDupFolder(isDupFolderByDirIndex, rootIdx)}");
 
             DumpDirRecursive(
                 view,
@@ -166,6 +245,7 @@ public static class RepoTreeDumper
                 childDirs,
                 filesByDir,
                 dupCounts,
+                isDupFolderByDirIndex,
                 sb);
         }
     }
@@ -179,8 +259,6 @@ public static class RepoTreeDumper
             if (f.Status == ScanEntryStatus.Deleted)
                 continue;
 
-            // We assume FileRecordV2.Hash.ToString() is stable enough for grouping.
-            // If you have a HashKey struct, prefer using its raw bytes or a stable key.
             if (!f.Hash.IsComputed)
                 continue;
 
@@ -199,6 +277,7 @@ public static class RepoTreeDumper
         Dictionary<long, List<int>> childDirs,
         Dictionary<long, List<int>> filesByDir,
         Dictionary<string, int> dupCounts,
+        bool[]? isDupFolderByDirIndex,
         StringBuilder sb)
     {
         // For children: directories first, then files (like `tree`)
@@ -218,7 +297,7 @@ public static class RepoTreeDumper
             SafeFileName(view, view.Files[b])));
 
         // Determine which files in *this folder* are duplicates (immediate only)
-        var folderHasDup = fileChildren.Any(i =>
+        var folderHasDupFiles = fileChildren.Any(i =>
         {
             var f = view.Files[i];
             if (f.Status == ScanEntryStatus.Deleted || !f.Hash.IsComputed)
@@ -245,11 +324,13 @@ public static class RepoTreeDumper
                 var name = SafeDirName(view, d);
                 var flags = FormatDeleted(d.Status);
 
-                // Optional folder dup marker: “(has-dup)” if the folder's immediate files contain dups.
-                // This is cheap and useful, without needing subtree aggregation.
-                var dupFlag = folderHasDup ? " (has-dup)" : string.Empty;
+                // Folder markers:
+                // - dup-folder: folder content signature matches at least one other folder across dumped roots
+                // - has-dup-files: immediate duplicate files exist in this folder
+                var dupFolderFlag = FormatDupFolder(isDupFolderByDirIndex, idx);
+                var hasDupFilesFlag = folderHasDupFiles ? " (has-dup-files)" : string.Empty;
 
-                sb.Append(indent).Append(branch).Append(name).Append(flags).AppendLine(dupFlag);
+                sb.Append(indent).Append(branch).Append(name).Append(flags).Append(dupFolderFlag).AppendLine(hasDupFilesFlag);
 
                 DumpDirRecursive(
                     view,
@@ -258,6 +339,7 @@ public static class RepoTreeDumper
                     childDirs,
                     filesByDir,
                     dupCounts,
+                    isDupFolderByDirIndex,
                     sb);
             }
             else
@@ -279,6 +361,17 @@ public static class RepoTreeDumper
                 sb.Append(indent).Append(branch).Append(name).Append(flags).AppendLine(dup);
             }
         }
+    }
+
+    private static string FormatDupFolder(bool[]? isDupFolderByDirIndex, int dirIndex)
+    {
+        if (isDupFolderByDirIndex is null)
+            return string.Empty;
+
+        if ((uint)dirIndex >= (uint)isDupFolderByDirIndex.Length)
+            return string.Empty;
+
+        return isDupFolderByDirIndex[dirIndex] ? " (dup-folder)" : string.Empty;
     }
 
     private static string SafeDirName(ScanRootSnapshotView view, DirRecordV2 d)
