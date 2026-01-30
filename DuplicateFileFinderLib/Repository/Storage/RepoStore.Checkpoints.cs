@@ -85,14 +85,14 @@ internal static partial class RepoStore
         }
     }
 
-    public static async Task<ScanCheckpoint[]> LoadScanCheckpointsAsync(
+    public static Task<ScanCheckpoint[]> LoadScanCheckpointsAsync(
         string repoPath,
         long scanRootId,
         CancellationToken ct = default)
     {
         var dir = GetCheckpointDir(repoPath);
         if (!Directory.Exists(dir))
-            return [];
+            return Task.FromResult<ScanCheckpoint[]>([]);
 
         // Load all matching files; sort by CreatedAtUtcTicks (embedded as D19)
         var paths = Directory.EnumerateFiles(dir, $"{scanRootId}.*.checkpoint.mpk")
@@ -100,29 +100,21 @@ internal static partial class RepoStore
             .ToArray();
 
         if (paths.Length == 0)
-            return [];
+            return Task.FromResult<ScanCheckpoint[]>([]);
 
         var result = new List<ScanCheckpoint>(paths.Length);
 
         foreach (var path in paths)
         {
+
             ct.ThrowIfCancellationRequested();
 
-            try
-            {
-                var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-                var cp = MemoryPackSerializer.Deserialize<ScanCheckpoint>(bytes);
-                if (cp is not null && cp.ScanRootId == scanRootId)
-                    result.Add(cp);
-            }
-            catch
-            {
-                // tolerate: skip corrupt/partial files
-            }
+            if (MemoryPackFile.TryLoadMapped<ScanCheckpoint>(path, out var cp, ct) && cp != null)
+                result.Add(cp);
         }
 
         // Defensive: ensure ordered by tick even if filenames were odd
-        return result.OrderBy(c => c.CreatedAtUtcTicks).ToArray();
+        return Task.FromResult(result.OrderBy(c => c.CreatedAtUtcTicks).ToArray());
     }
 
     public static async Task DeleteScanCheckpointAsync(

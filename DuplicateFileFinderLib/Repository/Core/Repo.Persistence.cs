@@ -9,10 +9,7 @@ public sealed partial class Repo
     private long _metaVersion;
     private long _persistedMetaVersion;
 
-    private void MarkMetaDirty_NoLock()
-    {
-        _metaVersion++;
-    }
+    private void MarkMetaDirty_NoLock() => _metaVersion++;
 
     private bool TryBuildMetaFileForPersist_NoLock(out RepoMetaFile metaFile, out long version)
     {
@@ -28,7 +25,7 @@ public sealed partial class Repo
         {
             Meta = _meta,
             ScanRoots = _scanRoots.Values.ToList(),
-            ScanRuns = _scanRuns.ToList()
+            ScanRuns = _scanRunIndex.Values.OrderBy(r => r.ScanSequence).ToList()
         };
 
         version = _metaVersion;
@@ -76,16 +73,15 @@ public sealed partial class Repo
             SchemaVersion = RepoSchemaVersion
         };
 
-        _scanRoots.Clear();
+        var scanRoots = new Dictionary<long, ScanRoot>(metaFile.ScanRoots.Count);
         foreach (var root in metaFile.ScanRoots)
-            _scanRoots[root.RootId] = root;
+            scanRoots[root.RootId] = root;
+        _scanRoots = scanRoots;
 
-        _scanRuns.Clear();
-        _scanRuns.AddRange(metaFile.ScanRuns);
-
-        _scanRunIndex.Clear();
-        foreach (var run in _scanRuns)
-            _scanRunIndex[run.ScanSequence] = run;
+        var runIndex = new Dictionary<long, ScanRun>(metaFile.ScanRuns.Count);
+        foreach (var run in metaFile.ScanRuns)
+            runIndex[run.ScanSequence] = run;
+        _scanRunIndex = runIndex;
 
         _metaVersion = 1;
         _persistedMetaVersion = 1;
@@ -93,7 +89,9 @@ public sealed partial class Repo
 
     private async Task InitialiseStateFromStoreAsync(CancellationToken ct)
     {
-        // Load per-root snapshots
+        // Load per-root snapshots into a fresh dictionary, then assign once.
+        var snaps = new Dictionary<long, ScanRootSnapshotV2>(_scanRoots.Count);
+
         foreach (var root in _scanRoots.Values)
         {
             ct.ThrowIfCancellationRequested();
@@ -103,7 +101,10 @@ public sealed partial class Repo
 
             if (snap is null)
                 continue;
-            _scanRootSnapshots[root.RootId] = snap.Value;
+
+            snaps[root.RootId] = snap.Value;
         }
+
+        _scanRootSnapshots = snaps;
     }
 }

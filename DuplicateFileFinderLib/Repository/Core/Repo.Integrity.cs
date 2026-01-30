@@ -52,7 +52,7 @@ public sealed partial class Repo
 
             meta = _meta;
             scanRoots = new Dictionary<long, ScanRoot>(_scanRoots);
-            scanRuns = new List<ScanRun>(_scanRuns);
+            scanRuns = _scanRunIndex.Values.OrderBy(r => r.ScanSequence).ToList();
             scanRootSnapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
         }
 

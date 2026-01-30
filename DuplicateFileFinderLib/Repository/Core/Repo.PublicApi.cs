@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 
 using DuplicateFileFinderLib.IO;
 using DuplicateFileFinderLib.Logging;
+using DuplicateFileFinderLib.Repository.Core.Helpers;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Core.Scan;
@@ -37,10 +38,13 @@ public sealed partial class Repo
         {
             lock (_sync)
             {
-                return _scanRuns.ToArray();
+                return _scanRunIndex.Values
+                    .OrderBy(r => r.ScanSequence)
+                    .ToArray();
             }
         }
     }
+
 
     public async ValueTask DisposeAsync()
     {
@@ -80,25 +84,17 @@ public sealed partial class Repo
     }
 
     private RepoSnapshotView GetRepoSnapshotView_NoLock()
-    {
-        var snapshots = new Dictionary<long, ScanRootSnapshotView>(_scanRootSnapshots.Count);
-        foreach (var (id, snap) in _scanRootSnapshots)
+        => new()
         {
-            snapshots[id] = new ScanRootSnapshotView
-            {
-                ScanRootId = snap.ScanRootId,
-                StringPool = snap.StringPool,
-                Dirs = snap.Dirs,
-                Files = snap.Files
-            };
-        }
+            // Non-copying: the underlying dictionaries are copy-on-write, so views remain safe.
+            Snapshots = new ProjectedReadOnlyDictionary<long, ScanRootSnapshotV2, ScanRootSnapshotView>(
+                _scanRootSnapshots,
+                static snap => ToView(snap)),
 
-        return new RepoSnapshotView
-        {
-            Snapshots = new ReadOnlyDictionary<long, ScanRootSnapshotView>(snapshots),
-            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(new Dictionary<long, ScanRoot>(_scanRoots))
+            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(_scanRoots)
         };
-    }
+
+
 
     public async Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
     {
@@ -107,17 +103,18 @@ public sealed partial class Repo
         lock (_sync)
         {
             // 1) Remove the snapshot from live state (source of truth)
-            _scanRootSnapshots.Remove(scanRootId);
+            RemoveScanRootSnapshot_NoLock(scanRootId);
 
             // 2) Mark ScanRoot as deleted (metadata)
             if (_scanRoots.TryGetValue(scanRootId, out var scanRoot))
             {
-                scanRoot = scanRoot with
+                var updated = scanRoot with
                 {
                     IsDeleted = true,
                     DeletedAtUtc = DateTimeOffset.UtcNow
                 };
-                _scanRoots[scanRootId] = scanRoot;
+
+                UpsertScanRoot_NoLock(updated);
             }
 
             // 3) Bump generation and capture a coherent view so index plugins can rebuild
@@ -145,7 +142,7 @@ public sealed partial class Repo
     public async Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default)
     {
         long generation;
-        ScanRoot updatedScanRoot;
+        ScanRoot? updatedScanRoot;
 
         // Normalise: treat blank as null
         if (displayName is not null)
@@ -157,15 +154,11 @@ public sealed partial class Repo
 
         lock (_sync)
         {
-            if (!_scanRoots.TryGetValue(scanRootId, out var scanRoot))
+            if (!TryUpdateScanRoot_NoLock(
+                    scanRootId,
+                    sr => sr with { DisplayName = displayName },
+                    out updatedScanRoot) || updatedScanRoot is null)
                 return;
-
-            // No-op if unchanged
-            if (string.Equals(scanRoot.DisplayName, displayName, StringComparison.Ordinal))
-                return;
-
-            updatedScanRoot = scanRoot with { DisplayName = displayName };
-            _scanRoots[scanRootId] = updatedScanRoot;
 
             generation = _meta.Generation;  // don't bump generation
             MarkMetaDirty_NoLock();
@@ -359,8 +352,10 @@ public sealed partial class Repo
         if (scanRoot.DirId > 0)
             return;
 
-        scanRoot = scanRoot with { DirId = AllocateDirId_NoLock() };
-        _scanRoots[scanRoot.RootId] = scanRoot;
+        var updated = scanRoot with { DirId = AllocateDirId_NoLock() };
+        scanRoot = updated;
+
+        UpsertScanRoot_NoLock(updated);
         MarkMetaDirty_NoLock();
     }
 
@@ -383,11 +378,10 @@ public sealed partial class Repo
             DeviceModel = volumeInfo?.DeviceModel ?? scanRoot.DeviceModel
         };
 
-        if (!ReferenceEquals(updated, scanRoot))
-        {
-            _scanRoots[updated.RootId] = updated;
-            MarkMetaDirty_NoLock();
-        }
+        if (Equals(updated, scanRoot)) return updated;
+
+        UpsertScanRoot_NoLock(updated);
+        MarkMetaDirty_NoLock();
 
         return updated;
     }
@@ -408,9 +402,7 @@ public sealed partial class Repo
             HashPolicy = options.HashPolicy
         };
 
-        _scanRuns.Add(run);
-        _scanRunIndex[runId] = run;
-
+        AddScanRun_NoLock(run);
         MarkMetaDirty_NoLock();
         return run;
     }
@@ -459,7 +451,11 @@ public sealed partial class Repo
 
         using (TimingLog.StartPhase("Opening Repo"))
         {
+            // DotMemory.GetSnapshot("Baseline");
+
             await repo.InitialiseStateFromStoreAsync(ct).ConfigureAwait(false);
+
+            // DotMemory.GetSnapshot("After Repo Open");
         }
 
         return repo;

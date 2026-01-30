@@ -5,6 +5,7 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using MemoryPack;
@@ -630,28 +631,19 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         if (!File.Exists(path))
             return false;
 
-        try
+        TreeIndexState? state;
+        using (TimingLog.StartPhase("Deserialising TreeIndex state"))
         {
-            TreeIndexState? state;
-            using (TimingLog.StartPhase("Deserialising TreeIndex state"))
-            {
-                var bytes = File.ReadAllBytes(path);
-                state = MemoryPackSerializer.Deserialize<TreeIndexState>(bytes);
-                if (state is null)
-                    return false;
-            }
-
-            if (state.LastIndexedGeneration != expectedGeneration)
+            if (!MemoryPackFile.TryLoadMapped(path, out state, CancellationToken.None) || state is null)
                 return false;
-
-            _lastIndexedGeneration = state.LastIndexedGeneration;
-            _roots = state.Roots;
-
-            return true;
         }
-        catch
-        {
+
+        if (state.LastIndexedGeneration != expectedGeneration)
             return false;
-        }
+
+        _lastIndexedGeneration = state.LastIndexedGeneration;
+        _roots = state.Roots;
+
+        return true;
     }
 }

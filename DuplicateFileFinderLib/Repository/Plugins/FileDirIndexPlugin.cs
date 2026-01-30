@@ -3,6 +3,7 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 
 using MemoryPack;
 
@@ -264,31 +265,22 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         if (!File.Exists(path))
             return false;
 
-        try
+        FileDirIndexState? state;
+        using (TimingLog.StartPhase("Deserialising FileDirIndexState"))
         {
-            FileDirIndexState? state;
-            using (TimingLog.StartPhase("Deserialising FileDirIndexState"))
-            {
-                state = MemoryPackSerializer.Deserialize<FileDirIndexState>(File.ReadAllBytes(path));
-                if (state is null)
-                    return false;
-            }
-
-            // Only use the state if it matches the current repo position.
-            if (state.LastIndexedGeneration != expectedGeneration)
+            if (!MemoryPackFile.TryLoadMapped(path, out state, CancellationToken.None) || state is null)
                 return false;
-
-            _dirsById = state.DirsById;
-            _filesById = state.FilesById;
-
-            _lastIndexedGeneration = state.LastIndexedGeneration;
-            return true;
         }
-        catch
-        {
-            // Corrupt or incompatible state; ignore and rebuild from snapshot.
+
+        // Only use the state if it matches the current repo position.
+        if (state.LastIndexedGeneration != expectedGeneration)
             return false;
-        }
+
+        _dirsById = state.DirsById;
+        _filesById = state.FilesById;
+
+        _lastIndexedGeneration = state.LastIndexedGeneration;
+        return true;
     }
 
     // ---------------------------------------------------------------------

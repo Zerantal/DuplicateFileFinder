@@ -8,6 +8,7 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using MemoryPack;
@@ -630,47 +631,41 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (!File.Exists(path))
             return false;
 
-        try
+        if (!MemoryPackFile.TryLoadMapped<HashIndexState>(path, out var state, CancellationToken.None) || state == null)
+            return false;
+
+        if (state.LastIndexedGeneration != expectedGeneration)
+            return false;
+
+        using (TimingLog.StartPhase("Rehydrating hash index"))
         {
-            var state = MemoryPackSerializer.Deserialize<HashIndexState>(File.ReadAllBytes(path));
-            if (state == null) return false;
-            if (state.LastIndexedGeneration != expectedGeneration)
-                return false;
+            // Build locals first, then publish once (atomic-ish for readers).
+            var allFiles = state.AllFiles;
+            var groups = state.Groups;
 
-            using (TimingLog.StartPhase("Rehydrating hash index"))
+            if (groups.Length == 0 || allFiles.Length == 0)
             {
-                // Build locals first, then publish once (atomic-ish for readers).
-                var allFiles = state.AllFiles;
-                var groups = state.Groups;
-
-                if (groups.Length == 0 || allFiles.Length == 0)
-                {
-                    PublishEmpty();
-                    return true;
-                }
-
-                // Prefer persisted views; if missing/invalid, rebuild.
-                var bySize = state.BySizeDesc;
-                var byCount = state.ByCountDesc;
-
-                if (bySize.Length != groups.Length || byCount.Length != groups.Length)
-                    (bySize, byCount) = BuildSortedViews(groups);
-
-
-                var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
-
-                Publish(allFiles, groups, bySize, byCount, stats);
-
-                // Not part of read-model publication, but keep consistent here too.
-                _lastIndexedGeneration = state.LastIndexedGeneration;
+                PublishEmpty();
+                return true;
             }
 
-            return true;
+            // Prefer persisted views; if missing/invalid, rebuild.
+            var bySize = state.BySizeDesc;
+            var byCount = state.ByCountDesc;
+
+            if (bySize.Length != groups.Length || byCount.Length != groups.Length)
+                (bySize, byCount) = BuildSortedViews(groups);
+
+
+            var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
+
+            Publish(allFiles, groups, bySize, byCount, stats);
+
+            // Not part of read-model publication, but keep consistent here too.
+            _lastIndexedGeneration = state.LastIndexedGeneration;
         }
-        catch
-        {
-            return false;
-        }
+
+        return true;
     }
 
     // ---------------------------------------------------------------------
