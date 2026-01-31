@@ -173,10 +173,10 @@ internal sealed class BaselineIndex
         if (collisions <= BaselineCollisionTraceLimit)
         {
             var traceStrBuilder = new StringBuilder($"Baseline collision ({kind}): container={parentOrDirId} name='{name}' ");
-            if (existing is BaseLineDirMapValue existingDir && kept is BaseLineDirMapValue keptDir )
+            if (existing is BaseLineDirMapValue existingDir && kept is BaseLineDirMapValue keptDir)
                 traceStrBuilder.Append($"keptId={keptDir.dirId} keptStatus={keptDir.status} keptLastSeen={keptDir.lastSeen} " +
                     $"droppedId={existingDir.dirId} droppedStatus={existingDir.status} droppedLastSeen={existingDir.lastSeen}");
-            else if (existing is BaseLineFileMapValue existingFile && kept is BaseLineFileMapValue keptFile )
+            else if (existing is BaseLineFileMapValue existingFile && kept is BaseLineFileMapValue keptFile)
                 traceStrBuilder.Append($"keptId={keptFile.fileId} keptStatus={keptFile.status} keptLastSeen={keptFile.lastSeen} " +
                     $"droppedId={existingFile.fileId} droppedStatus={existingFile.status} droppedLastSeen={existingFile.lastSeen}");
 
