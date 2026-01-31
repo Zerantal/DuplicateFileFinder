@@ -54,7 +54,7 @@ public sealed class DuplicateFileFinder
         _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
 
     public Task FullScanAsync(
-        long scanRootId,
+        ScanRootId scanRootId,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
         CancellationToken ct = default) =>
         _fullScan.ExecuteAsync(scanRootId, ThrottledProgress(progress), ct);

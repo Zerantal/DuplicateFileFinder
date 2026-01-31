@@ -92,8 +92,8 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
                 parentDirId: 1,
-                expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
-                expectedFiles: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal)));
+                expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
+                expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
 
         session.Setup(s => s.EndDirectory(ref It.Ref<DirEnumerationContext>.IsAny));
 
@@ -179,8 +179,8 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
                 parentDirId: 1,
-                expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
-                expectedFiles: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal)));
+                expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
+                expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
 
         session.Setup(s => s.FailAsync("Scan cancelled.", cancelled: true, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -256,8 +256,8 @@ public sealed class FullScanOperationTests
 
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(parentDirId: 1,
-                expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
-                expectedFiles: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal)));
+                expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
+                expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
 
         session.Setup(s => s.EndDirectory(ref It.Ref<DirEnumerationContext>.IsAny));
 
@@ -430,7 +430,7 @@ public sealed class FullScanOperationTests
         // Return a context with a real existing root path (used for Directory.Exists)
         var runRoot = PathUtils.NormalizePath(_fs.Dir("scanRoot"));
         repo.Setup(r => r.BeginRescanAsync(
-                It.Is<long>(id => id == 123),
+                It.Is<ScanRootId>(id => id == 123),
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
@@ -458,8 +458,8 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
                 parentDirId: 1,
-                expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
-                expectedFiles: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal)));
+                expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
+                expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
 
         session.Setup(s => s.EndDirectory(ref It.Ref<DirEnumerationContext>.IsAny));
 
@@ -531,11 +531,11 @@ public sealed class FullScanOperationTests
 
         ScanOptions? capturedOptions = null;
         repo.Setup(r => r.BeginSubtreeScanAsync(
-                It.Is<long>(id => id == 7),
+                It.Is<ScanRootId>(id => id == 7),
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<long, ScanOptions, VolumeInfo?, CancellationToken>((_, o, _, _) => capturedOptions = o)
+            .Callback<ScanRootId, ScanOptions, VolumeInfo?, CancellationToken>((_, o, _, _) => capturedOptions = o)
             .ReturnsAsync(new ScanContext
             {
                 Session = session.Object,
@@ -565,8 +565,8 @@ public sealed class FullScanOperationTests
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
                 parentDirId: 2,
-                expectedDirs: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal),
-                expectedFiles: new Dictionary<string, (long, string, ScanEntryStatus, long)>(StringComparer.Ordinal)));
+                expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
+                expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
         session.Setup(s => s.EndDirectory(ref It.Ref<DirEnumerationContext>.IsAny));
 
         hashing.Setup(h => h.HashFilesAsync(

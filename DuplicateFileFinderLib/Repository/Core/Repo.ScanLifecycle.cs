@@ -30,7 +30,7 @@ public sealed partial class Repo
         return seq;
     }
 
-    public long AllocateDirId()
+    public DirId AllocateDirId()
     {
         lock (_sync)
         {
@@ -38,7 +38,7 @@ public sealed partial class Repo
         }
     }
 
-    private long AllocateDirId_NoLock()
+    private DirId AllocateDirId_NoLock()
     {
         var id = _meta.NextDirId;
         _meta = _meta with { NextDirId = id + 1 };
@@ -46,7 +46,7 @@ public sealed partial class Repo
         return id;
     }
 
-    public long AllocateFileId()
+    public FileId AllocateFileId()
     {
         lock (_sync)
         {
@@ -54,7 +54,7 @@ public sealed partial class Repo
         }
     }
 
-    private long AllocateFileId_NoLock()
+    private FileId AllocateFileId_NoLock()
     {
         var id = _meta.NextFileId;
         _meta = _meta with { NextFileId = id + 1 };
@@ -63,7 +63,7 @@ public sealed partial class Repo
     }
 
     [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
-    private long AllocateRootId_NoLock()
+    private int AllocateRootId_NoLock()
     {
         var id = _meta.NextScanRootId;
         _meta = _meta with { NextScanRootId = id + 1 };
@@ -321,6 +321,6 @@ public sealed partial class Repo
     async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
         => await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
 
-    public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
+    public Task DeleteScanCheckpointAsync(ScanRootId scanRootId, CancellationToken ct = default)
         => RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct);
 }

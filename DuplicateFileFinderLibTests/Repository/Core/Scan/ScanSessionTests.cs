@@ -441,7 +441,7 @@ public sealed class ScanSessionTests
     {
         // Build a partial snapshot that contains a small tree + one file.
         // IMPORTANT: scanRootId matches the run so CommitSnapshotV2 is consistent.
-        const long scanRootId = 123;
+        const ScanRootId scanRootId = 123;
         const long scanSequence = 77;
 
         // Pool indices:
@@ -533,7 +533,7 @@ public sealed class ScanSessionTests
     [Fact]
     public async Task ImportPartialSnapshot_ThenNewFinds_CommitsUnionOfImportedAndNew()
     {
-        const long scanRootId = 123;
+        const ScanRootId scanRootId = 123;
         const long scanSequence = 88;
 
         var pool = PackedStringPool.FromStrings(["", "D1", "F1.bin"]);
@@ -631,7 +631,7 @@ public sealed class ScanSessionTests
 
     // ---------------- helpers ----------------
 
-    private static ScanSession NewSession(CapturingRepo repo, ScanRun run, long rootDirId = -1)
+    private static ScanSession NewSession(CapturingRepo repo, ScanRun run, DirId rootDirId = -1)
         => new(
             repo,
             run,
@@ -646,7 +646,7 @@ public sealed class ScanSessionTests
                 ErrorMessage = null
             });
 
-    private static ScanRun CreateRun(long scanSequence, long scanRootId)
+    private static ScanRun CreateRun(long scanSequence, ScanRootId scanRootId)
         => new()
         {
             ScanSequence = scanSequence,

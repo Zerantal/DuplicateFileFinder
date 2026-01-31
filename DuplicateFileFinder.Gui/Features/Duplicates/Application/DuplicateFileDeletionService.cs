@@ -27,7 +27,7 @@ public sealed class DuplicateFileDeletionService : IDuplicateFileDeletionService
     }
 
     public async Task<DuplicateFileDeletionResult> DeleteAsync(
-        long fileId,
+        FileId fileId,
         string fullPath,
         CancellationToken ct = default)
     {

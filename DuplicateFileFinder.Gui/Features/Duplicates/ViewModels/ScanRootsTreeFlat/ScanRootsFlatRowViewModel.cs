@@ -30,7 +30,7 @@ public sealed partial class ScanRootsFlatRowViewModel : ObservableObject
     public ScanRootsTreeNode Model { get; }
 
     public DirHandle Dir => Model.Dir;
-    public long ScanRootId => Model.ScanRootId;
+    public ScanRootId ScanRootId => Model.ScanRootId;
 
     public int Depth { get; }
 

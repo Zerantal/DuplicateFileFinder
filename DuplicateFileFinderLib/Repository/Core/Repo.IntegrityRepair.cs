@@ -119,7 +119,7 @@ public sealed partial class Repo
                 var canonicalRootPath = PathUtils.NormalizePath(run.RootPath);
 
                 // If we have a snapshot for this ScanRootId, attempt to pick a plausible root DirId.
-                long dirId = 0;
+                DirId dirId = 0;
                 if (_scanRootSnapshots.TryGetValue(run.ScanRootId, out var snap))
                 {
                     dirId = PickSnapshotRootDirId_NoLock(snap, canonicalRootPath);
@@ -155,7 +155,7 @@ public sealed partial class Repo
                 if (root.DirId > 0)
                     continue;
 
-                long dirId = 0;
+                DirId dirId = 0;
                 if (_scanRootSnapshots.TryGetValue(id, out var snap))
                 {
                     dirId = PickSnapshotRootDirId_NoLock(snap, root.RootPath);
@@ -202,7 +202,7 @@ public sealed partial class Repo
                 .GroupBy(r => r.ScanRootId)
                 .ToDictionary(g => g.Key, g => g.Count());
 
-            var newRoots = new Dictionary<long, ScanRoot>(_scanRoots.Count);
+            var newRoots = new Dictionary<ScanRootId, ScanRoot>(_scanRoots.Count);
             foreach (var (id, root) in _scanRoots)
             {
                 if (!root.IsDeleted &&
@@ -220,7 +220,7 @@ public sealed partial class Repo
                 _scanRoots = newRoots;
 
                 // also drop snapshots for removed roots
-                var newSnaps = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots.Count);
+                var newSnaps = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRootSnapshots.Count);
                 foreach (var (id, snap) in _scanRootSnapshots)
                 {
                     if (_scanRoots.ContainsKey(id))
@@ -242,8 +242,8 @@ public sealed partial class Repo
                 .ToList();
 
 
-            var canonical = new Dictionary<long, ScanRoot>();
-            var remap = new Dictionary<long, long>(); // oldRootId -> canonicalRootId
+            var canonical = new Dictionary<ScanRootId, ScanRoot>();
+            var remap = new Dictionary<ScanRootId, ScanRootId>(); // oldRootId -> canonicalRootId
 
             foreach (var grp in grouped)
             {
@@ -352,7 +352,7 @@ public sealed partial class Repo
     /// Prefers: a dir whose ParentDirId == -1 and name matches the leaf of rootPath.
     /// Falls back to: first dir with ParentDirId == -1.
     /// </summary>
-    private static long PickSnapshotRootDirId_NoLock(ScanRootSnapshotV2 snap, string rootPath)
+    private static DirId PickSnapshotRootDirId_NoLock(ScanRootSnapshotV2 snap, string rootPath)
     {
         if (snap.Dirs.Length == 0)
             return 0;
@@ -368,7 +368,7 @@ public sealed partial class Repo
 
         var leafName = Leaf(rootPath);
 
-        long firstRoot = 0;
+        DirId firstRoot = 0;
 
         foreach (var d in snap.Dirs)
         {

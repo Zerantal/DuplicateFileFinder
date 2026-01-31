@@ -129,19 +129,19 @@ public sealed class ScanRootsTreeNodeActions_DeleteFolderTests
         public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 
-        public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken)
+        public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
         public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
-        public Task RemoveScanRoot(long scanRootId)
+        public Task RemoveScanRoot(ScanRootId scanRootId)
             => Task.CompletedTask;
 
         public void CancelScan()
             => throw new NotImplementedException();
 
-        public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+        public Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName)
             => Task.CompletedTask;
     }
 }

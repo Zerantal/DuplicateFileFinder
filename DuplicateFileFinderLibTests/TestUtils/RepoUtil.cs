@@ -10,9 +10,9 @@ namespace DuplicateFileFinderLibTests.TestUtils;
 public static class RepoUtil
 {
     internal static RepoSnapshotView MakeSnapshotV2(
-        long scanRootId,
-        (string name, long parentDirId, long dirId)[] dirs,
-        (string name, long dirId, long fileId, long size)[] files)
+        ScanRootId scanRootId,
+        (string name, DirId parentDirId, DirId dirId)[] dirs,
+        (string name, DirId dirId, FileId fileId, long size)[] files)
     {
         return MakeSnapshotV2(scanRootId, dirs,
             files.Select(f => (
@@ -24,9 +24,9 @@ public static class RepoUtil
     }
 
     internal static RepoSnapshotView MakeSnapshotV2(
-        long scanRootId,
-        (string name, long parentDirId, long dirId)[] dirs,
-        (string name, long dirId, long fileId, long size, HashKey hash)[] files)
+        ScanRootId scanRootId,
+        (string name, DirId parentDirId, DirId dirId)[] dirs,
+        (string name, DirId dirId, FileId fileId, long size, HashKey hash)[] files)
     {
         // String pool layout:
         // [dir0.name][dir0.err][dir1.name][dir1.err]...[file0.name][file0.err]...
@@ -90,7 +90,7 @@ public static class RepoUtil
             Files = fileRecs
         };
 
-        var snapshots = new Dictionary<long, ScanRootSnapshotView>
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [scanRootId] = rootSnapshot
         };
@@ -106,35 +106,41 @@ public static class RepoUtil
     /// Builds a usable RepoSnapshotView.ScanRoots map from the provided snapshots.
     /// Suitable for plugin/unit-test scenarios where "deleted roots" are not being modeled.
     /// </summary>
-    internal static Dictionary<long, ScanRoot> MakeScanRootsFromSnapshots(
-        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
-        Func<long, bool>? isDeleted = null,
-        Func<long, long>? dirIdForRoot = null,
-        Func<long, string>? rootPathForRoot = null,
-        Func<long, string?>? volumePathForRoot = null,
-        Func<long, string?>? volumeLabelForRoot = null,
-        Func<long, string?>? displayNameForRoot = null)
+    internal static Dictionary<ScanRootId, ScanRoot> MakeScanRootsFromSnapshots(
+        IReadOnlyDictionary<ScanRootId, ScanRootSnapshotView> snapshots,
+        Func<DirId, bool>? isDeleted = null,
+        Func<ScanRootId, DirId>? dirIdForRoot = null,
+        Func<ScanRootId, string>? rootPathForRoot = null,
+        Func<ScanRootId, string?>? volumePathForRoot = null,
+        Func<ScanRootId, string?>? volumeLabelForRoot = null,
+        Func<ScanRootId, string?>? displayNameForRoot = null)
     {
-        var dict = new Dictionary<long, ScanRoot>(snapshots.Count);
+        var dict = new Dictionary<ScanRootId, ScanRoot>(snapshots.Count);
 
         foreach (var (rootId, snapshot) in snapshots)
         {
+            // Default: not deleted
             var deleted = isDeleted?.Invoke(rootId) ?? false;
 
-            // Default: choose the first dir as the scan-root dir, if present.
+            // Default: use first dir's DirId as the scan-root dirId if present
             var dirId = dirIdForRoot?.Invoke(rootId)
-                       ?? (snapshot.Dirs.Count > 0 ? snapshot.Dirs[0].DirId : 0);
+                        ?? (snapshot.Dirs.Count > 0 ? snapshot.Dirs[0].DirId : -1);
+
+            var rootPath = rootPathForRoot?.Invoke(rootId) ?? $"root-{rootId}";
+            var volPath = volumePathForRoot?.Invoke(rootId);
+            var volLabel = volumeLabelForRoot?.Invoke(rootId);
+            var displayName = displayNameForRoot?.Invoke(rootId);
 
             dict[rootId] = new ScanRoot
             {
                 RootId = rootId,
                 DirId = dirId,
-                RootPath = rootPathForRoot?.Invoke(rootId) ?? $"root-{rootId}",
-                VolumePath = volumePathForRoot?.Invoke(rootId),
-                VolumeLabel = volumeLabelForRoot?.Invoke(rootId),
-                DisplayName = displayNameForRoot?.Invoke(rootId),
+                RootPath = rootPath,
+                VolumePath = volPath,
+                VolumeLabel = volLabel,
+                DisplayName = displayName,
                 IsDeleted = deleted,
-                CreatedAt = DateTimeOffset.UtcNow
+                CreatedAt = default
             };
         }
 

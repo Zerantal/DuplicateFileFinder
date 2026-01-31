@@ -22,7 +22,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
 
     // dirId (of scanroot dir) -> scanroot display info
-    private Dictionary<long, ScanRootViewEntry> _scanRootByDirId = new();
+    private Dictionary<DirId, ScanRootViewEntry> _scanRootByDirId = new();
 
     private RepoSnapshotView? _snapshot;
 
@@ -91,7 +91,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     public bool TryGetNode(DirHandle dirHandle, out ScanRootsTreeNode node)
         => _nodesByDirHandle.TryGetValue(dirHandle, out node!);
 
-    public bool TryGetDirHandle(long dirId, out DirHandle handle)
+    public bool TryGetDirHandle(DirId dirId, out DirHandle handle)
         => _mainIndex.TryGetDir(dirId, out handle);
 
     public bool TryGetParentDirHandle(FileHandle fileHandle, out DirHandle parentDirHandle)
@@ -278,10 +278,10 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     // ---------------------------------------------------------------------
 
     private ScanRootsTreeNode CreateRootNodeModel(
-        long rootDirId,
+        DirId rootDirId,
         string label,
         string fullPath,
-        long scanRootId,
+        ScanRootId scanRootId,
         bool hasCheckpoint,
         out DirHandle rootHandle)
     {
@@ -324,7 +324,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     private static ScanRootsTreeNode CreatePlaceholderRootNodeModel(
         string label,
         string fullPath,
-        long scanRootId,
+        ScanRootId scanRootId,
         bool hasCheckpoint)
     {
         // Placeholder: Dir invalid, no stats, no children.
@@ -346,7 +346,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         DirHandle dirHandle,
         string parentPath,
         long scanRootTotalBytes,
-        long scanRootId)
+        ScanRootId scanRootId)
     {
         if (_snapshot is null)
             throw new InvalidOperationException("Build must be called first.");
@@ -387,7 +387,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     // Scan root labeling / status
     // ---------------------------------------------------------------------
 
-    private string GetScanRootLabel(long rootDirId)
+    private string GetScanRootLabel(DirId rootDirId)
     {
         var fullPath = GetScanRootFullPath(rootDirId);
 
@@ -403,7 +403,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         return fullPath;
     }
 
-    private string GetScanRootFullPath(long rootDirId)
+    private string GetScanRootFullPath(DirId rootDirId)
     {
         if (_scanRootByDirId.TryGetValue(rootDirId, out var sr))
         {

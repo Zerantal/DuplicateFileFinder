@@ -11,7 +11,7 @@ internal sealed partial class ScanCheckpoint
 
     [MemoryPackOrder(0)] public int CheckpointVersion { get; init; } = CurrentCheckpointVersion;
 
-    [MemoryPackOrder(1)] public long ScanRootId { get; init; }
+    [MemoryPackOrder(1)] public ScanRootId ScanRootId { get; init; }
     [MemoryPackOrder(2)] public long ScanSequence { get; init; } // run sequence that wrote this checkpoint
     [MemoryPackOrder(3)] public required string RootPath { get; init; }
 
@@ -26,5 +26,5 @@ internal sealed partial class ScanCheckpoint
 
 [MemoryPackable(SerializeLayout.Sequential)]
 public readonly partial record struct PendingDir(
-    long DirId,
+    DirId DirId,
     string FullPath);

@@ -1,4 +1,4 @@
-// DuplicateFileFinderLibTests/Repository/Plugins/Models/SegmentedIdMapTests.cs
+// DuplicateFileFinderLibTests/Repository/Plugins/Models/SegmentedLongMapTests.cs
 
 using System;
 using System.Collections.Generic;
@@ -13,12 +13,12 @@ using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins.Models;
 
-public sealed class SegmentedIdMapTests
+public sealed class SegmentedLongMapTests
 {
     [Fact]
     public void Empty_TryGetValue_ReturnsFalse()
     {
-        var map = SegmentedIdMap<DirHandle>.Empty;
+        var map = SegmentedLongMap<DirHandle>.Empty;
 
         Assert.False(map.TryGetValue(123, out _));
         Assert.False(map.TryGetValue(-1, out _));
@@ -34,7 +34,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, DirHandle>(42, new DirHandle(5, 7))
         };
 
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.Equal(1, map.SegmentCount);
         Assert.True(map.TryGetValue(42, out var v));
@@ -58,7 +58,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, DirHandle>(10, new DirHandle(1, 2)),
         };
 
-        Assert.Throws<InvalidOperationException>(() => SegmentedIdMap<DirHandle>.Build(items));
+        Assert.Throws<InvalidOperationException>(() => SegmentedLongMap<DirHandle>.Build(items));
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, FileHandle>(50,  new FileHandle(8, 3)),
         };
 
-        var map = SegmentedIdMap<FileHandle>.Build(items, gapThreshold: 1000);
+        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold: 1000);
 
         Assert.True(map.TryGetValue(1, out var v1));
         Assert.Equal(new FileHandle(8, 2), v1);
@@ -97,7 +97,7 @@ public sealed class SegmentedIdMapTests
         };
 
         // With gapThreshold=5, 10->20 gap=10 => split; 20->200 gap=180 => split
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 5);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 5);
 
         Assert.Equal(3, map.SegmentCount);
 
@@ -116,7 +116,7 @@ public sealed class SegmentedIdMapTests
         };
 
         // gapThreshold >=2 keeps in one segment spanning [10..12]
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 2);
 
         Assert.Equal(1, map.SegmentCount);
 
@@ -139,7 +139,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, DirHandle>(101, new DirHandle(1, 2)),
         };
 
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.False(map.TryGetValue(99, out _));
         Assert.True(map.TryGetValue(100, out _));
@@ -154,7 +154,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, DirHandle>(101, new DirHandle(1, 2)),
         };
 
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.False(map.TryGetValue(102, out _));
     }
@@ -170,7 +170,7 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, FileHandle>(200, new FileHandle(9, 4)),
         };
 
-        var map = SegmentedIdMap<FileHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold: 2);
 
         var enumerated = map.Enumerate().ToArray();
 
@@ -196,7 +196,7 @@ public sealed class SegmentedIdMapTests
             [100] = new DirHandle(1, 100),
         };
 
-        var map = SegmentedIdMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);
+        var map = SegmentedLongMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);
 
         foreach (var (k, v) in dict)
         {
@@ -217,11 +217,11 @@ public sealed class SegmentedIdMapTests
             new KeyValuePair<long, DirHandle>(200, new DirHandle(5, 200)),
         };
 
-        var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 2);
         Assert.True(map.SegmentCount >= 1);
 
         var bytes = MemoryPackSerializer.Serialize(map);
-        var clone = MemoryPackSerializer.Deserialize<SegmentedIdMap<DirHandle>>(bytes);
+        var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<DirHandle>>(bytes);
 
         Assert.NotNull(clone);
         Assert.Equal(map.SegmentCount, clone.SegmentCount);
@@ -256,7 +256,7 @@ public sealed class SegmentedIdMapTests
         for (long i = 5000; i < 5100; i++) items.Add(new(i, new FileHandle(2, (int)(i - 5000))));
         items.Add(new(9999, new FileHandle(3, 9)));
 
-        var map = SegmentedIdMap<FileHandle>.Build(items, gapThreshold);
+        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold);
 
         // All keys present
         foreach (var (k, v) in items)
@@ -323,7 +323,7 @@ public sealed class SegmentedIdMapTests
 
             foreach (var gapThreshold in thresholds)
             {
-                var map = SegmentedIdMap<DirHandle>.Build(items, gapThreshold);
+                var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold);
 
                 // 1) Every input key must be retrievable with exact value.
                 foreach (var (k, v) in items)
@@ -376,7 +376,7 @@ public sealed class SegmentedIdMapTests
 
                 // 4) MemoryPack round-trip should preserve behavior (lookup + enumeration).
                 var bytes = MemoryPackSerializer.Serialize(map);
-                var clone = MemoryPackSerializer.Deserialize<SegmentedIdMap<DirHandle>>(bytes);
+                var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<DirHandle>>(bytes);
                 Assert.NotNull(clone);
 
                 foreach (var (k, v) in items)
@@ -423,7 +423,7 @@ public sealed class SegmentedIdMapTests
 
         foreach (var gapThreshold in thresholds)
         {
-            var map = SegmentedIdMap<FileHandle>.Build(items, gapThreshold);
+            var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold);
 
             // All present
             foreach (var (k, v) in items)
@@ -447,7 +447,7 @@ public sealed class SegmentedIdMapTests
 
             // MemoryPack roundtrip
             var bytes = MemoryPackSerializer.Serialize(map);
-            var clone = MemoryPackSerializer.Deserialize<SegmentedIdMap<FileHandle>>(bytes);
+            var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<FileHandle>>(bytes);
             Assert.NotNull(clone);
 
             foreach (var (k, v) in items)
@@ -463,7 +463,7 @@ public sealed class SegmentedIdMapTests
             long start,
             int length,
             int holeEvery,
-            long scanRootId)
+            ScanRootId scanRootId)
         {
             for (int i = 0; i < length; i++)
             {

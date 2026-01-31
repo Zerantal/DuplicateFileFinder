@@ -12,8 +12,8 @@ public partial record RepoMeta
     [MemoryPackOrder(6)] public required string RepoPath { get; init; }
     [MemoryPackOrder(7)] public required string RepoHostName { get; init; }
     [MemoryPackOrder(8)] public required long NextScanSequence { get; init; } = 1;
-    [MemoryPackOrder(8)] public long NextScanRootId { get; init; } = 1;
-    [MemoryPackOrder(10)] public long NextDirId { get; init; } = 1;
-    [MemoryPackOrder(11)] public long NextFileId { get; init; } = 1;
+    [MemoryPackOrder(8)] public ScanRootId NextScanRootId { get; init; } = 1;
+    [MemoryPackOrder(10)] public DirId NextDirId { get; init; } = 1;
+    [MemoryPackOrder(11)] public FileId NextFileId { get; init; } = 1;
 
 }

@@ -11,9 +11,9 @@ public sealed class FakeDuplicateFileDeletionService : IDuplicateFileDeletionSer
     public DuplicateFileDeletionResult NextResult { get; set; } =
         new(false, DuplicateFileDeletionFailure.CancelledByUser);
 
-    public List<(long FileId, string FullPath)> Calls { get; } = [];
+    public List<(FileId FileId, string FullPath)> Calls { get; } = [];
 
-    public Task<DuplicateFileDeletionResult> DeleteAsync(long fileId, string fullPath, CancellationToken ct)
+    public Task<DuplicateFileDeletionResult> DeleteAsync(FileId fileId, string fullPath, CancellationToken ct)
     {
         Calls.Add((fileId, fullPath));
         return Task.FromResult(NextResult);

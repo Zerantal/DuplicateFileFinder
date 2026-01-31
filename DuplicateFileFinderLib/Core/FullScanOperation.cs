@@ -28,7 +28,7 @@ internal sealed class FullScanOperation(
         => ExecuteAsync(rootPath, new ScanOptions(), progress, ct);
 
     public Task ExecuteAsync(
-        long scanRootId,
+        ScanRootId scanRootId,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct) =>
         ExecuteAsync(scanRootId, new ScanOptions(), progress, ct);
@@ -67,7 +67,7 @@ internal sealed class FullScanOperation(
 
     // Location re-scanning
     private async Task ExecuteAsync(
-        long scanRootId,
+        ScanRootId scanRootId,
         ScanOptions options,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct)
@@ -344,7 +344,7 @@ internal sealed class FullScanOperation(
         return PathUtils.NormalizePath(p);
     }
 
-    private static (long dirId, string fullPath) ResolveStartDir(
+    private static (DirId dirId, string fullPath) ResolveStartDir(
         string rootPath,
         ScanRootSnapshotView snap,
         int dirIndex)
@@ -352,7 +352,7 @@ internal sealed class FullScanOperation(
         if (dirIndex < 0 || dirIndex >= snap.Dirs.Count)
             throw new ArgumentOutOfRangeException(nameof(dirIndex));
 
-        var byId = new Dictionary<long, int>(snap.Dirs.Count);
+        var byId = new Dictionary<DirId, int>(snap.Dirs.Count);
         for (var i = 0; i < snap.Dirs.Count; i++)
             byId[snap.Dirs[i].DirId] = i;
 

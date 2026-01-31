@@ -59,12 +59,12 @@ public sealed class DirectoryComparatorTests
     [Fact]
     public void TryConsumeExpectedDirId_RemovesAndReturnsId_WhenPresent()
     {
-        var expectedDirs = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedDirs = new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal)
         {
-            ["A"] = (1, "A", ScanEntryStatus.Enumerated, 10),
+            ["A"] = new BaseLineDirMapValue(1, "A", ScanEntryStatus.Enumerated, 10),
         };
 
-        var expectedFiles = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal);
+        var expectedFiles = new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal);
 
         var ctx = new DirEnumerationContext(parentDirId: 42, expectedDirs, expectedFiles);
         var comp = new DirectoryComparator(baseline: new BaselineIndex(view: null));
@@ -78,11 +78,11 @@ public sealed class DirectoryComparatorTests
     [Fact]
     public void TryConsumeExpectedFileId_RemovesAndReturnsId_WhenPresent()
     {
-        var expectedDirs = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal);
+        var expectedDirs = new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal);
 
-        var expectedFiles = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedFiles = new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)
         {
-            ["b.txt"] = (2, "b.txt", ScanEntryStatus.Enumerated, 10),
+            ["b.txt"] = new BaseLineFileMapValue(2, "b.txt", ScanEntryStatus.Enumerated, 10),
         };
 
         var ctx = new DirEnumerationContext(parentDirId: 42, expectedDirs, expectedFiles);
@@ -97,15 +97,15 @@ public sealed class DirectoryComparatorTests
     [Fact]
     public void ConsumeRemainingExpected_ReturnsRemainingValues()
     {
-        var expectedDirs = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedDirs = new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal)
         {
-            ["D1"] = (101, "D1", ScanEntryStatus.Enumerated, 1),
-            ["D2"] = (102, "D2", ScanEntryStatus.Enumerated, 2),
+            ["D1"] = new(101, "D1", ScanEntryStatus.Enumerated, 1),
+            ["D2"] = new(102, "D2", ScanEntryStatus.Enumerated, 2),
         };
 
-        var expectedFiles = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedFiles = new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)
         {
-            ["F1"] = (201, "F1", ScanEntryStatus.Enumerated, 3),
+            ["F1"] = new(201, "F1", ScanEntryStatus.Enumerated, 3),
         };
 
         var ctx = new DirEnumerationContext(parentDirId: 50, expectedDirs, expectedFiles);
@@ -121,14 +121,14 @@ public sealed class DirectoryComparatorTests
     [Fact]
     public void Clear_EmptiesContext()
     {
-        var expectedDirs = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedDirs = new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal)
         {
-            ["A"] = (1, "A", ScanEntryStatus.Enumerated, 1),
+            ["A"] = new(1, "A", ScanEntryStatus.Enumerated, 1),
         };
 
-        var expectedFiles = new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(StringComparer.Ordinal)
+        var expectedFiles = new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)
         {
-            ["b.txt"] = (2, "b.txt", ScanEntryStatus.Enumerated, 1),
+            ["b.txt"] = new(2, "b.txt", ScanEntryStatus.Enumerated, 1),
         };
 
         var ctx = new DirEnumerationContext(parentDirId: 7, expectedDirs, expectedFiles);

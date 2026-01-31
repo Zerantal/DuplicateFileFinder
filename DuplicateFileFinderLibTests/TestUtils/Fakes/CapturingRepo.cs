@@ -25,12 +25,12 @@ internal sealed class CapturingRepo : IRepoInternal
 
     public long NextRunId { get; set; } = 1;
 
-    public long NextDirId { get; set; } = 1;
+    public DirId NextDirId { get; set; } = 1;
 
-    public long NextFileId { get; set; } = 1;
-    public long NextScanRootId { get; set; } = 1;
+    public FileId NextFileId { get; set; } = 1;
+    public ScanRootId NextScanRootId { get; set; } = 1;
 
-    public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
+    public Task DeleteScanCheckpointAsync(ScanRootId scanRootId, CancellationToken ct = default)
     {
         _methodCounter.IncrementMethodCalCount();
         return Task.CompletedTask;
@@ -74,7 +74,7 @@ internal sealed class CapturingRepo : IRepoInternal
         });
     }
 
-    Task<ScanContext> IRepoInternal.BeginRescanAsync(long scanRootId, ScanOptions options, VolumeInfo? volumeInfo,
+    Task<ScanContext> IRepoInternal.BeginRescanAsync(ScanRootId scanRootId, ScanOptions options, VolumeInfo? volumeInfo,
         CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
@@ -104,7 +104,7 @@ internal sealed class CapturingRepo : IRepoInternal
         });
     }
 
-    public Task<ScanContext> BeginSubtreeScanAsync(long scanRootId, ScanOptions options,
+    public Task<ScanContext> BeginSubtreeScanAsync(ScanRootId scanRootId, ScanOptions options,
         VolumeInfo? volumeInfo = null,
         CancellationToken ct = default)
     {
@@ -146,7 +146,7 @@ internal sealed class CapturingRepo : IRepoInternal
         return ValueTask.CompletedTask;
     }
 
-    public Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default)
+    public Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct = default)
     {
         _methodCounter.IncrementMethodCalCount();
         return Task.CompletedTask;
@@ -155,7 +155,7 @@ internal sealed class CapturingRepo : IRepoInternal
     public IReadOnlyList<ScanRun> ScanRunsView => [];
     public IReadOnlyList<ScanRoot> ScanRootsView => [];
 
-    public ScanRootSnapshotView? TryGetScanRootView(long scanRootId)
+    public ScanRootSnapshotView? TryGetScanRootView(ScanRootId scanRootId)
     {
         return BaselineView;
     }
@@ -165,7 +165,7 @@ internal sealed class CapturingRepo : IRepoInternal
         throw new NotSupportedException();
     }
 
-    public bool HasScanCheckpoint(long scanRootId)
+    public bool HasScanCheckpoint(ScanRootId scanRootId)
     {
         _methodCounter.IncrementMethodCalCount();
         return false;
@@ -183,7 +183,7 @@ internal sealed class CapturingRepo : IRepoInternal
         return Task.FromResult(new DeleteResult());
     }
 
-    public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
+    public Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
 
@@ -192,9 +192,9 @@ internal sealed class CapturingRepo : IRepoInternal
 
     public long AllocateRunId() => NextRunId++;
 
-    public long AllocateDirId() => NextDirId++;
+    public DirId AllocateDirId() => NextDirId++;
 
-    public long AllocateFileId() => NextFileId++;
+    public FileId AllocateFileId() => NextFileId++;
 
     Task IRepoInternal.MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct)
     {

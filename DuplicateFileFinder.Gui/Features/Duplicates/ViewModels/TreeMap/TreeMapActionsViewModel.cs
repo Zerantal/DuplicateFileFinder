@@ -18,7 +18,7 @@ public partial class TreeMapActionsViewModel : ObservableObject
     private readonly IDialogService _dialogs;
     private readonly IFileSystemDeleteService _deleter;
 
-    private Dictionary<long, string> _scanRootFullPathById = new();
+    private Dictionary<ScanRootId, string> _scanRootFullPathById = new();
 
     public TreeMapActionsViewModel(
         IRepoHost host,

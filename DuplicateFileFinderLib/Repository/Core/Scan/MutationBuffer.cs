@@ -19,7 +19,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
     // Reused buffer to avoid allocations when draining
     private Buffer _drain = new();
 
-    public long UpsertDir(in DirScanInput input)
+    public DirId UpsertDir(in DirScanInput input)
     {
         lock (Sync)
         {
@@ -43,7 +43,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         }
     }
 
-    public void ApplyFileHash(long dirId, string name, HashKey hash)
+    public void ApplyFileHash(DirId dirId, string name, HashKey hash)
     {
         lock (Sync)
         {
@@ -72,7 +72,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         }
     }
 
-    public void ApplyFileError(long dirId, string name, string errorMessage)
+    public void ApplyFileError(DirId dirId, string name, string errorMessage)
     {
         lock (Sync)
         {
@@ -101,7 +101,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         }
     }
 
-    internal ScanRootSnapshotV2 BuildSnapshotV2(long scanRootId)
+    internal ScanRootSnapshotV2 BuildSnapshotV2(ScanRootId scanRootId)
     {
         lock (Sync)
         {
@@ -113,7 +113,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
     /// Drains only the delta buffer (changes since last checkpoint).
     /// This MUST NOT affect the full buffer used to build the final snapshot.
     /// </summary>
-    internal ScanRootSnapshotV2 DrainCheckpointSnapshot(long scanRootId)
+    internal ScanRootSnapshotV2 DrainCheckpointSnapshot(ScanRootId scanRootId)
     {
         lock (Sync)
         {
@@ -145,7 +145,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         b.Sb.Reset();
     }
 
-    private static ScanRootSnapshotV2 BuildSnapshotFrom(Buffer b, long scanRootId)
+    private static ScanRootSnapshotV2 BuildSnapshotFrom(Buffer b, ScanRootId scanRootId)
         => new()
         {
             ScanRootId = scanRootId,
@@ -154,7 +154,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
             Files = b.Files.Where(f => f.Status != ScanEntryStatus.None).ToArray()
         };
 
-    private void UpsertDirInto(Buffer b, in DirScanInput input, long dirId)
+    private void UpsertDirInto(Buffer b, in DirScanInput input, DirId dirId)
     {
         var rec = new DirRecordV2
         {
@@ -179,7 +179,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         b.DirIdToIndex.Add(dirId, idx);
     }
 
-    private void UpsertFileInto(Buffer b, in FileScanInput input, long fileId)
+    private void UpsertFileInto(Buffer b, in FileScanInput input, FileId fileId)
     {
         // Build a candidate record from the new observation.
         var rec = new FileRecordV2
@@ -311,13 +311,13 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         return incoming;
     }
 
-    private void EnsureDeltaFileExists(long dirId, string name)
+    private void EnsureDeltaFileExists(DirId dirId, string name)
     {
         if (_delta.FileKeyToIndex.ContainsKey((dirId, name)))
             return;
 
         // If full has the record, copy numeric fields; otherwise use defaults.
-        long fileId = -1;
+        FileId fileId = -1;
         long size = 0;
         long created = 0;
         long modified = 0;
@@ -361,7 +361,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         _delta.FileKeyToIndex[(dirId, name)] = idx;
     }
 
-    private static bool TryUpdateFileHashInBuffer(Buffer b, long dirId, string name, HashKey hash)
+    private static bool TryUpdateFileHashInBuffer(Buffer b, DirId dirId, string name, HashKey hash)
     {
         if (!b.FileKeyToIndex.TryGetValue((dirId, name), out var idx))
             return false;
@@ -375,7 +375,7 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         return true;
     }
 
-    private static bool TryUpdateFileErrorInBuffer(Buffer b, long dirId, string name, string errorMessage)
+    private static bool TryUpdateFileErrorInBuffer(Buffer b, DirId dirId, string name, string errorMessage)
     {
         if (!b.FileKeyToIndex.TryGetValue((dirId, name), out var idx))
             return false;
@@ -389,12 +389,12 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         return true;
     }
 
-    private sealed class FileKeyComparer : IEqualityComparer<(long dirId, string name)>
+    private sealed class FileKeyComparer : IEqualityComparer<(DirId dirId, string name)>
     {
-        public bool Equals((long dirId, string name) x, (long dirId, string name) y)
+        public bool Equals((DirId dirId, string name) x, (DirId dirId, string name) y)
             => x.dirId == y.dirId && PathUtils.PathComparer.Equals(x.name, y.name);
 
-        public int GetHashCode((long dirId, string name) obj)
+        public int GetHashCode((DirId dirId, string name) obj)
             => HashCode.Combine(obj.dirId, PathUtils.PathComparer.GetHashCode(obj.name));
     }
 
@@ -406,9 +406,9 @@ internal sealed class MutationBuffer(IRepoInternal repo, long scanSequence)
         public readonly List<DirRecordV2> Dirs = new();
         public readonly List<FileRecordV2> Files = new();
 
-        public readonly Dictionary<long, int> DirIdToIndex = new();
-        public readonly Dictionary<long, int> FileIdToIndex = new();
-        public readonly Dictionary<(long dirId, string name), int> FileKeyToIndex =
+        public readonly Dictionary<DirId, int> DirIdToIndex = new();
+        public readonly Dictionary<FileId, int> FileIdToIndex = new();
+        public readonly Dictionary<(DirId dirId, string name), int> FileKeyToIndex =
             new(new FileKeyComparer());
     }
 }

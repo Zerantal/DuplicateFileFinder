@@ -8,8 +8,8 @@ namespace DuplicateFileFinderLib.Repository.Storage.Models;
 // ReSharper disable once RedundantExtendsListEntry
 public readonly partial record struct FileRecordV2() : IEquatable<FileRecordV2>
 {
-    public long FileId { get; init; } = -1;
-    public long DirId { get; init; } = -1;
+    public FileId FileId { get; init; } = -1;
+    public DirId DirId { get; init; } = -1;
     public int NameStrIdx { get; init; } = -1;
     public long Size { get; init; } = 0;
     public HashKey Hash { get; init; } = HashKey.NotComputed;

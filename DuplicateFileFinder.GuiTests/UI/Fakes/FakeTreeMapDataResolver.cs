@@ -17,7 +17,7 @@ public sealed class FakeTreeMapDataResolver : ITreeMapDataResolver
     public FileRecordV2 GetFileRecord(FileHandle file)
         => new() { FileId = 200 + file.Index, DirId = 1, Status = ScanEntryStatus.Enumerated };
 
-    public string GetRelativePath(long dirId) => $"rel/{dirId}";
+    public string GetRelativePath(DirId dirId) => $"rel/{dirId}";
 
     public DirAggregateStats GetDirStats(DirHandle dir) => new DirAggregateStats
     {

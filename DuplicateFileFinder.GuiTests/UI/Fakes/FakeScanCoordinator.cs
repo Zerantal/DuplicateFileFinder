@@ -17,7 +17,7 @@ public sealed class FakeScanCoordinator : IScanCoordinator
 {
     public List<DirHandle> RescannedFolders { get; } = [];
 
-    public readonly List<(long ScanRootId, string? DisplayName)> DisplayNameUpdates = [];
+    public readonly List<(ScanRootId ScanRootId, string? DisplayName)> DisplayNameUpdates = [];
 
     public Task RunFolderRescanWithDialogAsync(DirHandle dir)
     {
@@ -31,7 +31,7 @@ public sealed class FakeScanCoordinator : IScanCoordinator
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
         => throw new NotImplementedException();
 
-    public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken)
+    public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken)
         => throw new NotImplementedException();
 
     public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken)
@@ -40,11 +40,11 @@ public sealed class FakeScanCoordinator : IScanCoordinator
         return Task.CompletedTask;
     }
 
-    public Task RemoveScanRoot(long scanRootId) => throw new NotImplementedException();
+    public Task RemoveScanRoot(ScanRootId scanRootId) => throw new NotImplementedException();
 
     public void CancelScan() => throw new NotImplementedException();
 
-    public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+    public Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName)
     {
         DisplayNameUpdates.Add((scanRootId, displayName));
         return Task.CompletedTask;

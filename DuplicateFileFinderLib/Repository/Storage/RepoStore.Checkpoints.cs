@@ -25,7 +25,7 @@ internal static partial class RepoStore
             CultureInfo.InvariantCulture,
             $"{checkpoint.ScanRootId}.{checkpoint.CreatedAtUtcTicks:D19}.{checkpoint.ScanSequence}.checkpoint.mpk");
 
-    public static bool HasScanCheckpoint(string repoPath, long scanRootId)
+    public static bool HasScanCheckpoint(string repoPath, ScanRootId scanRootId)
     {
         var dir = GetCheckpointDir(repoPath);
         if (!Directory.Exists(dir))
@@ -119,7 +119,7 @@ internal static partial class RepoStore
 
     public static async Task DeleteScanCheckpointAsync(
         string repoPath,
-        long scanRootId,
+        ScanRootId scanRootId,
         CancellationToken ct = default)
     {
         var dir = GetCheckpointDir(repoPath);

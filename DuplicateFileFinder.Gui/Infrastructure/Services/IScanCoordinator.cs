@@ -20,7 +20,7 @@ public interface IScanCoordinator
 
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken = default);
 
-    public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken = default);
+    public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rescans a specific directory within a scan root (including the root itself).
@@ -28,9 +28,9 @@ public interface IScanCoordinator
     /// </summary>
     public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken = default);
 
-    public Task RemoveScanRoot(long scanRootId);
+    public Task RemoveScanRoot(ScanRootId scanRootId);
 
     public void CancelScan();
 
-    Task SetScanRootDisplayName(long scanRootId, string? displayName);
+    Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName);
 }

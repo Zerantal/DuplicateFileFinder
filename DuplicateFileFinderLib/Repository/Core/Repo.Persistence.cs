@@ -73,7 +73,7 @@ public sealed partial class Repo
             SchemaVersion = RepoSchemaVersion
         };
 
-        var scanRoots = new Dictionary<long, ScanRoot>(metaFile.ScanRoots.Count);
+        var scanRoots = new Dictionary<ScanRootId, ScanRoot>(metaFile.ScanRoots.Count);
         foreach (var root in metaFile.ScanRoots)
             scanRoots[root.RootId] = root;
         _scanRoots = scanRoots;
@@ -90,7 +90,7 @@ public sealed partial class Repo
     private async Task InitialiseStateFromStoreAsync(CancellationToken ct)
     {
         // Load per-root snapshots into a fresh dictionary, then assign once.
-        var snaps = new Dictionary<long, ScanRootSnapshotV2>(_scanRoots.Count);
+        var snaps = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRoots.Count);
 
         foreach (var root in _scanRoots.Values)
         {

@@ -29,13 +29,13 @@ internal sealed partial record RootTreeIndexState
     public required FileHandle[] ChildFilesPool { get; init; }
 
     // Keyed by DirHandle.Index (per root) -> slice into the corresponding pool.
-    public required SegmentedIdMap<Slice> ChildDirSliceByDirIndex { get; init; }
-    public required SegmentedIdMap<Slice> ChildFileSliceByDirIndex { get; init; }
+    public required SegmentedLongMap<Slice> ChildDirSliceByDirIndex { get; init; }
+    public required SegmentedLongMap<Slice> ChildFileSliceByDirIndex { get; init; }
 
-    public required SegmentedIdMap<DirAggregateStats> StatsByDirIndex { get; init; }
+    public required SegmentedLongMap<DirAggregateStats> StatsByDirIndex { get; init; }
 
     // keyed by DirHandle.Index -> subtree preorder interval
-    public required SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex { get; init; }
+    public required SegmentedLongMap<SubtreeRange> SubtreeRangeByDirIndex { get; init; }
 
     // per-file (FileHandle.Index) -> preorder of parent directory (or -1 if unknown)
     public required int[] DirPreorderByFileIndex { get; init; }

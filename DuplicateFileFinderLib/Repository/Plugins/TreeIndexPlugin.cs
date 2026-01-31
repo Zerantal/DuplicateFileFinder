@@ -187,10 +187,10 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         using (TimingLog.StartPhase("Rebuilding TreeIndex"))
         {
-            var liveRootIds = new HashSet<long>(
+            var liveRootIds = new HashSet<ScanRootId>(
                 repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
 
-            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(capacity: liveRootIds.Count);
+            var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(capacity: liveRootIds.Count);
             foreach (var (rootId, snap) in repoSnapshot.Snapshots)
                 if (liveRootIds.Contains(rootId))
                     liveSnapshots[rootId] = snap;
@@ -307,12 +307,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
 
                 var childDirSliceMap = childDirSlices.Length == 0
-                    ? SegmentedIdMap<Slice>.Empty
-                    : SegmentedIdMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
+                    ? SegmentedLongMap<Slice>.Empty
+                    : SegmentedLongMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
 
                 var childFileSliceMap = childFileSlices.Length == 0
-                    ? SegmentedIdMap<Slice>.Empty
-                    : SegmentedIdMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
+                    ? SegmentedLongMap<Slice>.Empty
+                    : SegmentedLongMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
 
                 var statsMap = ComputeRootDirStats(
                     scanRootId: rootId,
@@ -346,7 +346,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
     }
 
-    private static (SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
+    private static (SegmentedLongMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
         ScanRootSnapshotView snapshot,
         IReadOnlyList<int> rootDirIndices,
         Dictionary<int, List<DirHandle>> childrenDirsTmp,
@@ -422,8 +422,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
 
         var subtreeRangeMap = rangeItems.Count == 0
-            ? SegmentedIdMap<SubtreeRange>.Empty
-            : SegmentedIdMap<SubtreeRange>.Build(rangeItems.ToArray(), gapThreshold: SegmentGapThreshold);
+            ? SegmentedLongMap<SubtreeRange>.Empty
+            : SegmentedLongMap<SubtreeRange>.Build(rangeItems.ToArray(), gapThreshold: SegmentGapThreshold);
 
         // Per-file mapping: fileIndex -> preorder(parent dir), or -1
         var dirPreorderByFileIndex = new int[snapshot.Files.Count];
@@ -452,7 +452,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         Dictionary<int, List<T>> tmp)
     {
         if (tmp.Count == 0)
-            return (Array.Empty<T>(), Array.Empty<KeyValuePair<long, Slice>>());
+            return ([], []);
 
         // Deterministic ordering to keep state stable across rebuilds.
         var keys = tmp.Keys.ToArray();
@@ -463,7 +463,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         for (int i = 0; i < keys.Length; i++)
             total += tmp[keys[i]].Count;
 
-        var pool = total == 0 ? Array.Empty<T>() : new T[total];
+        var pool = total == 0 ? [] : new T[total];
         var sliceItems = new KeyValuePair<long, Slice>[keys.Length];
 
         int write = 0;
@@ -493,13 +493,13 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         return (pool, sliceItems);
     }
 
-    private static SegmentedIdMap<DirAggregateStats> ComputeRootDirStats(
+    private static SegmentedLongMap<DirAggregateStats> ComputeRootDirStats(
         long scanRootId,
         ScanRootSnapshotView snapshot,
         DirHandle[] childDirsPool,
-        SegmentedIdMap<Slice> childDirSliceByDirIndex,
+        SegmentedLongMap<Slice> childDirSliceByDirIndex,
         FileHandle[] childFilesPool,
-        SegmentedIdMap<Slice> childFileSliceByDirIndex,
+        SegmentedLongMap<Slice> childFileSliceByDirIndex,
         IReadOnlyList<int> rootDirIndices,
         Dictionary<HashKey, int> globalHashCounts)
     {
@@ -591,14 +591,14 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             _ = Dfs(rootDirIndices[i]);
 
         if (memo.Count == 0)
-            return SegmentedIdMap<DirAggregateStats>.Empty;
+            return SegmentedLongMap<DirAggregateStats>.Empty;
 
         var items = new KeyValuePair<long, DirAggregateStats>[memo.Count];
         int w = 0;
         foreach (var (dirIndex, stats) in memo)
             items[w++] = new KeyValuePair<long, DirAggregateStats>(dirIndex, stats);
 
-        return SegmentedIdMap<DirAggregateStats>.Build(items);
+        return SegmentedLongMap<DirAggregateStats>.Build(items);
     }
 
     // ---------------------------------------------------------------------

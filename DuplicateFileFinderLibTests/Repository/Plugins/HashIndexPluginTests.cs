@@ -61,7 +61,7 @@ public sealed class HashIndexPluginTests
             RepoSnapshotView = snapshot
         };
 
-    private static RepoEvent MakeSnapshotReplacedEvent(long gen, long scanRootId, RepoSnapshotView snapshot)
+    private static RepoEvent MakeSnapshotReplacedEvent(long gen, ScanRootId scanRootId, RepoSnapshotView snapshot)
         => new ScanRootSnapshotReplacedEvent
         {
             Generation = gen,
@@ -70,18 +70,18 @@ public sealed class HashIndexPluginTests
             Reason = RepoSnapshotCommitReason.ScanCompleted
         };
 
-    private static RepoEvent MakeScanRootRemovedEvent(long gen, long scanRootId)
+    private static RepoEvent MakeScanRootRemovedEvent(long gen, ScanRootId scanRootId)
         => new RepoScanRootRemovedEvent
         {
             Generation = gen,
             ScanRootId = scanRootId
         };
 
-    private static IReadOnlyDictionary<long, ScanRoot> BuildScanRoots(
-        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
-        HashSet<long>? deletedScanRoots = null)
+    private static IReadOnlyDictionary<ScanRootId, ScanRoot> BuildScanRoots(
+        IReadOnlyDictionary<ScanRootId, ScanRootSnapshotView> snapshots,
+        HashSet<ScanRootId>? deletedScanRoots = null)
     {
-        var dict = new Dictionary<long, ScanRoot>(snapshots.Count);
+        var dict = new Dictionary<ScanRootId, ScanRoot>(snapshots.Count);
 
         foreach (var (rootId, s) in snapshots)
         {
@@ -375,10 +375,10 @@ public sealed class HashIndexPluginTests
         var hA = NewHash(1);
         var hB = NewHash(2);
 
-        var rootId = 1L;
-        var dirRootId = 10L;
-        var dirAId = 11L;
-        var dirBId = 12L;
+        ScanRootId rootId = 1;
+        DirId dirRootId = 10;
+        DirId dirAId = 11;
+        DirId dirBId = 12;
 
         // String pool: file names + "" terminator
         var strings = new[] { "a1.bin", "a2.bin", "b1.bin", "b2.bin", "" };
@@ -494,7 +494,7 @@ public sealed class HashIndexPluginTests
         var r1 = MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(h, 100, 2)]);
         var r2 = MakeRootFromGroups(scanRootId: 2, dirId: 20, groups: [(h, 100, 2)]);
 
-        var snaps = new Dictionary<long, ScanRootSnapshotView> { [1] = r1, [2] = r2 };
+        var snaps = new Dictionary<ScanRootId, ScanRootSnapshotView> { [1] = r1, [2] = r2 };
         var snapshot = new RepoSnapshotView { Snapshots = snaps, ScanRoots = BuildScanRoots(snaps) };
 
         await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
@@ -569,8 +569,8 @@ public sealed class HashIndexPluginTests
     // ---------------------------------------------------------------------
 
     private static ScanRootSnapshotView MakeRootFromGroups(
-        long scanRootId,
-        long dirId,
+        ScanRootId scanRootId,
+        DirId dirId,
         (HashKey hash, long size, int count)[] groups)
     {
         var files = new List<(string name, long size, HashKey hash, ScanEntryStatus status)>();
@@ -586,8 +586,8 @@ public sealed class HashIndexPluginTests
     }
 
     private static ScanRootSnapshotView MakeRootFromFiles(
-        long scanRootId,
-        long dirId,
+        ScanRootId scanRootId,
+        DirId dirId,
         (string name, long size, HashKey hash, ScanEntryStatus status)[] files)
     {
         // String pool: all file names + a single "" entry at end used as ErrorMessageStrIdx and Dir name

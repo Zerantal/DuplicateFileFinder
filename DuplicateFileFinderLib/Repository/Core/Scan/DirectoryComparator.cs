@@ -1,7 +1,5 @@
 using DuplicateFileFinderLib.Util;
 
-using BaseLineMapValue = (long id, string name, DuplicateFileFinderLib.Repository.Core.Models.ScanEntryStatus status, long lastSeen);
-
 namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
 internal sealed class DirectoryComparator(BaselineIndex baseline)
@@ -10,8 +8,8 @@ internal sealed class DirectoryComparator(BaselineIndex baseline)
     {
         var parentId = parent.DirId;
 
-        var expectedDirs = new Dictionary<string, BaseLineMapValue>(PathUtils.PathComparer);
-        var expectedFiles = new Dictionary<string, BaseLineMapValue>(PathUtils.PathComparer);
+        var expectedDirs = new Dictionary<string, BaseLineDirMapValue>(PathUtils.PathComparer);
+        var expectedFiles = new Dictionary<string, BaseLineFileMapValue>(PathUtils.PathComparer);
 
         if (baseline.TryGetChildDirMap(parentId, out var dirs))
             foreach (var kv in dirs)
@@ -24,28 +22,28 @@ internal sealed class DirectoryComparator(BaselineIndex baseline)
         return new DirEnumerationContext(parentId, expectedDirs, expectedFiles);
     }
 
-    public long TryConsumeExpectedDirId(ref DirEnumerationContext ctx, string name)
+    public DirId TryConsumeExpectedDirId(ref DirEnumerationContext ctx, string name)
     {
         if (ctx.ExpectedDirs.Remove(name, out var existing))
         {
-            return existing.id;
+            return existing.dirId;
         }
         return -1;
     }
 
-    public long TryConsumeExpectedFileId(ref DirEnumerationContext ctx, string name)
+    public FileId TryConsumeExpectedFileId(ref DirEnumerationContext ctx, string name)
     {
         if (ctx.ExpectedFiles.Remove(name, out var existing))
         {
-            return existing.id;
+            return existing.fileId;
         }
         return -1;
     }
 
-    public IEnumerable<BaseLineMapValue> ConsumeRemainingExpectedDirs(ref DirEnumerationContext ctx)
+    public IEnumerable<BaseLineDirMapValue> ConsumeRemainingExpectedDirs(ref DirEnumerationContext ctx)
         => ctx.ExpectedDirs.Values;
 
-    public IEnumerable<BaseLineMapValue> ConsumeRemainingExpectedFiles(ref DirEnumerationContext ctx)
+    public IEnumerable<BaseLineFileMapValue> ConsumeRemainingExpectedFiles(ref DirEnumerationContext ctx)
         => ctx.ExpectedFiles.Values;
 
     public void Clear(ref DirEnumerationContext ctx)

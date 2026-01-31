@@ -18,14 +18,14 @@ public sealed partial class Repo
 
     private void UpsertScanRoot_NoLock(in ScanRoot root)
     {
-        var copy = new Dictionary<long, ScanRoot>(_scanRoots)
+        var copy = new Dictionary<ScanRootId, ScanRoot>(_scanRoots)
         {
             [root.RootId] = root
         };
         _scanRoots = copy;
     }
 
-    private bool TryUpdateScanRoot_NoLock(long scanRootId, Func<ScanRoot, ScanRoot> updater, out ScanRoot? updated)
+    private bool TryUpdateScanRoot_NoLock(ScanRootId scanRootId, Func<ScanRoot, ScanRoot> updater, out ScanRoot? updated)
     {
         if (!_scanRoots.TryGetValue(scanRootId, out var current))
         {
@@ -41,19 +41,19 @@ public sealed partial class Repo
         return true;
     }
 
-    private void RemoveScanRootSnapshot_NoLock(long scanRootId)
+    private void RemoveScanRootSnapshot_NoLock(ScanRootId scanRootId)
     {
         if (!_scanRootSnapshots.ContainsKey(scanRootId))
             return;
 
-        var copy = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
+        var copy = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRootSnapshots);
         copy.Remove(scanRootId);
         _scanRootSnapshots = copy;
     }
 
     private void UpsertScanRootSnapshot_NoLock(in ScanRootSnapshotV2 snapshot)
     {
-        var copy = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots)
+        var copy = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRootSnapshots)
         {
             [snapshot.ScanRootId] = snapshot
         };

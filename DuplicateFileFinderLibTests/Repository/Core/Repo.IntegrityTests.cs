@@ -50,24 +50,24 @@ public sealed class RepoIntegrityTests : IDisposable
         return f.GetValue(repo)!;
     }
 
-    private static Dictionary<long, ScanRoot> GetScanRoots(Repo repo)
+    private static Dictionary<ScanRootId, ScanRoot> GetScanRoots(Repo repo)
     {
         var f = typeof(Repo).GetField("_scanRoots", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(f);
-        return (Dictionary<long, ScanRoot>)f.GetValue(repo)!;
+        return (Dictionary<ScanRootId, ScanRoot>)f.GetValue(repo)!;
     }
 
-    private static Dictionary<long, ScanRootSnapshotV2> GetScanRootSnapshots(Repo repo)
+    private static Dictionary<ScanRootId, ScanRootSnapshotV2> GetScanRootSnapshots(Repo repo)
     {
         var f = typeof(Repo).GetField("_scanRootSnapshots", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(f);
-        return (Dictionary<long, ScanRootSnapshotV2>)f.GetValue(repo)!;
+        return (Dictionary<ScanRootId, ScanRootSnapshotV2>)f.GetValue(repo)!;
     }
 
     private static PackedStringPool Pool(params string[] s) => PackedStringPool.FromStrings(s);
 
     private static ScanRootSnapshotV2 MakeSnapshot(
-        long scanRootId,
+        ScanRootId scanRootId,
         PackedStringPool pool,
         DirRecordV2[] dirs,
         FileRecordV2[] files)
@@ -79,7 +79,7 @@ public sealed class RepoIntegrityTests : IDisposable
             Files = files
         };
 
-    private static ScanRoot MakeRoot(long rootId, string rootPath, long dirId, bool deleted = false)
+    private static ScanRoot MakeRoot(ScanRootId rootId, string rootPath, DirId dirId, bool deleted = false)
         => new()
         {
             RootId = rootId,

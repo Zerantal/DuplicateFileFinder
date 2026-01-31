@@ -15,7 +15,7 @@ public interface ITreeMapDataResolver
     FileRecordV2 GetFileRecord(FileHandle file);
 
     // Paths
-    string GetRelativePath(long dirId);
+    string GetRelativePath(DirId dirId);
 
     // Optional aggregates (for tooltips)
     DirAggregateStats GetDirStats(DirHandle dir);

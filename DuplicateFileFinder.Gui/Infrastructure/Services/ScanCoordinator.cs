@@ -33,7 +33,7 @@ public sealed class ScanCoordinator(
 
     public bool IsScanning { get; private set; }
 
-    public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+    public Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName)
         => _host.Repo.SetScanRootDisplayNameAsync(scanRootId, displayName);
 
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken = default)
@@ -50,7 +50,7 @@ public sealed class ScanCoordinator(
             logFail: ex => s_log.Error(ex, "Scan failed for {root}", rootPath));
     }
 
-    public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken = default)
+    public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken = default)
     {
         if (scanRootId < 0)
             throw new ArgumentException("Valid ScanRootId is required.", nameof(scanRootId));
@@ -174,7 +174,7 @@ public sealed class ScanCoordinator(
         if (cancelled) throw new OperationCanceledException(token);
     }
 
-    public Task RemoveScanRoot(long scanRootId)
+    public Task RemoveScanRoot(ScanRootId scanRootId)
         => _host.Repo.DeleteScanRootAsync(scanRootId);
 
     public void CancelScan()

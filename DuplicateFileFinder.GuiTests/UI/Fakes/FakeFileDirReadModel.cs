@@ -10,13 +10,13 @@ public sealed class FakeFileDirReadModel : IFileDirReadModel
 {
     public delegate bool TryGetDirPathByHandleDelegate(DirHandle handle, out string rel);
     public delegate bool TryGetFilePathByHandleDelegate(FileHandle handle, out string rel);
-    public delegate bool TryGetFileDelegate(long fileId, out FileHandle handle);
+    public delegate bool TryGetFileDelegate(FileId fileId, out FileHandle handle);
 
     public TryGetFileDelegate? TryGetFileImpl { get; set; }
     public TryGetDirPathByHandleDelegate? TryGetDirPathByHandleImpl { get; init; }
     public TryGetFilePathByHandleDelegate? TryGetFilePathByHandleImpl { get; init; }
 
-    public bool TryGetDirPathById(long dirId, out string relativePath) => throw new NotImplementedException();
+    public bool TryGetDirPathById(DirId dirId, out string relativePath) => throw new NotImplementedException();
 
     public bool TryGetDirPathByHandle(DirHandle handle, out string rel)
     {
@@ -27,9 +27,9 @@ public sealed class FakeFileDirReadModel : IFileDirReadModel
         return false;
     }
 
-    public bool TryGetDir(long dirId, out DirHandle handle) => throw new NotImplementedException();
+    public bool TryGetDir(DirId dirId, out DirHandle handle) => throw new NotImplementedException();
 
-    public bool TryGetFile(long fileId, out FileHandle handle)
+    public bool TryGetFile(FileId fileId, out FileHandle handle)
     {
         if (TryGetFileImpl is not null)
             return TryGetFileImpl(fileId, out handle);
@@ -41,7 +41,7 @@ public sealed class FakeFileDirReadModel : IFileDirReadModel
     public int FileCount { get; }
     public int DirCount { get; }
 
-    public bool TryGetFilePathById(long fileId, out string relativePath) => throw new NotImplementedException();
+    public bool TryGetFilePathById(FileId fileId, out string relativePath) => throw new NotImplementedException();
 
     public bool TryGetFilePathByHandle(FileHandle handle, out string rel)
     {

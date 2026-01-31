@@ -20,7 +20,7 @@ internal sealed class ScanSession : IScanSession
 
     private ScanRun Run { get; }
     private long ScanSequence => Run.ScanSequence;
-    private long ScanRootId => Run.ScanRootId;
+    private ScanRootId ScanRootId => Run.ScanRootId;
 
     public DirCursor RootDirCursor { get; }
 
@@ -238,7 +238,7 @@ internal sealed class ScanSession : IScanSession
         {
             var f = new FileScanInput
             {
-                FileId = delFile.id,
+                FileId = delFile.fileId,
                 DirId = ctx.ParentDirId,
                 Name = delFile.name,
                 Size = 0,
@@ -256,7 +256,7 @@ internal sealed class ScanSession : IScanSession
         {
             var d = new DirScanInput
             {
-                DirId = delDir.id,
+                DirId = delDir.dirId,
                 ParentDirId = ctx.ParentDirId,
                 Name = delDir.name,
                 CreatedTicks = 0,

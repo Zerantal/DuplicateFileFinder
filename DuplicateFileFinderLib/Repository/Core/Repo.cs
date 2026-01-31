@@ -22,8 +22,8 @@ public sealed partial class Repo : IRepoInternal
     // - Never mutate a dictionary/list instance in-place.
     // - Any update must replace the entire reference with a copied instance.
     // This ensures previously published RepoSnapshotView instances remain safe to enumerate.
-    private Dictionary<long, ScanRootSnapshotV2> _scanRootSnapshots = new();
-    private Dictionary<long, ScanRoot> _scanRoots = new();
+    private Dictionary<ScanRootId, ScanRootSnapshotV2> _scanRootSnapshots = new();
+    private Dictionary<ScanRootId, ScanRoot> _scanRoots = new();
     private Dictionary<long, ScanRun> _scanRunIndex = new(); // scan run id -> scan run
 
     private readonly Lock _sync = new();

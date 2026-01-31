@@ -13,8 +13,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
     // Published, read-only snapshots (we never mutate these maps after publishing).
     // We swap the reference atomically when rebuilding.
-    private volatile SegmentedIdMap<FileHandle> _filesById = SegmentedIdMap<FileHandle>.Empty;
-    private volatile SegmentedIdMap<DirHandle> _dirsById = SegmentedIdMap<DirHandle>.Empty;
+    private volatile SegmentedIntMap<FileHandle> _filesById = SegmentedIntMap<FileHandle>.Empty;
+    private volatile SegmentedIntMap<DirHandle> _dirsById = SegmentedIntMap<DirHandle>.Empty;
 
     // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
@@ -26,11 +26,11 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     private const string StateFileName = "file-dir-index.bin";
 
     // Active (non-deleted) scan roots (based on snapshot scanroot meta)
-    private HashSet<long> _activeScanRoots = new();
+    private HashSet<ScanRootId> _activeScanRoots = new();
 
     // Per-root counts (only updated on worker thread)
-    private Dictionary<long, int> _dirCountByRootId = new();
-    private Dictionary<long, int> _fileCountByRootId = new();
+    private Dictionary<ScanRootId, int> _dirCountByRootId = new();
+    private Dictionary<ScanRootId, int> _fileCountByRootId = new();
 
     // Published counts (exclude deleted scan roots)
     private int _activeDirCount;
@@ -124,7 +124,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
                 .Select(r => r.RootId)
                 .ToHashSet();
 
-            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(
+            var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(
                 repoSnapshot.Snapshots.Where(kvp => activeRootIds.Contains(kvp.Key)));
 
             // Build fresh dictionaries (no shared state with readers).
@@ -137,11 +137,11 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
                 totalFiles += s.Files.Count;
             }
 
-            var newDirs = new Dictionary<long, DirHandle>(capacity: totalDirs);
-            var newFiles = new Dictionary<long, FileHandle>(capacity: totalFiles);
+            var newDirs = new Dictionary<DirId, DirHandle>(capacity: totalDirs);
+            var newFiles = new Dictionary<FileId, FileHandle>(capacity: totalFiles);
 
-            var newDirCounts = new Dictionary<long, int>(capacity: liveSnapshots.Count);
-            var newFileCounts = new Dictionary<long, int>(capacity: liveSnapshots.Count);
+            var newDirCounts = new Dictionary<ScanRootId, int>(capacity: liveSnapshots.Count);
+            var newFileCounts = new Dictionary<ScanRootId, int>(capacity: liveSnapshots.Count);
 
             var activeDirCount = 0;
             var activeFileCount = 0;
@@ -183,8 +183,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             // 1) publish dictionaries
             // 2) publish counts + active roots
             // 3) publish snapshot view last so readers see coherent state for Decode* usage
-            _dirsById = SegmentedIdMap<DirHandle>.FromDictionary(newDirs);
-            _filesById = SegmentedIdMap<FileHandle>.FromDictionary(newFiles);
+            _dirsById = SegmentedIntMap<DirHandle>.FromDictionary(newDirs);
+            _filesById = SegmentedIntMap<FileHandle>.FromDictionary(newFiles);
 
             _activeScanRoots = activeRootIds;
             _dirCountByRootId = newDirCounts;
@@ -207,8 +207,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             .Select(r => r.RootId)
             .ToHashSet();
 
-        var dirCounts = new Dictionary<long, int>(capacity: activeRootIds.Count);
-        var fileCounts = new Dictionary<long, int>(capacity: activeRootIds.Count);
+        var dirCounts = new Dictionary<ScanRootId, int>(capacity: activeRootIds.Count);
+        var fileCounts = new Dictionary<ScanRootId, int>(capacity: activeRootIds.Count);
 
         var activeDirCount = 0;
         var activeFileCount = 0;
@@ -287,11 +287,11 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     // Public query surface (lock-free)
     // ---------------------------------------------------------------------
 
-    public bool TryGetDir(long dirId, out DirHandle handle) => _dirsById.TryGetValue(dirId, out handle);
+    public bool TryGetDir(DirId dirId, out DirHandle handle) => _dirsById.TryGetValue(dirId, out handle);
 
-    public bool TryGetFile(long fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
+    public bool TryGetFile(FileId fileId, out FileHandle handle) => _filesById.TryGetValue(fileId, out handle);
 
-    public bool TryGetFilePathById(long fileId, out string relativePath)
+    public bool TryGetFilePathById(FileId fileId, out string relativePath)
     {
         relativePath = string.Empty;
         return TryGetFile(fileId, out var handle) && TryGetFilePathByHandle(handle, out relativePath);
@@ -322,7 +322,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         // Snapshot dirs dictionary for stable lookups during traversal
         var dirsById = _dirsById;
 
-        long dirId = file.DirId;
+        DirId dirId = file.DirId;
         while (dirId > 0)
         {
             if (!dirsById.TryGetValue(dirId, out var dh))
@@ -349,7 +349,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         return true;
     }
 
-    public bool TryGetDirPathById(long dirId, out string relativePath)
+    public bool TryGetDirPathById(DirId dirId, out string relativePath)
     {
         relativePath = string.Empty;
         return TryGetDir(dirId, out var handle) && TryGetDirPathByHandle(handle, out relativePath);
@@ -380,7 +380,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         var dir = snapshot.Dirs[dirHandle.Index];
         segments.Add(view.DecodeDirName(dirHandle));
 
-        long parentId = dir.ParentDirId;
+        DirId parentId = dir.ParentDirId;
         while (parentId > 0)
         {
             if (!dirsById.TryGetValue(parentId, out var parentHandle))

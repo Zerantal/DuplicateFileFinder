@@ -10,7 +10,7 @@ namespace DuplicateFileFinder.GuiTests.UI.Fakes;
 public class FakeScanRootsTreeNodeAction(IScanCoordinator scanner) : IScanRootsTreeNodeActions
 {
 
-    public Task RescanScanRootAsync(long scanRootId) => throw new System.NotImplementedException();
+    public Task RescanScanRootAsync(ScanRootId scanRootId) => throw new System.NotImplementedException();
 
     public Task RescanFolderAsync(DirHandle dir)
     {
@@ -18,9 +18,9 @@ public class FakeScanRootsTreeNodeAction(IScanCoordinator scanner) : IScanRootsT
         return Task.CompletedTask;
     }
 
-    public Task<bool> TryRemoveScanRootAsync(long scanRootId) => throw new System.NotImplementedException();
+    public Task<bool> TryRemoveScanRootAsync(ScanRootId scanRootId) => throw new System.NotImplementedException();
 
-    public Task<bool> TrySetScanRootDisplayNameAsync(long scanRootId, string currentLabel) => throw new System.NotImplementedException();
+    public Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel) => throw new System.NotImplementedException();
 
     public Task DeleteFolderAsync(DirHandle dir, string fullPath) => throw new System.NotImplementedException();
 }

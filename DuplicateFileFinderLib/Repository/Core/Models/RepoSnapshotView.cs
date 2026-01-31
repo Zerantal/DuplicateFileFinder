@@ -4,8 +4,8 @@ namespace DuplicateFileFinderLib.Repository.Core.Models;
 
 public sealed class RepoSnapshotView
 {
-    public required IReadOnlyDictionary<long, ScanRootSnapshotView> Snapshots { get; init; }
-    public required IReadOnlyDictionary<long, ScanRoot> ScanRoots { get; init; }
+    public required IReadOnlyDictionary<ScanRootId, ScanRootSnapshotView> Snapshots { get; init; }
+    public required IReadOnlyDictionary<ScanRootId, ScanRoot> ScanRoots { get; init; }
 
     public DirRecordV2 GetDirRecord(DirHandle dir) => Snapshots[dir.ScanRootId].Dirs[dir.Index];
     public FileRecordV2 GetFileRecord(FileHandle file) => Snapshots[file.ScanRootId].Files[file.Index];

@@ -32,15 +32,15 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
 
 
 
-    public Task DeleteScanRootAsync(long scanRootId, CancellationToken ct) => throw new NotImplementedException();
+    public Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct) => throw new NotImplementedException();
 
-    public Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct)
+    public Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct)
         => throw new NotImplementedException();
 
     public IReadOnlyList<ScanRun> ScanRunsView => _scanRuns;
     public IReadOnlyList<ScanRoot> ScanRootsView => _scanRoots;
     // ReSharper disable once ReturnTypeCanBeNotNullable
-    public ScanRootSnapshotView? TryGetScanRootView(long scanRootId) => throw new NotImplementedException();
+    public ScanRootSnapshotView? TryGetScanRootView(ScanRootId scanRootId) => throw new NotImplementedException();
 
     public RepoSnapshotView GetRepoSnapshotView()
     {
@@ -51,7 +51,7 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
         };
     }
 
-    public bool HasScanCheckpoint(long scanRootId) => throw new NotImplementedException();
+    public bool HasScanCheckpoint(ScanRootId scanRootId) => throw new NotImplementedException();
 
     Task<DeleteResult> IRepo.DeleteFileAsync(FileHandle file, CancellationToken ct)
     {

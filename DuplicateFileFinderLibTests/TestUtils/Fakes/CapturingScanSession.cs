@@ -12,7 +12,7 @@ namespace DuplicateFileFinderLibTests.TestUtils.Fakes;
 
 internal sealed class CapturingScanSession : IScanSession
 {
-    private long _dirCounter = 1000;
+    private DirId _dirCounter = 1000;
     private readonly MethodCounter _methodCounter = new();
     public string? LastFailMessage { get; private set; }
     public bool LastFailCancelled { get; private set; }
@@ -32,9 +32,9 @@ internal sealed class CapturingScanSession : IScanSession
     public DirEnumerationContext BeginDirectory(DirCursor parent)
     {
         return new DirEnumerationContext(parent.DirId,
-            new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(
+            new Dictionary<string, BaseLineDirMapValue>(
                 StringComparer.Ordinal),
-            new Dictionary<string, (long id, string name, ScanEntryStatus status, long lastSeen)>(
+            new Dictionary<string, BaseLineFileMapValue>(
                 StringComparer.Ordinal));
     }
 
@@ -83,7 +83,7 @@ internal sealed class CapturingScanSession : IScanSession
         HashCompletions.Add((token, hashBytes, errorMessage));
     }
 
-    public void SetRootDirId(long dirId)
+    public void SetRootDirId(DirId dirId)
     {
         RootDirCursor = new DirCursor(dirId);
     }

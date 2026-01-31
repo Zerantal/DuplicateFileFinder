@@ -59,7 +59,7 @@ public sealed partial class Repo
 
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-    public ScanRootSnapshotView? TryGetScanRootView(long scanRootId)
+    public ScanRootSnapshotView? TryGetScanRootView(ScanRootId scanRootId)
     {
         lock (_sync)
         {
@@ -87,16 +87,16 @@ public sealed partial class Repo
         => new()
         {
             // Non-copying: the underlying dictionaries are copy-on-write, so views remain safe.
-            Snapshots = new ProjectedReadOnlyDictionary<long, ScanRootSnapshotV2, ScanRootSnapshotView>(
+            Snapshots = new ProjectedReadOnlyDictionary<ScanRootId, ScanRootSnapshotV2, ScanRootSnapshotView>(
                 _scanRootSnapshots,
                 static snap => ToView(snap)),
 
-            ScanRoots = new ReadOnlyDictionary<long, ScanRoot>(_scanRoots)
+            ScanRoots = new ReadOnlyDictionary<ScanRootId, ScanRoot>(_scanRoots)
         };
 
 
 
-    public async Task DeleteScanRootAsync(long scanRootId, CancellationToken ct)
+    public async Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
     {
         long generation;
 
@@ -139,7 +139,7 @@ public sealed partial class Repo
         });
     }
 
-    public async Task SetScanRootDisplayNameAsync(long scanRootId, string? displayName, CancellationToken ct = default)
+    public async Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct = default)
     {
         long generation;
         ScanRoot? updatedScanRoot;
@@ -175,7 +175,7 @@ public sealed partial class Repo
 
     // -------- Scan bootstrap (creates ScanRun + ScanSession) --------
 
-    public bool HasScanCheckpoint(long scanRootId) => RepoStore.HasScanCheckpoint(_repoPath, scanRootId);
+    public bool HasScanCheckpoint(ScanRootId scanRootId) => RepoStore.HasScanCheckpoint(_repoPath, scanRootId);
 
     /// <summary>
     /// Folder-rescan support: Begin a scan for an existing scan root, and seed the session's mutation buffer
@@ -186,7 +186,7 @@ public sealed partial class Repo
     /// - a snapshot must already be loaded in memory for this scan root (UI should only expose the action then)
     /// </summary>
     async Task<ScanContext> IRepoInternal.BeginSubtreeScanAsync(
-        long scanRootId,
+        ScanRootId scanRootId,
         ScanOptions options,
         VolumeInfo? volumeInfo,
         CancellationToken ct)
@@ -255,7 +255,7 @@ public sealed partial class Repo
     }
 
     async Task<ScanContext> IRepoInternal.BeginRescanAsync(
-        long scanRootId,
+        ScanRootId scanRootId,
         ScanOptions options,
         VolumeInfo? volumeInfo,
         CancellationToken ct)
@@ -386,7 +386,7 @@ public sealed partial class Repo
         return updated;
     }
 
-    private ScanRun CreateInProgressRun_NoLock(long scanRootId, long runId, string rootPath, ScanOptions options)
+    private ScanRun CreateInProgressRun_NoLock(ScanRootId scanRootId, long runId, string rootPath, ScanOptions options)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -451,11 +451,7 @@ public sealed partial class Repo
 
         using (TimingLog.StartPhase("Opening Repo"))
         {
-            // DotMemory.GetSnapshot("Baseline");
-
             await repo.InitialiseStateFromStoreAsync(ct).ConfigureAwait(false);
-
-            // DotMemory.GetSnapshot("After Repo Open");
         }
 
         return repo;

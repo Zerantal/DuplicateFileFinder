@@ -1,69 +1,72 @@
-// DuplicateFileFinderLib/Repository/Plugins/Models/SegmentedIdMap.cs
+// DuplicateFileFinderLib/Repository/Plugins/Models/SegmentedDenseMap.cs
 
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Plugins.Models;
+namespace MemPackBench.SegmentedDenseMapBench;
 
 /// <summary>
-/// A long->T map optimized for fast (de)serialization:
+/// A TKey->TValue map optimized for fast (de)serialization:
 /// persisted as a sorted set of dense-ish segments (arrays + presence bitmap),
 /// avoiding Dictionary construction/insertion costs.
 /// </summary>
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class SegmentedIdMap<T>
-    where T : struct
+public sealed partial class SegmentedDenseMap<TKey, TValue>
+    where TKey : struct, System.Numerics.IBinaryInteger<TKey>
+    where TValue : struct
 {
     /// <summary>
-    /// Sorted by StartId ascending.
+    /// Sorted by StartKey ascending.
     /// </summary>
-    public required Segment<T>[] Segments { get; init; } = [];
+    public required SegmentDense<TKey, TValue>[] Segments { get; init; } = [];
 
     [MemoryPackIgnore]
     public int SegmentCount => Segments.Length;
 
-    public static SegmentedIdMap<T> Empty { get; } = new() { Segments = [] };
+    public static SegmentedDenseMap<TKey, TValue> Empty { get; }
+        = new() { Segments = [] };
 
     /// <summary>
     /// Build from unique key/value pairs. Keys will be sorted. Segments may span small gaps
     /// up to <paramref name="gapThreshold"/> to reduce segment count (gaps tracked by bitmap).
     /// </summary>
-    public static SegmentedIdMap<T> Build(
-        IEnumerable<KeyValuePair<long, T>> items,
+    public static SegmentedDenseMap<TKey, TValue> Build(
+        IEnumerable<KeyValuePair<TKey, TValue>> items,
         int gapThreshold = 64)
     {
         if (items is null) throw new ArgumentNullException(nameof(items));
         if (gapThreshold < 0) throw new ArgumentOutOfRangeException(nameof(gapThreshold));
 
-        // Materialize + sort by key (ascending).
-        var sorted = items as KeyValuePair<long, T>[] ?? items.ToArray();
+        var sorted = items as KeyValuePair<TKey, TValue>[] ?? items.ToArray();
         if (sorted.Length == 0)
             return Empty;
 
-        Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
+        Array.Sort(sorted, static (a, b) => Comparer<TKey>.Default.Compare(a.Key, b.Key));
 
-        var segments = new List<Segment<T>>(capacity: Math.Min(1024, sorted.Length));
+        var segments = new List<SegmentDense<TKey, TValue>>(capacity: Math.Min(1024, sorted.Length));
 
-        long segStart = sorted[0].Key;
-        long segEnd = segStart;
+        var segStart = sorted[0].Key;
+        var segEnd = segStart;
 
         int segFirstIndex = 0;
 
+        var gapThresholdKey = TKey.CreateChecked(gapThreshold);
+
         for (int i = 1; i < sorted.Length; i++)
         {
-            long k = sorted[i].Key;
+            var k = sorted[i].Key;
 
             // Guard against duplicates (Dictionary semantics).
             if (k == sorted[i - 1].Key)
                 throw new InvalidOperationException($"Duplicate key detected: {k}");
 
-            long gap = k - segEnd;
-            if (gap <= 0)
+            var gap = k - segEnd;
+            if (gap <= TKey.Zero)
                 throw new InvalidOperationException("Keys must be strictly increasing after sort.");
 
             // Split if gap is too large.
-            if (gap > gapThreshold)
+            if (gap > gapThresholdKey)
             {
-                segments.Add(Segment<T>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
+                segments.Add(SegmentDense<TKey, TValue>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
                 segFirstIndex = i;
                 segStart = k;
                 segEnd = k;
@@ -75,23 +78,23 @@ public sealed partial class SegmentedIdMap<T>
             }
         }
 
-        segments.Add(Segment<T>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
+        segments.Add(SegmentDense<TKey, TValue>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
 
-        return new SegmentedIdMap<T> { Segments = segments.ToArray() };
+        return new SegmentedDenseMap<TKey, TValue> { Segments = segments.ToArray() };
     }
 
     /// <summary>
     /// Convenience: build from a Dictionary without changing callers.
     /// </summary>
-    public static SegmentedIdMap<T> FromDictionary(
-        Dictionary<long, T> dict,
+    public static SegmentedDenseMap<TKey, TValue> FromDictionary(
+        Dictionary<TKey, TValue> dict,
         int gapThreshold = 64)
     {
         if (dict is null) throw new ArgumentNullException(nameof(dict));
         return Build(dict, gapThreshold);
     }
 
-    public bool TryGetValue(long key, out T value)
+    public bool TryGetValue(TKey key, out TValue value)
     {
         var idx = FindSegmentIndexForKey(key);
         if (idx < 0)
@@ -101,14 +104,26 @@ public sealed partial class SegmentedIdMap<T>
         }
 
         var seg = Segments[idx];
-        long offsetL = key - seg.StartId;
-        if ((ulong)offsetL >= (ulong)seg.Values.Length)
+        var offsetKey = key - seg.StartKey;
+
+        // Bounds checks in int space (span/array indexing).
+        int offset;
+        try
+        {
+            offset = int.CreateChecked(offsetKey);
+        }
+        catch
         {
             value = default;
             return false;
         }
 
-        int offset = (int)offsetL;
+        if ((uint)offset >= (uint)seg.Values.Length)
+        {
+            value = default;
+            return false;
+        }
+
         if (!seg.IsPresent(offset))
         {
             value = default;
@@ -122,14 +137,13 @@ public sealed partial class SegmentedIdMap<T>
     /// <summary>
     /// Enumerate all present entries in ascending key order.
     /// </summary>
-    public IEnumerable<KeyValuePair<long, T>> Enumerate()
+    public IEnumerable<KeyValuePair<TKey, TValue>> Enumerate()
     {
         for (int s = 0; s < Segments.Length; s++)
         {
             var seg = Segments[s];
-            var start = seg.StartId;
+            var start = seg.StartKey;
 
-            // Walk bitmap words and emit set bits.
             var bits = seg.PresentBits;
             var vals = seg.Values;
 
@@ -143,16 +157,16 @@ public sealed partial class SegmentedIdMap<T>
                     if (idx >= vals.Length)
                         break;
 
-                    yield return new KeyValuePair<long, T>(start + idx, vals[idx]);
-                    word &= word - 1; // clear lowest set bit
+                    yield return new KeyValuePair<TKey, TValue>(start + TKey.CreateChecked(idx), vals[idx]);
+                    word &= word - 1;
                 }
             }
         }
     }
 
-    private int FindSegmentIndexForKey(long key)
+    private int FindSegmentIndexForKey(TKey key)
     {
-        // Find greatest segment.StartId <= key
+        // Find greatest segment.StartKey <= key
         var segs = Segments;
         int lo = 0;
         int hi = segs.Length - 1;
@@ -161,7 +175,7 @@ public sealed partial class SegmentedIdMap<T>
         while (lo <= hi)
         {
             int mid = lo + ((hi - lo) >> 1);
-            long start = segs[mid].StartId;
+            var start = segs[mid].StartKey;
 
             if (start <= key)
             {
@@ -177,11 +191,10 @@ public sealed partial class SegmentedIdMap<T>
         if (best < 0)
             return -1;
 
-        // Quick end-bound check. If key is beyond end, it can't be in any later segment
-        // because best is the last segment with start <= key.
-        if (key > segs[best].EndId)
+        if (key > segs[best].EndKey)
             return -1;
 
         return best;
     }
 }
+

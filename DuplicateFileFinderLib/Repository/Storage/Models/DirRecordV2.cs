@@ -8,8 +8,8 @@ namespace DuplicateFileFinderLib.Repository.Storage.Models;
 // ReSharper disable once RedundantExtendsListEntry
 public readonly partial record struct DirRecordV2() : IEquatable<DirRecordV2>
 {
-    public long DirId { get; init; } = -1;
-    public long ParentDirId { get; init; } = -1;
+    public DirId DirId { get; init; } = -1;
+    public DirId ParentDirId { get; init; } = -1;
     public int NameStrIdx { get; init; } = -1;
     public long LastSeenScanSequence { get; init; } = -1;
     public ScanEntryStatus Status { get; init; } = ScanEntryStatus.None;

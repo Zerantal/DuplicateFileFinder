@@ -19,7 +19,7 @@ public sealed class ScanRootsTreeNode
     /// <summary>Children models. May be empty until materialized (lazy).</summary>
     public List<ScanRootsTreeNode> Children { get; } = new();
 
-    public required long ScanRootId { get; init; }
+    public required ScanRootId ScanRootId { get; init; }
 
     /// <summary>True for scan-root nodes (even placeholders); set by builder.</summary>
     public required bool IsScanRoot { get; init; }
