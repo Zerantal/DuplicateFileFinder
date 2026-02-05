@@ -1,18 +1,16 @@
-// DuplicateFileFinderLib/Repository/Plugins/Models/MapSegmentInt.cs
-
 using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class MapSegmentInt<T>
+public sealed partial class IntMapSegment<T>
     where T : struct
 {
     public int StartId { get; init; }
 
-    public required T[] Values { get; init; }
+    public required T[] Values { get; init; } = [];
 
-    public required ulong[] PresentBits { get; init; }
+    public required ulong[] PresentBits { get; init; } = [];
 
     [MemoryPackIgnore]
     public int EndId => StartId + Values.Length - 1;
@@ -27,16 +25,16 @@ public sealed partial class MapSegmentInt<T>
         return (PresentBits[word] & (1UL << bit)) != 0;
     }
 
-    public static MapSegmentInt<T> BuildSegment(
+    public static IntMapSegment<T> BuildSegment(
         KeyValuePair<int, T>[] sorted,
         int fromInclusive,
         int toInclusive,
         int segStart,
         int segEnd)
     {
-        long lenL = (long)segEnd - segStart + 1;
-        if (lenL <= 0 || lenL > int.MaxValue)
-            throw new InvalidOperationException($"Segment length out of range: {lenL}");
+        long lenL = segEnd - segStart + 1;
+        if (lenL <= 0)
+            throw new InvalidOperationException($"LongMapSegment length out of range: {lenL}");
 
         int len = (int)lenL;
 
@@ -55,7 +53,7 @@ public sealed partial class MapSegmentInt<T>
             SetBit(bits, offset);
         }
 
-        return new MapSegmentInt<T>
+        return new IntMapSegment<T>
         {
             StartId = segStart,
             Values = values,
@@ -70,4 +68,3 @@ public sealed partial class MapSegmentInt<T>
         bits[word] |= 1UL << bit;
     }
 }
-

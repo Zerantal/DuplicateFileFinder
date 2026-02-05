@@ -1,4 +1,4 @@
-// DuplicateFileFinderLib/Repository/Plugins/Models/SegmentedDenseMap.cs
+// DuplicateFileFinderLib/Repository/Plugins/Models/GenericSegmentedMap.cs
 
 using MemoryPack;
 
@@ -10,26 +10,26 @@ namespace MemPackBench.SegmentedDenseMapBench;
 /// avoiding Dictionary construction/insertion costs.
 /// </summary>
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class SegmentedDenseMap<TKey, TValue>
+public sealed partial class GenericSegmentedMap<TKey, TValue>
     where TKey : struct, System.Numerics.IBinaryInteger<TKey>
     where TValue : struct
 {
     /// <summary>
     /// Sorted by StartKey ascending.
     /// </summary>
-    public required SegmentDense<TKey, TValue>[] Segments { get; init; } = [];
+    public required GenericMapSegment<TKey, TValue>[] Segments { get; init; } = [];
 
     [MemoryPackIgnore]
     public int SegmentCount => Segments.Length;
 
-    public static SegmentedDenseMap<TKey, TValue> Empty { get; }
+    public static GenericSegmentedMap<TKey, TValue> Empty { get; }
         = new() { Segments = [] };
 
     /// <summary>
     /// Build from unique key/value pairs. Keys will be sorted. Segments may span small gaps
     /// up to <paramref name="gapThreshold"/> to reduce segment count (gaps tracked by bitmap).
     /// </summary>
-    public static SegmentedDenseMap<TKey, TValue> Build(
+    public static GenericSegmentedMap<TKey, TValue> Build(
         IEnumerable<KeyValuePair<TKey, TValue>> items,
         int gapThreshold = 64)
     {
@@ -42,7 +42,7 @@ public sealed partial class SegmentedDenseMap<TKey, TValue>
 
         Array.Sort(sorted, static (a, b) => Comparer<TKey>.Default.Compare(a.Key, b.Key));
 
-        var segments = new List<SegmentDense<TKey, TValue>>(capacity: Math.Min(1024, sorted.Length));
+        var segments = new List<GenericMapSegment<TKey, TValue>>(capacity: Math.Min(1024, sorted.Length));
 
         var segStart = sorted[0].Key;
         var segEnd = segStart;
@@ -66,7 +66,7 @@ public sealed partial class SegmentedDenseMap<TKey, TValue>
             // Split if gap is too large.
             if (gap > gapThresholdKey)
             {
-                segments.Add(SegmentDense<TKey, TValue>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
+                segments.Add(GenericMapSegment<TKey, TValue>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
                 segFirstIndex = i;
                 segStart = k;
                 segEnd = k;
@@ -78,15 +78,15 @@ public sealed partial class SegmentedDenseMap<TKey, TValue>
             }
         }
 
-        segments.Add(SegmentDense<TKey, TValue>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
+        segments.Add(GenericMapSegment<TKey, TValue>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
 
-        return new SegmentedDenseMap<TKey, TValue> { Segments = segments.ToArray() };
+        return new GenericSegmentedMap<TKey, TValue> { Segments = segments.ToArray() };
     }
 
     /// <summary>
     /// Convenience: build from a Dictionary without changing callers.
     /// </summary>
-    public static SegmentedDenseMap<TKey, TValue> FromDictionary(
+    public static GenericSegmentedMap<TKey, TValue> FromDictionary(
         Dictionary<TKey, TValue> dict,
         int gapThreshold = 64)
     {

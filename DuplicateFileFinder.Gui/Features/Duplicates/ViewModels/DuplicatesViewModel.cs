@@ -232,10 +232,7 @@ public partial class DuplicatesViewModel : ObservableObject
     {
         ScanRootsTree.Rebuild(snapshot);
 
-        using (TimingLog.StartPhase("RebuildDuplicatesAndState()"))
-        {
-            DuplicateGroups.Rebuild(snapshot);
-        }
+        DuplicateGroups.Rebuild(snapshot);
 
         using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
         {

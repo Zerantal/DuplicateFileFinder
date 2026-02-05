@@ -1,4 +1,4 @@
-// DuplicateFileFinderLib/Repository/Plugins/Models/SegmentedLongMap.cs
+// DuplicateFileFinderLib/Repository/Plugins/Models/SegmentedMap.cs
 
 using MemoryPack;
 
@@ -10,47 +10,47 @@ namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 /// avoiding Dictionary construction/insertion costs.
 /// </summary>
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class SegmentedLongMap<T>
-    where T : struct
+public sealed partial class SegmentedMap<T>
+    where T : unmanaged
 {
     /// <summary>
     /// Sorted by StartId ascending.
     /// </summary>
-    public required MapSegmentLong<T>[] Segments { get; init; } = [];
+    public required IntMapSegment<T>[] Segments { get; init; } = [];
 
     [MemoryPackIgnore]
     public int SegmentCount => Segments.Length;
 
-    public static SegmentedLongMap<T> Empty { get; } = new() { Segments = [] };
+    public static SegmentedMap<T> Empty { get; } = new() { Segments = [] };
 
     /// <summary>
     /// Build from unique key/value pairs. Keys will be sorted. Segments may span small gaps
     /// up to <paramref name="gapThreshold"/> to reduce segment count (gaps tracked by bitmap).
     /// </summary>
-    public static SegmentedLongMap<T> Build(
-        IEnumerable<KeyValuePair<long, T>> items,
+    public static SegmentedMap<T> Build(
+        IEnumerable<KeyValuePair<int, T>> items,
         int gapThreshold = 64)
     {
         if (items is null) throw new ArgumentNullException(nameof(items));
         if (gapThreshold < 0) throw new ArgumentOutOfRangeException(nameof(gapThreshold));
 
         // Materialize + sort by key (ascending).
-        var sorted = items as KeyValuePair<long, T>[] ?? items.ToArray();
+        var sorted = items as KeyValuePair<int, T>[] ?? items.ToArray();
         if (sorted.Length == 0)
             return Empty;
 
         Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
 
-        var segments = new List<MapSegmentLong<T>>(capacity: Math.Min(1024, sorted.Length));
+        var segments = new List<IntMapSegment<T>>(capacity: Math.Min(1024, sorted.Length));
 
-        long segStart = sorted[0].Key;
-        long segEnd = segStart;
+        int segStart = sorted[0].Key;
+        int segEnd = segStart;
 
         int segFirstIndex = 0;
 
         for (int i = 1; i < sorted.Length; i++)
         {
-            long k = sorted[i].Key;
+            int k = sorted[i].Key;
 
             // Guard against duplicates (Dictionary semantics).
             if (k == sorted[i - 1].Key)
@@ -63,7 +63,7 @@ public sealed partial class SegmentedLongMap<T>
             // Split if gap is too large.
             if (gap > gapThreshold)
             {
-                segments.Add(MapSegmentLong<T>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
+                segments.Add(IntMapSegment<T>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
                 segFirstIndex = i;
                 segStart = k;
                 segEnd = k;
@@ -75,16 +75,16 @@ public sealed partial class SegmentedLongMap<T>
             }
         }
 
-        segments.Add(MapSegmentLong<T>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
+        segments.Add(IntMapSegment<T>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
 
-        return new SegmentedLongMap<T> { Segments = segments.ToArray() };
+        return new SegmentedMap<T> { Segments = segments.ToArray() };
     }
 
     /// <summary>
     /// Convenience: build from a Dictionary without changing callers.
     /// </summary>
-    public static SegmentedLongMap<T> FromDictionary(
-        Dictionary<long, T> dict,
+    public static SegmentedMap<T> FromDictionary(
+        Dictionary<int, T> dict,
         int gapThreshold = 64)
     {
         if (dict is null) throw new ArgumentNullException(nameof(dict));
@@ -122,7 +122,7 @@ public sealed partial class SegmentedLongMap<T>
     /// <summary>
     /// Enumerate all present entries in ascending key order.
     /// </summary>
-    public IEnumerable<KeyValuePair<long, T>> Enumerate()
+    public IEnumerable<KeyValuePair<int, T>> Enumerate()
     {
         for (int s = 0; s < Segments.Length; s++)
         {
@@ -143,7 +143,7 @@ public sealed partial class SegmentedLongMap<T>
                     if (idx >= vals.Length)
                         break;
 
-                    yield return new KeyValuePair<long, T>(start + idx, vals[idx]);
+                    yield return new KeyValuePair<int, T>(start + idx, vals[idx]);
                     word &= word - 1; // clear lowest set bit
                 }
             }

@@ -1,4 +1,4 @@
-// DuplicateFileFinderLibTests/Repository/Plugins/Models/SegmentedLongMapTests.cs
+// DuplicateFileFinderLibTests/Repository/Plugins/Models/SegmentedMapTests.cs
 
 using System;
 using System.Collections.Generic;
@@ -13,12 +13,12 @@ using Xunit;
 
 namespace DuplicateFileFinderLibTests.Repository.Plugins.Models;
 
-public sealed class SegmentedLongMapTests
+public sealed class SegmentedMapTests
 {
     [Fact]
     public void Empty_TryGetValue_ReturnsFalse()
     {
-        var map = SegmentedLongMap<DirHandle>.Empty;
+        var map = SegmentedMap<DirHandle>.Empty;
 
         Assert.False(map.TryGetValue(123, out _));
         Assert.False(map.TryGetValue(-1, out _));
@@ -31,10 +31,10 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(42, new DirHandle(5, 7))
+            new KeyValuePair<int, DirHandle>(42, new DirHandle(5, 7))
         };
 
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.Equal(1, map.SegmentCount);
         Assert.True(map.TryGetValue(42, out var v));
@@ -54,11 +54,11 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(10, new DirHandle(1, 1)),
-            new KeyValuePair<long, DirHandle>(10, new DirHandle(1, 2)),
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 1)),
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 2)),
         };
 
-        Assert.Throws<InvalidOperationException>(() => SegmentedLongMap<DirHandle>.Build(items));
+        Assert.Throws<InvalidOperationException>(() => SegmentedMap<DirHandle>.Build(items));
     }
 
     [Fact]
@@ -66,12 +66,12 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, FileHandle>(100, new FileHandle(8, 1)),
-            new KeyValuePair<long, FileHandle>(1,   new FileHandle(8, 2)),
-            new KeyValuePair<long, FileHandle>(50,  new FileHandle(8, 3)),
+            new KeyValuePair<int, FileHandle>(100, new FileHandle(8, 1)),
+            new KeyValuePair<int, FileHandle>(1,   new FileHandle(8, 2)),
+            new KeyValuePair<int, FileHandle>(50,  new FileHandle(8, 3)),
         };
 
-        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold: 1000);
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 1000);
 
         Assert.True(map.TryGetValue(1, out var v1));
         Assert.Equal(new FileHandle(8, 2), v1);
@@ -83,7 +83,7 @@ public sealed class SegmentedLongMapTests
         Assert.Equal(new FileHandle(8, 1), v100);
 
         var keys = map.Enumerate().Select(kv => kv.Key).ToArray();
-        Assert.Equal(new long[] { 1, 50, 100 }, keys);
+        Assert.Equal(new[] { 1, 50, 100 }, keys);
     }
 
     [Fact]
@@ -91,13 +91,13 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(10,  new DirHandle(1, 10)),
-            new KeyValuePair<long, DirHandle>(20,  new DirHandle(1, 20)),
-            new KeyValuePair<long, DirHandle>(200, new DirHandle(1, 200)),
+            new KeyValuePair<int, DirHandle>(10,  new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(20,  new DirHandle(1, 20)),
+            new KeyValuePair<int, DirHandle>(200, new DirHandle(1, 200)),
         };
 
         // With gapThreshold=5, 10->20 gap=10 => split; 20->200 gap=180 => split
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 5);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 5);
 
         Assert.Equal(3, map.SegmentCount);
 
@@ -111,12 +111,12 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(10, new DirHandle(1, 10)),
-            new KeyValuePair<long, DirHandle>(12, new DirHandle(1, 12)), // gap 2
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(12, new DirHandle(1, 12)), // gap 2
         };
 
         // gapThreshold >=2 keeps in one segment spanning [10..12]
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 2);
 
         Assert.Equal(1, map.SegmentCount);
 
@@ -135,11 +135,11 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(100, new DirHandle(1, 1)),
-            new KeyValuePair<long, DirHandle>(101, new DirHandle(1, 2)),
+            new KeyValuePair<int, DirHandle>(100, new DirHandle(1, 1)),
+            new KeyValuePair<int, DirHandle>(101, new DirHandle(1, 2)),
         };
 
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.False(map.TryGetValue(99, out _));
         Assert.True(map.TryGetValue(100, out _));
@@ -150,11 +150,11 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(100, new DirHandle(1, 1)),
-            new KeyValuePair<long, DirHandle>(101, new DirHandle(1, 2)),
+            new KeyValuePair<int, DirHandle>(100, new DirHandle(1, 1)),
+            new KeyValuePair<int, DirHandle>(101, new DirHandle(1, 2)),
         };
 
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 0);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
 
         Assert.False(map.TryGetValue(102, out _));
     }
@@ -164,18 +164,18 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, FileHandle>(100, new FileHandle(9, 1)),
-            new KeyValuePair<long, FileHandle>(10,  new FileHandle(9, 2)),
-            new KeyValuePair<long, FileHandle>(12,  new FileHandle(9, 3)),
-            new KeyValuePair<long, FileHandle>(200, new FileHandle(9, 4)),
+            new KeyValuePair<int, FileHandle>(100, new FileHandle(9, 1)),
+            new KeyValuePair<int, FileHandle>(10,  new FileHandle(9, 2)),
+            new KeyValuePair<int, FileHandle>(12,  new FileHandle(9, 3)),
+            new KeyValuePair<int, FileHandle>(200, new FileHandle(9, 4)),
         };
 
-        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 2);
 
         var enumerated = map.Enumerate().ToArray();
 
         Assert.Equal(items.Length, enumerated.Length);
-        Assert.Equal(new long[] { 10, 12, 100, 200 }, enumerated.Select(e => e.Key).ToArray());
+        Assert.Equal(new[] { 10, 12, 100, 200 }, enumerated.Select(e => e.Key).ToArray());
 
         // Ensure each key appears once
         Assert.Equal(enumerated.Length, enumerated.Select(e => e.Key).Distinct().Count());
@@ -189,14 +189,14 @@ public sealed class SegmentedLongMapTests
     [Fact]
     public void FromDictionary_BuildsEquivalentMap()
     {
-        var dict = new Dictionary<long, DirHandle>
+        var dict = new Dictionary<int, DirHandle>
         {
             [5] = new DirHandle(1, 5),
             [1] = new DirHandle(1, 1),
             [100] = new DirHandle(1, 100),
         };
 
-        var map = SegmentedLongMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);
+        var map = SegmentedMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);
 
         foreach (var (k, v) in dict)
         {
@@ -212,16 +212,16 @@ public sealed class SegmentedLongMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<long, DirHandle>(10,  new DirHandle(5, 10)),
-            new KeyValuePair<long, DirHandle>(12,  new DirHandle(5, 12)),
-            new KeyValuePair<long, DirHandle>(200, new DirHandle(5, 200)),
+            new KeyValuePair<int, DirHandle>(10,  new DirHandle(5, 10)),
+            new KeyValuePair<int, DirHandle>(12,  new DirHandle(5, 12)),
+            new KeyValuePair<int, DirHandle>(200, new DirHandle(5, 200)),
         };
 
-        var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold: 2);
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 2);
         Assert.True(map.SegmentCount >= 1);
 
         var bytes = MemoryPackSerializer.Serialize(map);
-        var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<DirHandle>>(bytes);
+        var clone = MemoryPackSerializer.Deserialize<SegmentedMap<DirHandle>>(bytes);
 
         Assert.NotNull(clone);
         Assert.Equal(map.SegmentCount, clone.SegmentCount);
@@ -251,12 +251,12 @@ public sealed class SegmentedLongMapTests
     public void Build_WithVariousGapThresholds_MaintainsCorrectness(int gapThreshold)
     {
         // Mix of clusters and gaps.
-        var items = new List<KeyValuePair<long, FileHandle>>();
-        for (long i = 1000; i < 1100; i++) items.Add(new(i, new FileHandle(1, (int)(i - 1000))));
-        for (long i = 5000; i < 5100; i++) items.Add(new(i, new FileHandle(2, (int)(i - 5000))));
+        var items = new List<KeyValuePair<int, FileHandle>>();
+        for (int i = 1000; i < 1100; i++) items.Add(new(i, new FileHandle(1, i - 1000)));
+        for (int i = 5000; i < 5100; i++) items.Add(new(i, new FileHandle(2, i - 5000)));
         items.Add(new(9999, new FileHandle(3, 9)));
 
-        var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold);
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold);
 
         // All keys present
         foreach (var (k, v) in items)
@@ -293,9 +293,9 @@ public sealed class SegmentedLongMapTests
             // Generate a random sparse-ish set of unique keys.
             // Range is intentionally large compared to count to create holes and multiple segments.
             int count = rng.Next(1_000, 6_000);
-            long maxKey = rng.Next(50_000, 500_000);
+            int maxKey = rng.Next(50_000, 500_000);
 
-            var keys = new HashSet<long>();
+            var keys = new HashSet<int>();
             while (keys.Count < count)
             {
                 // Create clustered keys sometimes, to form bands like your real data.
@@ -303,19 +303,19 @@ public sealed class SegmentedLongMapTests
                 {
                     var baseKey = keys.ElementAt(rng.Next(keys.Count));
                     var delta = rng.Next(-128, 129);
-                    long k = baseKey + delta;
+                    int k = baseKey + delta;
                     if (k >= 0 && k <= maxKey) keys.Add(k);
                 }
                 else
                 {
-                    keys.Add(rng.NextInt64(0, maxKey + 1));
+                    keys.Add(rng.Next(0, maxKey + 1));
                 }
             }
 
             // Assign deterministic values.
             // We only care about exact key->value preservation.
             var items = keys
-                .Select(k => new KeyValuePair<long, DirHandle>(k, new DirHandle(ScanRootId: 5, Index: unchecked((int)k))))
+                .Select(k => new KeyValuePair<int, DirHandle>(k, new DirHandle(ScanRootId: 5, Index: k)))
                 .ToArray();
 
             // Try several thresholds per trial.
@@ -323,7 +323,7 @@ public sealed class SegmentedLongMapTests
 
             foreach (var gapThreshold in thresholds)
             {
-                var map = SegmentedLongMap<DirHandle>.Build(items, gapThreshold);
+                var map = SegmentedMap<DirHandle>.Build(items, gapThreshold);
 
                 // 1) Every input key must be retrievable with exact value.
                 foreach (var (k, v) in items)
@@ -336,10 +336,10 @@ public sealed class SegmentedLongMapTests
                 // We test a mix of random probes and near-miss probes around existing keys.
                 for (int i = 0; i < 2_000; i++)
                 {
-                    long probe;
+                    int probe;
                     if (rng.NextDouble() < 0.5)
                     {
-                        probe = rng.NextInt64(0, maxKey + 1);
+                        probe = rng.Next(0, maxKey + 1);
                     }
                     else
                     {
@@ -376,7 +376,7 @@ public sealed class SegmentedLongMapTests
 
                 // 4) MemoryPack round-trip should preserve behavior (lookup + enumeration).
                 var bytes = MemoryPackSerializer.Serialize(map);
-                var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<DirHandle>>(bytes);
+                var clone = MemoryPackSerializer.Deserialize<SegmentedMap<DirHandle>>(bytes);
                 Assert.NotNull(clone);
 
                 foreach (var (k, v) in items)
@@ -400,7 +400,7 @@ public sealed class SegmentedLongMapTests
         const int seed = 424242;
         var rng = new Random(seed);
 
-        var items = new List<KeyValuePair<long, FileHandle>>(capacity: 50_000);
+        var items = new List<KeyValuePair<int, FileHandle>>(capacity: 50_000);
 
         // Band A: dense with random holes
         AddBand(items, rng, start: 100_000, length: 20_000, holeEvery: 37, scanRootId: 5);
@@ -410,8 +410,8 @@ public sealed class SegmentedLongMapTests
         AddBand(items, rng, start: 250_000, length: 30_000, holeEvery: 53, scanRootId: 6);
 
         // Singletons far away
-        items.Add(new KeyValuePair<long, FileHandle>(999_999, new FileHandle(8, 1)));
-        items.Add(new KeyValuePair<long, FileHandle>(1_500_000, new FileHandle(8, 2)));
+        items.Add(new KeyValuePair<int, FileHandle>(999_999, new FileHandle(8, 1)));
+        items.Add(new KeyValuePair<int, FileHandle>(1_500_000, new FileHandle(8, 2)));
 
         // Ensure keys unique
         items = items
@@ -423,7 +423,7 @@ public sealed class SegmentedLongMapTests
 
         foreach (var gapThreshold in thresholds)
         {
-            var map = SegmentedLongMap<FileHandle>.Build(items, gapThreshold);
+            var map = SegmentedMap<FileHandle>.Build(items, gapThreshold);
 
             // All present
             foreach (var (k, v) in items)
@@ -447,7 +447,7 @@ public sealed class SegmentedLongMapTests
 
             // MemoryPack roundtrip
             var bytes = MemoryPackSerializer.Serialize(map);
-            var clone = MemoryPackSerializer.Deserialize<SegmentedLongMap<FileHandle>>(bytes);
+            var clone = MemoryPackSerializer.Deserialize<SegmentedMap<FileHandle>>(bytes);
             Assert.NotNull(clone);
 
             foreach (var (k, v) in items)
@@ -458,9 +458,9 @@ public sealed class SegmentedLongMapTests
         }
 
         static void AddBand(
-            List<KeyValuePair<long, FileHandle>> dst,
+            List<KeyValuePair<int, FileHandle>> dst,
             Random rng,
-            long start,
+            int start,
             int length,
             int holeEvery,
             ScanRootId scanRootId)
@@ -470,12 +470,12 @@ public sealed class SegmentedLongMapTests
                 if (holeEvery > 0 && (i % holeEvery) == 0)
                     continue; // hole
 
-                long key = start + i;
+                int key = start + i;
 
                 // Make index non-trivial and non-monotonic (still deterministic).
-                int idx = unchecked((int)(key ^ (key >> 7) ^ rng.Next(0, 10)));
+                int idx = key ^ (key >> 7) ^ rng.Next(0, 10);
 
-                dst.Add(new KeyValuePair<long, FileHandle>(key, new FileHandle(scanRootId, idx)));
+                dst.Add(new KeyValuePair<int, FileHandle>(key, new FileHandle(scanRootId, idx)));
             }
         }
     }

@@ -16,7 +16,11 @@ public interface IScanCoordinator
 {
     bool IsScanning { get; }
     public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
+
+#pragma warning disable 0067
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+#pragma warning restore 0067
+
 
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken = default);
 

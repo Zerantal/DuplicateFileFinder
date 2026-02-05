@@ -14,7 +14,7 @@ using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Features.Duplicates.ScanRootsTree;
 
-public sealed class ScanRootsTreeNodeActions_DeleteFolderTests
+public sealed class ScanRootsTreeNodeActionsDeleteFolderTests
 {
     [Fact]
     public async Task DeleteFolderAsync_WhenCancelled_DoesNothing()
@@ -123,8 +123,13 @@ public sealed class ScanRootsTreeNodeActions_DeleteFolderTests
     {
         public bool IsScanning => false;
 
-        public event EventHandler<DuplicateFileFinderLib.Core.DuplicateFileFinderProgressReport>? ProgressChanged;
-        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+        public event EventHandler<DuplicateFileFinderLib.Core.DuplicateFileFinderProgressReport>? ProgressChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted { add { } remove { } }
 
         public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
             => throw new NotImplementedException();

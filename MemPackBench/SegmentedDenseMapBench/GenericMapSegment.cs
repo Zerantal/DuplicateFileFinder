@@ -1,19 +1,21 @@
 using MemoryPack;
 
-namespace DuplicateFileFinderLib.Repository.Plugins.Models;
+namespace MemPackBench.SegmentedDenseMapBench;
 
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class MapSegmentLong<T>
-    where T : struct
+public sealed partial class GenericMapSegment<TKey, TValue>
+    where TKey : struct, System.Numerics.IBinaryInteger<TKey>
+    where TValue : struct
 {
-    public long StartId { get; init; }
+    public TKey StartKey { get; init; }
 
-    public required T[] Values { get; init; }
+    public required TValue[] Values { get; init; }
 
     public required ulong[] PresentBits { get; init; }
 
     [MemoryPackIgnore]
-    public long EndId => StartId + Values.Length - 1;
+    public TKey EndKey
+        => StartKey + TKey.CreateChecked(Values.Length - 1);
 
     public bool IsPresent(int index)
     {
@@ -25,20 +27,19 @@ public sealed partial class MapSegmentLong<T>
         return (PresentBits[word] & (1UL << bit)) != 0;
     }
 
-    public static MapSegmentLong<T> BuildSegment(
-        KeyValuePair<long, T>[] sorted,
+    public static GenericMapSegment<TKey, TValue> BuildSegment(
+        KeyValuePair<TKey, TValue>[] sorted,
         int fromInclusive,
         int toInclusive,
-        long segStart,
-        long segEnd)
+        TKey segStart,
+        TKey segEnd)
     {
-        long lenL = segEnd - segStart + 1;
-        if (lenL <= 0 || lenL > int.MaxValue)
-            throw new InvalidOperationException($"MapSegmentLong length out of range: {lenL}");
+        // len = (segEnd - segStart + 1)
+        var len = int.CreateChecked(segEnd - segStart + TKey.One);
+        if (len <= 0)
+            throw new InvalidOperationException($"LongMapSegment length out of range: {len}");
 
-        int len = (int)lenL;
-
-        var values = new T[len];
+        var values = new TValue[len];
 
         // ceil(len / 64)
         int words = (len + 63) >> 6;
@@ -47,15 +48,15 @@ public sealed partial class MapSegmentLong<T>
         for (int i = fromInclusive; i <= toInclusive; i++)
         {
             var (k, v) = (sorted[i].Key, sorted[i].Value);
-            int offset = (int)(k - segStart);
+            int offset = int.CreateChecked(k - segStart);
 
             values[offset] = v;
             SetBit(bits, offset);
         }
 
-        return new MapSegmentLong<T>
+        return new GenericMapSegment<TKey, TValue>
         {
-            StartId = segStart,
+            StartKey = segStart,
             Values = values,
             PresentBits = bits
         };
@@ -68,3 +69,4 @@ public sealed partial class MapSegmentLong<T>
         bits[word] |= 1UL << bit;
     }
 }
+

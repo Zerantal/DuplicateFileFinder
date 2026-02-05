@@ -5,16 +5,14 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 
-using MemoryPack;
-
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
     // Published, read-only snapshots (we never mutate these maps after publishing).
     // We swap the reference atomically when rebuilding.
-    private volatile SegmentedIntMap<FileHandle> _filesById = SegmentedIntMap<FileHandle>.Empty;
-    private volatile SegmentedIntMap<DirHandle> _dirsById = SegmentedIntMap<DirHandle>.Empty;
+    private volatile SegmentedMap<FileHandle> _filesById = SegmentedMap<FileHandle>.Empty;
+    private volatile SegmentedMap<DirHandle> _dirsById = SegmentedMap<DirHandle>.Empty;
 
     // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
@@ -183,8 +181,8 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             // 1) publish dictionaries
             // 2) publish counts + active roots
             // 3) publish snapshot view last so readers see coherent state for Decode* usage
-            _dirsById = SegmentedIntMap<DirHandle>.FromDictionary(newDirs);
-            _filesById = SegmentedIntMap<FileHandle>.FromDictionary(newFiles);
+            _dirsById = SegmentedMap<DirHandle>.FromDictionary(newDirs);
+            _filesById = SegmentedMap<FileHandle>.FromDictionary(newFiles);
 
             _activeScanRoots = activeRootIds;
             _dirCountByRootId = newDirCounts;
@@ -256,7 +254,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        File.WriteAllBytes(path, MemoryPackSerializer.Serialize(state));
+        MemoryPackFile.SaveToFile(path, state);
     }
 
     private bool TryLoadState(long expectedGeneration)

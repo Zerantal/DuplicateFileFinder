@@ -83,4 +83,28 @@ internal static class MemoryPackFile
             accessor.SafeMemoryMappedViewHandle.ReleasePointer();
         }
     }
+
+    internal static void SaveToFile<T>(string path, in T value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        using var fs = new FileStream(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 1 << 20,
+            options: FileOptions.SequentialScan);
+
+        using var writer = new StreamBufferWriter(fs);
+
+        MemoryPackSerializer.Serialize(writer, value);
+
+        writer.Flush();
+        fs.Flush(flushToDisk: false);
+    }
 }

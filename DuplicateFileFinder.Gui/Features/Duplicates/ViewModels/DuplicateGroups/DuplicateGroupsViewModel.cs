@@ -168,7 +168,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
             return FetchSetsPage_Unfiltered(offset, count);
 
         if (!_treeIndex.TryGetSubtreeRange(subtree, out var range) || range.IsEmpty)
-            return (-1, Array.Empty<DuplicateSetRow>());
+            return (-1, []);
 
         var filter = new SubtreeFilter(subtree, range);
         return FetchSetsPage_Filtered(filter, offset, count);
@@ -176,22 +176,17 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 
     private (int total, DuplicateSetRow[] items) FetchSetsPage_Unfiltered(int offset, int count)
     {
-        DuplicateSetRow[] rows;
+        var page = _hashIndex.GetGroupsPage(_query, offset, count);
+        if (page.Count == 0)
+            return (-1, []);
 
-        using (TimingLog.Start("FetchSetsPage_Unfiltered"))
-        {
-            var page = _hashIndex.GetGroupsPage(_query, offset, count);
-            if (page.Count == 0)
-                return (-1, Array.Empty<DuplicateSetRow>());
+        var rows = new DuplicateSetRow[page.Count];
+        var span = page.Groups.Span;
 
-            rows = new DuplicateSetRow[page.Count];
-            var span = page.Groups.Span;
-
-            for (var i = 0; i < page.Count; i++)
-                rows[i] = new DuplicateSetRow(
-                    span[i],
-                    _controller.ResolveFileName);
-        }
+        for (var i = 0; i < page.Count; i++)
+            rows[i] = new DuplicateSetRow(
+                span[i],
+                _controller.ResolveFileName);
 
         return (-1, rows);
     }
@@ -207,7 +202,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         {
             var page = _hashIndex.GetGroupsPage(_query, filter, offset, count);
             if (page.Count == 0)
-                return (-1, Array.Empty<DuplicateSetRow>());
+                return (-1, []);
 
             rows = new DuplicateSetRow[page.Count];
             var span = page.Groups.Span;
