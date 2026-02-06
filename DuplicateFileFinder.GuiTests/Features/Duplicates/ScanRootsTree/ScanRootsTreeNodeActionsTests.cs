@@ -147,18 +147,18 @@ public sealed class ScanRootsTreeNodeActionsTests
     {
         public bool IsScanning => false;
 
-        public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
-        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+        public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged { add { } remove { } }
+        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted { add { } remove { } }
 
-        public readonly List<long> RescannedScanRoots = [];
+        public readonly List<ScanRootId> RescannedScanRoots = [];
         public readonly List<DirHandle> RescannedFolders = [];
-        public readonly List<long> RemovedScanRoots = [];
-        public readonly List<(long ScanRootId, string? DisplayName)> DisplayNameUpdates = [];
+        public readonly List<ScanRootId> RemovedScanRoots = [];
+        public readonly List<(ScanRootId ScanRootId, string? DisplayName)> DisplayNameUpdates = [];
 
         public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 
-        public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken)
+        public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken)
         {
             RescannedScanRoots.Add(scanRootId);
             return Task.CompletedTask;
@@ -177,7 +177,7 @@ public sealed class ScanRootsTreeNodeActionsTests
             return Task.CompletedTask;
         }
 
-        public Task RemoveScanRoot(long scanRootId)
+        public Task RemoveScanRoot(ScanRootId scanRootId)
         {
             RemovedScanRoots.Add(scanRootId);
             return Task.CompletedTask;
@@ -185,7 +185,7 @@ public sealed class ScanRootsTreeNodeActionsTests
 
         public void CancelScan() => throw new NotImplementedException();
 
-        public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+        public Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName)
         {
             DisplayNameUpdates.Add((scanRootId, displayName));
             return Task.CompletedTask;

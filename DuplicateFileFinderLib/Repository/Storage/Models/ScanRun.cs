@@ -25,7 +25,7 @@ public enum HashPolicyMode : byte
 public sealed partial record ScanRun
 {
     [MemoryPackOrder(0)] public required long ScanSequence { get; init; }
-    [MemoryPackOrder(1)] public required long ScanRootId { get; init; }
+    [MemoryPackOrder(1)] public required ScanRootId ScanRootId { get; init; }
     [MemoryPackOrder(2)] public required string RootPath { get; init; } = string.Empty;
     [MemoryPackOrder(3)] public required DateTimeOffset StartedAt { get; init; }
     [MemoryPackOrder(4)] public DateTimeOffset? FinishedAt { get; init; }

@@ -50,7 +50,7 @@ public sealed class DuplicateGroupsViewModelDeletionTests
     // Harness
     // ---------------------------------------------------------------------
 
-    private static FileItem MakeFileItem(long id, string fullPath)
+    private static FileItem MakeFileItem(FileId id, string fullPath)
         => new()
         {
             Id = id,

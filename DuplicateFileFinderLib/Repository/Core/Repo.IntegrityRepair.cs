@@ -46,7 +46,7 @@ public sealed partial class Repo
         // ------------------------------
         lock (_sync)
         {
-            foreach (var (rootId, snap) in _scanRootSnapshots.ToArray())
+            foreach (var (_, snap) in _scanRootSnapshots.ToArray())
             {
                 var dirs = snap.Dirs;
                 if (dirs.Length == 0)
@@ -85,7 +85,7 @@ public sealed partial class Repo
 
                 if (changed)
                 {
-                    _scanRootSnapshots[rootId] = updated;
+                    UpsertScanRootSnapshot_NoLock(updated);
                     changedSnapshots.Add(updated);
                 }
             }
@@ -105,7 +105,7 @@ public sealed partial class Repo
         lock (_sync)
         {
             // 2a) Ensure ScanRoots referenced by runs exist (best-effort).
-            foreach (var run in _scanRuns.ToArray())
+            foreach (var run in _scanRunIndex.Values.ToArray())
             {
                 if (run.ScanRootId <= 0)
                     continue;
@@ -119,7 +119,7 @@ public sealed partial class Repo
                 var canonicalRootPath = PathUtils.NormalizePath(run.RootPath);
 
                 // If we have a snapshot for this ScanRootId, attempt to pick a plausible root DirId.
-                long dirId = 0;
+                DirId dirId = 0;
                 if (_scanRootSnapshots.TryGetValue(run.ScanRootId, out var snap))
                 {
                     dirId = PickSnapshotRootDirId_NoLock(snap, canonicalRootPath);
@@ -145,7 +145,7 @@ public sealed partial class Repo
                     DeletedAtUtc = null
                 };
 
-                _scanRoots[root.RootId] = root;
+                UpsertScanRoot_NoLock(root);
                 metaChanged = true;
             }
 
@@ -155,7 +155,7 @@ public sealed partial class Repo
                 if (root.DirId > 0)
                     continue;
 
-                long dirId = 0;
+                DirId dirId = 0;
                 if (_scanRootSnapshots.TryGetValue(id, out var snap))
                 {
                     dirId = PickSnapshotRootDirId_NoLock(snap, root.RootPath);
@@ -166,7 +166,7 @@ public sealed partial class Repo
                     dirId = AllocateDirId_NoLock(); // stable id; snapshot may not contain it, but this is “repair”.
                 }
 
-                _scanRoots[id] = root with { DirId = dirId };
+                UpsertScanRoot_NoLock(root with { DirId = dirId });
                 metaChanged = true;
             }
 
@@ -186,40 +186,50 @@ public sealed partial class Repo
 
             if (usedSequences.Count > 0)
             {
-                var keptRuns = new List<ScanRun>(_scanRuns.Count);
-                foreach (var run in _scanRuns)
-                {
-                    if (usedSequences.Contains(run.ScanSequence))
-                        keptRuns.Add(run);
-                    else
-                        metaChanged = true;
-                }
+                var kept = _scanRunIndex.Values
+                    .Where(r => usedSequences.Contains(r.ScanSequence))
+                    .ToDictionary(r => r.ScanSequence, r => r);
 
-                if (keptRuns.Count != _scanRuns.Count)
+                if (kept.Count != _scanRunIndex.Count)
                 {
-                    _scanRuns = keptRuns;
-                    _scanRunIndex.Clear();
-                    foreach (var run in keptRuns)
-                        _scanRunIndex[run.ScanSequence] = run;
+                    _scanRunIndex = kept;
+                    metaChanged = true;
                 }
             }
 
             // 2d) Remove non-deleted roots with no remaining runs.
-            var runsByRootId = _scanRuns
+            var runsByRootId = _scanRunIndex.Values
                 .GroupBy(r => r.ScanRootId)
                 .ToDictionary(g => g.Key, g => g.Count());
 
-            foreach (var (id, root) in _scanRoots.ToArray())
+            var newRoots = new Dictionary<ScanRootId, ScanRoot>(_scanRoots.Count);
+            foreach (var (id, root) in _scanRoots)
             {
-                if (root.IsDeleted)
-                    continue;
-
-                if (!runsByRootId.TryGetValue(id, out var count) || count == 0)
+                if (!root.IsDeleted &&
+                    (!runsByRootId.TryGetValue(id, out var count) || count == 0))
                 {
-                    _scanRoots.Remove(id);
-                    _scanRootSnapshots.Remove(id);
                     metaChanged = true;
+                    continue; // drop
                 }
+
+                newRoots[id] = root;
+            }
+
+            if (metaChanged)
+            {
+                _scanRoots = newRoots;
+
+                // also drop snapshots for removed roots
+                var newSnaps = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRootSnapshots.Count);
+                foreach (var (id, snap) in _scanRootSnapshots)
+                {
+                    if (_scanRoots.ContainsKey(id))
+                        newSnaps[id] = snap;
+                    else
+                        metaChanged = true;
+                }
+
+                _scanRootSnapshots = newSnaps;
             }
 
             // 2e) Deduplicate non-deleted roots by (VolumePath, RootPath)
@@ -232,8 +242,8 @@ public sealed partial class Repo
                 .ToList();
 
 
-            var canonical = new Dictionary<long, ScanRoot>();
-            var remap = new Dictionary<long, long>(); // oldRootId -> canonicalRootId
+            var canonical = new Dictionary<ScanRootId, ScanRoot>();
+            var remap = new Dictionary<ScanRootId, ScanRootId>(); // oldRootId -> canonicalRootId
 
             foreach (var grp in grouped)
             {
@@ -270,19 +280,18 @@ public sealed partial class Repo
             // Remap ScanRuns to canonical root ids
             if (remap.Count > 0)
             {
-                var newRuns = new List<ScanRun>(_scanRuns.Count);
-                foreach (var run in _scanRuns)
+                var newIndex = new Dictionary<long, ScanRun>(_scanRunIndex.Count);
+                foreach (var run in _scanRunIndex.Values)
                 {
-                    if (remap.TryGetValue(run.ScanRootId, out var newId))
-                        newRuns.Add(run with { ScanRootId = newId });
-                    else
-                        newRuns.Add(run);
+                    var updatedRun = remap.TryGetValue(run.ScanRootId, out var newId)
+                        ? run with { ScanRootId = newId }
+                        : run;
+
+                    newIndex[updatedRun.ScanSequence] = updatedRun;
                 }
 
-                _scanRuns = newRuns;
-                _scanRunIndex.Clear();
-                foreach (var run in newRuns)
-                    _scanRunIndex[run.ScanSequence] = run;
+                _scanRunIndex = newIndex;
+                metaChanged = true;
             }
 
             // Add back deleted roots unchanged.
@@ -298,7 +307,7 @@ public sealed partial class Repo
                 {
                     Meta = _meta,
                     ScanRoots = _scanRoots.Values.ToList(),
-                    ScanRuns = _scanRuns.ToList()
+                    ScanRuns = _scanRunIndex.Values.OrderBy(r => r.ScanSequence).ToList()
                 };
             }
         }
@@ -343,7 +352,7 @@ public sealed partial class Repo
     /// Prefers: a dir whose ParentDirId == -1 and name matches the leaf of rootPath.
     /// Falls back to: first dir with ParentDirId == -1.
     /// </summary>
-    private static long PickSnapshotRootDirId_NoLock(ScanRootSnapshotV2 snap, string rootPath)
+    private static DirId PickSnapshotRootDirId_NoLock(ScanRootSnapshotV2 snap, string rootPath)
     {
         if (snap.Dirs.Length == 0)
             return 0;
@@ -359,7 +368,7 @@ public sealed partial class Repo
 
         var leafName = Leaf(rootPath);
 
-        long firstRoot = 0;
+        DirId firstRoot = 0;
 
         foreach (var d in snap.Dirs)
         {

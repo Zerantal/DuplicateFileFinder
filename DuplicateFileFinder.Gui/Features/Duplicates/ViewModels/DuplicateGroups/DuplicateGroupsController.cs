@@ -25,7 +25,7 @@ public sealed partial class DuplicateGroupsController(IRepoHost repoHost) : Obse
     private RepoSnapshotView? _snapshot;
 
     // RootId -> full path (e.g. VolumePath + RootPath)
-    private Dictionary<long, string> _scanRootFullPathByRootId = new();
+    private Dictionary<ScanRootId, string> _scanRootFullPathByRootId = new();
 
     [ObservableProperty] private int _duplicatesFound;
     [ObservableProperty] private int _filesScanned;

@@ -13,8 +13,8 @@ internal sealed class TestSnapshotViewBuilder
     private readonly List<FileRecordV2> _files = new();
 
     public TestSnapshotViewBuilder Dir(
-        long dirId,
-        long parentDirId,
+        DirId dirId,
+        DirId parentDirId,
         string? name,
         ScanEntryStatus status,
         long lastSeenScanSequence)
@@ -31,8 +31,8 @@ internal sealed class TestSnapshotViewBuilder
     }
 
     public TestSnapshotViewBuilder File(
-        long fileId,
-        long dirId,
+        FileId fileId,
+        DirId dirId,
         string? name,
         ScanEntryStatus status,
         long lastSeenScanSequence)
@@ -48,7 +48,7 @@ internal sealed class TestSnapshotViewBuilder
         return this;
     }
 
-    public ScanRootSnapshotView Build(long scanRootId = 1)
+    public ScanRootSnapshotView Build(ScanRootId scanRootId = 1)
         => new()
         {
             ScanRootId = scanRootId,

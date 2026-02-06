@@ -25,13 +25,13 @@ public sealed class ScanRootsTreeNodeActions : IScanRootsTreeNodeActions
         _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
     }
 
-    public Task RescanScanRootAsync(long scanRootId)
+    public Task RescanScanRootAsync(ScanRootId scanRootId)
         => _scanner.RunRescanLocationWithDialogAsync(scanRootId);
 
     public Task RescanFolderAsync(DirHandle dir)
         => _scanner.RunFolderRescanWithDialogAsync(dir);
 
-    public async Task<bool> TryRemoveScanRootAsync(long scanRootId)
+    public async Task<bool> TryRemoveScanRootAsync(ScanRootId scanRootId)
     {
         var ok = await _dialogs.ShowConfirmationAsync(
             "Remove scan root",
@@ -46,7 +46,7 @@ public sealed class ScanRootsTreeNodeActions : IScanRootsTreeNodeActions
         return true;
     }
 
-    public async Task<bool> TrySetScanRootDisplayNameAsync(long scanRootId, string currentLabel)
+    public async Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel)
     {
         var input = await _dialogs.ShowTextInputAsync(
             "Set display name",

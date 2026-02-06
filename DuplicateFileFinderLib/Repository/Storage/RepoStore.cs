@@ -77,24 +77,33 @@ internal static partial class RepoStore
 
     // ---------------- scanroot snapshot v2 ----------------
 
-    internal static async Task<ScanRootSnapshotV2?> LoadScanRootSnapshotV2Async(
+    internal static Task<ScanRootSnapshotV2?> LoadScanRootSnapshotV2Async(
         string repoPath,
         long scanRootId,
         CancellationToken ct = default)
     {
+        if (ct.IsCancellationRequested)
+            return Task.FromCanceled<ScanRootSnapshotV2?>(ct);
+
         repoPath = Path.GetFullPath(repoPath);
-
         var path = GetRootSnapshotPath(repoPath, scanRootId);
-        if (!File.Exists(path))
-            return null;
 
-        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var snapshotV2 = await MemoryPackSerializer.DeserializeAsync<ScanRootSnapshotV2>(fs, cancellationToken: ct)
-            .ConfigureAwait(false);
-
-
-        return snapshotV2;
+        try
+        {
+            // Synchronous load; returned as already-completed Task.
+            var snapshot = MemoryPackFile.LoadMapped<ScanRootSnapshotV2>(path, ct);
+            return Task.FromResult<ScanRootSnapshotV2?>(snapshot);
+        }
+        catch (FileNotFoundException)
+        {
+            return Task.FromResult<ScanRootSnapshotV2?>(null);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return Task.FromResult<ScanRootSnapshotV2?>(null);
+        }
     }
+
 
     internal static async Task SaveScanRootSnapshotV2Async(
         string repoPath,

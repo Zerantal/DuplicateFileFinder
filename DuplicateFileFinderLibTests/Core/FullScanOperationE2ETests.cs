@@ -417,9 +417,9 @@ public sealed class FullScanOperationE2ETests
             var pool = snap.StringPool;
 
             var dirById = dirs.ToDictionary(d => d.DirId);
-            var pathCache = new Dictionary<long, string>();
+            var pathCache = new Dictionary<DirId, string>();
 
-            string DirPath(long dirId)
+            string DirPath(DirId dirId)
             {
                 if (dirId <= 0)
                     return "";

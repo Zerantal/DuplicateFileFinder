@@ -30,7 +30,7 @@ public sealed partial class Repo
         return seq;
     }
 
-    public long AllocateDirId()
+    public DirId AllocateDirId()
     {
         lock (_sync)
         {
@@ -38,7 +38,7 @@ public sealed partial class Repo
         }
     }
 
-    private long AllocateDirId_NoLock()
+    private DirId AllocateDirId_NoLock()
     {
         var id = _meta.NextDirId;
         _meta = _meta with { NextDirId = id + 1 };
@@ -46,7 +46,7 @@ public sealed partial class Repo
         return id;
     }
 
-    public long AllocateFileId()
+    public FileId AllocateFileId()
     {
         lock (_sync)
         {
@@ -54,7 +54,7 @@ public sealed partial class Repo
         }
     }
 
-    private long AllocateFileId_NoLock()
+    private FileId AllocateFileId_NoLock()
     {
         var id = _meta.NextFileId;
         _meta = _meta with { NextFileId = id + 1 };
@@ -63,7 +63,7 @@ public sealed partial class Repo
     }
 
     [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
-    private long AllocateRootId_NoLock()
+    private int AllocateRootId_NoLock()
     {
         var id = _meta.NextScanRootId;
         _meta = _meta with { NextScanRootId = id + 1 };
@@ -73,28 +73,20 @@ public sealed partial class Repo
 
     async Task IRepoInternal.MarkScanCompletedAsync(long sequence, CancellationToken ct)
     {
-        ScanRun updated;
+        ScanRun? updated;
         long generation;
 
         lock (_sync)
         {
-            if (!_scanRunIndex.TryGetValue(sequence, out var run))
-                return;
-
-            updated = run with
+            if (!TryUpdateScanRun_NoLock(sequence, run => run with
             {
                 Status = ScanRunStatus.Completed,
                 FinishedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = null
-            };
-
-            _scanRunIndex[sequence] = updated;
-
-            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
-            if (idx >= 0)
-                _scanRuns[idx] = updated;
-            else
-                _scanRuns.Add(updated);
+            }, out updated) || updated is null)
+            {
+                return;
+            }
 
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };
@@ -108,29 +100,21 @@ public sealed partial class Repo
     async Task IRepoInternal.MarkScanFailedAsync(long sequence, string? errorMessage, bool cancelled, CancellationToken ct)
     {
         long generation;
-        ScanRun updated;
+        ScanRun? updated;
 
         lock (_sync)
         {
-            if (!_scanRunIndex.TryGetValue(sequence, out var run))
-                return;
-
             var status = cancelled ? ScanRunStatus.Cancelled : ScanRunStatus.Failed;
 
-            updated = run with
+            if (!TryUpdateScanRun_NoLock(sequence, run => run with
             {
                 Status = status,
                 FinishedAt = DateTimeOffset.UtcNow,
                 ErrorMessage = errorMessage
-            };
-
-            _scanRunIndex[sequence] = updated;
-
-            var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
-            if (idx >= 0)
-                _scanRuns[idx] = updated;
-            else
-                _scanRuns.Add(updated);
+            }, out updated) || updated is null)
+            {
+                return;
+            }
 
             generation = _meta.Generation + 1;
             _meta = _meta with { Generation = generation };
@@ -158,7 +142,7 @@ public sealed partial class Repo
                 string.Equals(r.RootPath, relativeRootPath, StringComparison.Ordinal));
         }
 
-        // fallback to mathcing by volumePath instead of volumeId
+        // fallback to matching by volumePath instead of volumeId
         existing ??= _scanRoots.Values.FirstOrDefault(r =>
             string.Equals(r.VolumePath, volumePath, StringComparison.Ordinal) &&
             string.Equals(r.RootPath, relativeRootPath, StringComparison.Ordinal));
@@ -182,7 +166,8 @@ public sealed partial class Repo
                 DeviceModel = volume?.DeviceModel ?? existing.DeviceModel
             };
 
-            _scanRoots[updated.RootId] = updated;
+            UpsertScanRoot_NoLock(updated);
+
             MarkMetaDirty_NoLock();
             return updated;
         }
@@ -205,7 +190,8 @@ public sealed partial class Repo
             DeletedAtUtc = null
         };
 
-        _scanRoots[created.RootId] = created;
+        UpsertScanRoot_NoLock(created);
+
         MarkMetaDirty_NoLock();
         return created;
     }
@@ -251,7 +237,7 @@ public sealed partial class Repo
         ScanRootSnapshotV2 snapshot,
         Action? additionalInMemoryChanges = null)
     {
-        _scanRootSnapshots[snapshot.ScanRootId] = snapshot;
+        UpsertScanRootSnapshot_NoLock(snapshot);
 
         additionalInMemoryChanges?.Invoke();
 
@@ -259,7 +245,7 @@ public sealed partial class Repo
         _meta = _meta with { Generation = generation };
         MarkMetaDirty_NoLock();
 
-        var view = GetRepoSnapshotView();
+        var view = GetRepoSnapshotView_NoLock();
         return (generation, view);
     }
 
@@ -268,7 +254,6 @@ public sealed partial class Repo
         await PersistScanRootSnapshotV2Async(snapshot, ct).ConfigureAwait(false);
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
     }
-
 
     private async Task<(long Generation, RepoSnapshotView SnapshotView)> CommitSnapshot_NoEventAsync(
         ScanRootSnapshotV2 snapshot,
@@ -285,7 +270,6 @@ public sealed partial class Repo
         await PersistCommittedSnapshotAsync(snapshot, ct).ConfigureAwait(false);
         return (gen, view);
     }
-
 
     private async Task<(long Generation, RepoSnapshotView SnapshotView, ScanRun UpdatedRun)> FinaliseCompletedScanAsync(
         long scanSequence,
@@ -321,23 +305,15 @@ public sealed partial class Repo
 
     private ScanRun MarkScanCompleted_NoLock(long sequence)
     {
-        if (!_scanRunIndex.TryGetValue(sequence, out var run))
-            throw new InvalidOperationException($"ScanRun {sequence} was not found.");
-
-        var updated = run with
+        if (!TryUpdateScanRun_NoLock(sequence, run => run with
         {
             Status = ScanRunStatus.Completed,
             FinishedAt = DateTimeOffset.UtcNow,
             ErrorMessage = null
-        };
-
-        _scanRunIndex[sequence] = updated;
-
-        var idx = _scanRuns.FindIndex(r => r.ScanSequence == sequence);
-        if (idx >= 0)
-            _scanRuns[idx] = updated;
-        else
-            _scanRuns.Add(updated);
+        }, out var updated) || updated is null)
+        {
+            throw new InvalidOperationException($"ScanRun {sequence} was not found.");
+        }
 
         return updated;
     }
@@ -345,6 +321,6 @@ public sealed partial class Repo
     async Task IRepoInternal.CommitCheckpoint(ScanCheckpoint checkpoint, CancellationToken ct)
         => await RepoStore.SaveScanCheckpointAsync(_repoPath, checkpoint, ct).ConfigureAwait(false);
 
-    public Task DeleteScanCheckpointAsync(long scanRootId, CancellationToken ct = default)
+    public Task DeleteScanCheckpointAsync(ScanRootId scanRootId, CancellationToken ct = default)
         => RepoStore.DeleteScanCheckpointAsync(_repoPath, scanRootId, ct);
 }

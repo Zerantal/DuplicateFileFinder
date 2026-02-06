@@ -28,7 +28,7 @@ public sealed class RepoIntegrityRepairTests
         // ------------------------------
         // Arrange meta
         // ------------------------------
-        var scanRootId = 1L;
+        ScanRootId scanRootId = 1;
 
         var meta = NewMeta(repoDir);
 
@@ -323,7 +323,7 @@ public sealed class RepoIntegrityRepairTests
 
         var pool = CreateStringPool("data");
 
-        const long snapshotRootDirId = 777;
+        const DirId snapshotRootDirId = 777;
 
         await WriteMpAsync(Path.Combine(rootsDir, "1.mp"),
             new ScanRootSnapshotV2
@@ -399,7 +399,7 @@ public sealed class RepoIntegrityRepairTests
         return new PackedStringPool(data, offsets);
     }
 
-    private static ScanRun NewRun(long scanRootId, long seq, string rootPath, ScanRunStatus status)
+    private static ScanRun NewRun(ScanRootId scanRootId, long seq, string rootPath, ScanRunStatus status)
         => new ScanRun
         {
             ScanRootId = scanRootId,

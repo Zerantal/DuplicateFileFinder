@@ -42,7 +42,7 @@ public enum RepoSnapshotCommitReason
 /// </summary>
 public sealed record ScanRootSnapshotReplacedEvent : RepoEvent
 {
-    public required long ScanRootId { get; init; }
+    public required ScanRootId ScanRootId { get; init; }
     public required RepoSnapshotView RepoSnapshotView { get; init; }
     public required RepoSnapshotCommitReason Reason { get; init; }
 }
@@ -72,5 +72,5 @@ public sealed record RepoDirDeletedEvent : RepoEvent
 /// </summary>
 public sealed record RepoScanRootRemovedEvent : RepoEvent
 {
-    public required long ScanRootId { get; init; }
+    public required ScanRootId ScanRootId { get; init; }
 }

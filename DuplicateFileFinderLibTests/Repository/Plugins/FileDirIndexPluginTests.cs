@@ -308,49 +308,49 @@ public sealed class FileDirIndexPluginTests
     private static RepoSnapshotView MakeTwoRootSnapshot()
     {
         // Deterministic ordering matters because handles are index-based.
-        var snapshots = new Dictionary<long, ScanRootSnapshotView>
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [1] = MakeRoot(
                     scanRootId: 1,
-                    dirIds: [101L, 102L],
-                    fileIds: [1001L]),
+                    dirIds: [101, 102],
+                    fileIds: [1001]),
             [2] = MakeRoot(
                     scanRootId: 2,
-                    dirIds: [201L],
-                    fileIds: [2001L])
+                    dirIds: [201],
+                    fileIds: [2001])
         };
 
         return new RepoSnapshotView
         {
             Snapshots = snapshots,
-            ScanRoots = MakeScanRootsFromSnapshots(snapshots)
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
         };
     }
 
     private static RepoSnapshotView MakeDifferentSnapshotSameRoots()
     {
-        var snapshots = new Dictionary<long, ScanRootSnapshotView>
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [1] = MakeRoot(
                     scanRootId: 1,
-                    dirIds: [99901L], // completely different IDs
-                    fileIds: [999001L]),
+                    dirIds: [99901], // completely different IDs
+                    fileIds: [999001]),
             [2] = MakeRoot(
                     scanRootId: 2,
-                    dirIds: [99902L],
-                    fileIds: [999002L])
+                    dirIds: [99902],
+                    fileIds: [999002])
         };
 
         return new RepoSnapshotView
         {
             Snapshots = snapshots,
-            ScanRoots = MakeScanRootsFromSnapshots(snapshots)
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
         };
     }
 
     private static RepoSnapshotView MakeHierarchicalSnapshot()
     {
-        var snapshots = new Dictionary<long, ScanRootSnapshotView>
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [1] = MakeHierarchicalRoot(scanRootId: 1)
         };
@@ -358,56 +358,11 @@ public sealed class FileDirIndexPluginTests
         return new RepoSnapshotView
         {
             Snapshots = snapshots,
-            ScanRoots = MakeScanRootsFromSnapshots(snapshots)
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
         };
     }
 
-    /// <summary>
-    /// Builds a usable RepoSnapshotView.ScanRoots dictionary from the per-root snapshots.
-    /// This is sufficient for plugin logic that needs to know which scan roots are live/deleted.
-    /// </summary>
-    private static Dictionary<long, ScanRoot> MakeScanRootsFromSnapshots(
-        IReadOnlyDictionary<long, ScanRootSnapshotView> snapshots,
-        Func<long, bool>? isDeleted = null,
-        Func<long, long>? dirIdForRoot = null,
-        Func<long, string>? rootPathForRoot = null,
-        Func<long, string?>? volumePathForRoot = null,
-        Func<long, string?>? volumeLabelForRoot = null,
-        Func<long, string?>? displayNameForRoot = null)
-    {
-        var dict = new Dictionary<long, ScanRoot>(snapshots.Count);
-
-        foreach (var (rootId, snapshot) in snapshots)
-        {
-            // Default: not deleted
-            var deleted = isDeleted?.Invoke(rootId) ?? false;
-
-            // Default: use first dir's DirId as the scan-root dirId if present
-            var dirId = dirIdForRoot?.Invoke(rootId)
-                        ?? (snapshot.Dirs.Count > 0 ? snapshot.Dirs[0].DirId : -1);
-
-            var rootPath = rootPathForRoot?.Invoke(rootId) ?? $"root-{rootId}";
-            var volPath = volumePathForRoot?.Invoke(rootId);
-            var volLabel = volumeLabelForRoot?.Invoke(rootId);
-            var displayName = displayNameForRoot?.Invoke(rootId);
-
-            dict[rootId] = new ScanRoot
-            {
-                RootId = rootId,
-                DirId = dirId,
-                RootPath = rootPath,
-                VolumePath = volPath,
-                VolumeLabel = volLabel,
-                DisplayName = displayName,
-                IsDeleted = deleted,
-                CreatedAt = default
-            };
-        }
-
-        return dict;
-    }
-
-    private static ScanRootSnapshotView MakeRoot(long scanRootId, long[] dirIds, long[] fileIds)
+    private static ScanRootSnapshotView MakeRoot(ScanRootId scanRootId, DirId[] dirIds, FileId[] fileIds)
     {
         // Minimal pool (indexing not used by FileDirIndexPlugin, but required by view).
         var pool = PackedStringPool.FromStrings(["x", ""]);
@@ -458,7 +413,7 @@ public sealed class FileDirIndexPluginTests
         };
     }
 
-    private static ScanRootSnapshotView MakeHierarchicalRoot(long scanRootId)
+    private static ScanRootSnapshotView MakeHierarchicalRoot(ScanRootId scanRootId)
     {
         // pool indices: 0="a", 1="b", 2="f.txt", 3="" (error/empty)
         var pool = PackedStringPool.FromStrings(["a", "b", "f.txt", ""]);

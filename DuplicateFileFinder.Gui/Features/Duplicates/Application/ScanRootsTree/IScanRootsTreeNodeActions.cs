@@ -8,16 +8,16 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 /// </summary>
 public interface IScanRootsTreeNodeActions
 {
-    Task RescanScanRootAsync(long scanRootId);
+    Task RescanScanRootAsync(ScanRootId scanRootId);
     Task RescanFolderAsync(DirHandle dir);
 
     /// <summary>Confirm and remove the scan root from the repository.</summary>
     /// <returns>true if the scan root was removed.</returns>
-    Task<bool> TryRemoveScanRootAsync(long scanRootId);
+    Task<bool> TryRemoveScanRootAsync(ScanRootId scanRootId);
 
     /// <summary>Prompt for and set the scan root display name.</summary>
     /// <returns>true if a change was applied (user didn’t cancel).</returns>
-    Task<bool> TrySetScanRootDisplayNameAsync(long scanRootId, string currentLabel);
+    Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel);
 
     /// <summary>Confirm and delete folder from disk, then remove from repo.</summary>
     Task DeleteFolderAsync(DirHandle dir, string fullPath);

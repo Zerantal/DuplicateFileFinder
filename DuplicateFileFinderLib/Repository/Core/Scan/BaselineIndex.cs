@@ -1,3 +1,5 @@
+using System.Text;
+
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Util;
@@ -8,7 +10,20 @@ using FileRecordV2 = DuplicateFileFinderLib.Repository.Storage.Models.FileRecord
 
 namespace DuplicateFileFinderLib.Repository.Core.Scan;
 
-using BaseLineMapValue = (long id, string name, ScanEntryStatus status, long lastSeen);
+// using BaseLineMapValue = (long id, string name, ScanEntryStatus status, long lastSeen);
+
+internal record BaseLineMapValue(string name, ScanEntryStatus status, long lastSeen);
+internal sealed record BaseLineDirMapValue(
+    DirId dirId,
+    string name,
+    ScanEntryStatus status,
+    long lastSeen) : BaseLineMapValue(name, status, lastSeen);
+internal sealed record BaseLineFileMapValue(
+    FileId fileId,
+    string name,
+    ScanEntryStatus status,
+    long lastSeen) : BaseLineMapValue(name, status, lastSeen);
+
 
 internal sealed class BaselineIndex
 {
@@ -17,9 +32,9 @@ internal sealed class BaselineIndex
     private long _baselineNameCollisions;
     private const int BaselineCollisionTraceLimit = 25;
 
-    private readonly Dictionary<long, Dictionary<string, BaseLineMapValue>> _childDirsByParentName = new();
-    private readonly Dictionary<long, Dictionary<string, BaseLineMapValue>> _childFilesByDirName = new();
-    private readonly Dictionary<long, FileRecordV2> _fileById = new();
+    private readonly Dictionary<DirId, Dictionary<string, BaseLineDirMapValue>> _childDirsByParentName = new();
+    private readonly Dictionary<FileId, Dictionary<string, BaseLineFileMapValue>> _childFilesByDirName = new();
+    private readonly Dictionary<FileId, FileRecordV2> _fileById = new();
 
     public BaselineIndex(ScanRootSnapshotView? view)
     {
@@ -41,11 +56,11 @@ internal sealed class BaselineIndex
 
             if (!_childDirsByParentName.TryGetValue(d.ParentDirId, out var byName))
             {
-                byName = new Dictionary<string, BaseLineMapValue>(PathUtils.PathComparer);
+                byName = new Dictionary<string, BaseLineDirMapValue>(PathUtils.PathComparer);
                 _childDirsByParentName.Add(d.ParentDirId, byName);
             }
 
-            var cand = (d.DirId, name, d.Status, d.LastSeenScanSequence);
+            var cand = new BaseLineDirMapValue(d.DirId, name, d.Status, d.LastSeenScanSequence);
 
             if (!byName.TryGetValue(name, out var existing))
             {
@@ -80,11 +95,11 @@ internal sealed class BaselineIndex
 
             if (!_childFilesByDirName.TryGetValue(f.DirId, out var byName))
             {
-                byName = new Dictionary<string, BaseLineMapValue>(PathUtils.PathComparer);
+                byName = new Dictionary<string, BaseLineFileMapValue>(PathUtils.PathComparer);
                 _childFilesByDirName.Add(f.DirId, byName);
             }
 
-            var cand = (f.FileId, name, f.Status, f.LastSeenScanSequence);
+            var cand = new BaseLineFileMapValue(f.FileId, name, f.Status, f.LastSeenScanSequence);
 
             if (!byName.TryGetValue(name, out var existing))
             {
@@ -106,13 +121,13 @@ internal sealed class BaselineIndex
         }
     }
 
-    public bool TryGetChildDirMap(long parentDirId, out Dictionary<string, BaseLineMapValue> map)
+    public bool TryGetChildDirMap(DirId parentDirId, out Dictionary<string, BaseLineDirMapValue> map)
         => _childDirsByParentName.TryGetValue(parentDirId, out map!);
 
-    public bool TryGetChildFileMap(long dirId, out Dictionary<string, BaseLineMapValue> map)
+    public bool TryGetChildFileMap(DirId dirId, out Dictionary<string, BaseLineFileMapValue> map)
         => _childFilesByDirName.TryGetValue(dirId, out map!);
 
-    public bool TryGetBaselineFile(long fileId, out FileRecordV2 file)
+    public bool TryGetBaselineFile(FileId fileId, out FileRecordV2 file)
         => _fileById.TryGetValue(fileId, out file);
 
     private static bool IsDeleted(ScanEntryStatus s) => s == ScanEntryStatus.Deleted;
@@ -157,11 +172,15 @@ internal sealed class BaselineIndex
         // Only trace first N collisions to avoid log spam.
         if (collisions <= BaselineCollisionTraceLimit)
         {
+            var traceStrBuilder = new StringBuilder($"Baseline collision ({kind}): container={parentOrDirId} name='{name}' ");
+            if (existing is BaseLineDirMapValue existingDir && kept is BaseLineDirMapValue keptDir)
+                traceStrBuilder.Append($"keptId={keptDir.dirId} keptStatus={keptDir.status} keptLastSeen={keptDir.lastSeen} " +
+                    $"droppedId={existingDir.dirId} droppedStatus={existingDir.status} droppedLastSeen={existingDir.lastSeen}");
+            else if (existing is BaseLineFileMapValue existingFile && kept is BaseLineFileMapValue keptFile)
+                traceStrBuilder.Append($"keptId={keptFile.fileId} keptStatus={keptFile.status} keptLastSeen={keptFile.lastSeen} " +
+                    $"droppedId={existingFile.fileId} droppedStatus={existingFile.status} droppedLastSeen={existingFile.lastSeen}");
 
-            s_log.Trace(
-                $"Baseline collision ({kind}): container={parentOrDirId} name='{name}' " +
-                $"keptId={kept.id} keptStatus={kept.status} keptLastSeen={kept.lastSeen} " +
-                $"droppedId={existing.id} droppedStatus={existing.status} droppedLastSeen={existing.lastSeen}");
+            s_log.Trace(traceStrBuilder.ToString());
         }
     }
 }

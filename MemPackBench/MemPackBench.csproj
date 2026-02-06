@@ -20,4 +20,8 @@
       </Reference>
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\DuplicateFileFinderLib\DuplicateFileFinderLib.csproj" />
+    </ItemGroup>
+
 </Project>

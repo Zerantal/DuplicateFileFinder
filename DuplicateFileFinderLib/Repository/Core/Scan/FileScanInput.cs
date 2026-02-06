@@ -6,8 +6,8 @@ namespace DuplicateFileFinderLib.Repository.Core.Scan;
 [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public readonly record struct FileScanInput
 {
-    public long FileId { get; init; }                // 0 => allocate
-    public long DirId { get; init; }                 // must be a valid dirId
+    public FileId FileId { get; init; }                // 0 => allocate
+    public DirId DirId { get; init; }                 // must be a valid dirId
     public required string Name { get; init; }       // never null
     public long Size { get; init; }
     public HashKey Hash { get; init; }

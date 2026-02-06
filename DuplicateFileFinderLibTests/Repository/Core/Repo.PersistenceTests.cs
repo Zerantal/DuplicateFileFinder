@@ -54,7 +54,7 @@ public sealed class Repo_PersistenceTests
         var repoDir = CreateTempDir();
         try
         {
-            long rootId;
+            ScanRootId rootId;
 
             // Create repo + root + snapshot
             await using (var repo = await Repo.OpenAsync(repoDir, CancellationToken.None))
@@ -91,7 +91,7 @@ public sealed class Repo_PersistenceTests
         }
     }
 
-    private static ScanRootSnapshotV2 MinimalSnapshot(long scanRootId)
+    private static ScanRootSnapshotV2 MinimalSnapshot(ScanRootId scanRootId)
     {
         return new ScanRootSnapshotV2
         {

@@ -155,6 +155,11 @@
         "resolved": "6.0.0",
         "contentHash": "9+PnzmQFfEFNR9J2aDTfJGGupShHjOuGw4VUv+JB044biSHrnmCIMD+mJHmb2H7YryrfBEXDurxQ47gJZdCKNQ=="
       },
+      "NLog": {
+        "type": "Transitive",
+        "resolved": "5.5.1",
+        "contentHash": "ZpLbXSi91tZJPjzNefE+3NugAkQtpWZpSLfZWJGcP1y8qMiXDKxW/nAQ+LYWo7GwH2iYsbKOdsLCK9S3BeRQxA=="
+      },
       "Perfolizer": {
         "type": "Transitive",
         "resolved": "0.6.1",
@@ -170,21 +175,29 @@
       },
       "System.CodeDom": {
         "type": "Transitive",
-        "resolved": "9.0.5",
-        "contentHash": "cuzLM2MWutf9ZBEMPYYfd0DXwYdvntp7VCT6a/wvbKCa2ZuvGmW74xi+YBa2mrfEieAXqM4TNKlMmSnfAfpUoQ=="
+        "resolved": "9.0.11",
+        "contentHash": "3dQXQ1w7LjiaTD9eJaEGB8cpMcpsayE3aRNoKWslhca8tLLJAUnEJe7tS4rzwn1LFxSm26hgiWuBF+Ll3FmBxw=="
       },
       "System.Management": {
         "type": "Transitive",
-        "resolved": "9.0.5",
-        "contentHash": "n6o9PZm9p25+zAzC3/48K0oHnaPKTInRrxqFq1fi/5TPbMLjuoCm/h//mS3cUmSy+9AO1Z+qsC/Ilt/ZFatv5Q==",
+        "resolved": "9.0.11",
+        "contentHash": "5jMTeHv8Dt+NB9S+uetLp3TYJyUjaJaHXGzYw8/x+TzOC6CpnobPs0hG+qurFflYlVYv732kwLPIO5W+u8IjZA==",
         "dependencies": {
-          "System.CodeDom": "9.0.5"
+          "System.CodeDom": "9.0.11"
         }
       },
       "System.Reflection.TypeExtensions": {
         "type": "Transitive",
         "resolved": "4.7.0",
         "contentHash": "VybpaOQQhqE6siHppMktjfGBw1GCwvCqiufqmP8F1nj7fTUNtW35LOEt3UZTEsECfo+ELAl/9o9nJx3U91i7vA=="
+      },
+      "duplicatefilefinderlib": {
+        "type": "Project",
+        "dependencies": {
+          "MemoryPack": "[1.21.4, )",
+          "NLog": "[5.*, )",
+          "System.Management": "[9.0.11, )"
+        }
       }
     }
   }

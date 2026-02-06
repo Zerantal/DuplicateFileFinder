@@ -41,14 +41,14 @@ public sealed class TreeIndexPluginTests
                 scanRootId: 1,
                 dirs:
                 [
-                    ("root", parentDirId: -1L, dirId: 1L),
-                    ("subA", parentDirId: 1L, dirId: 2L),
-                    ("subB", parentDirId: 1L, dirId: 3L)
+                    ("root", parentDirId: -1, dirId: 1),
+                    ("subA", parentDirId: 1, dirId: 2),
+                    ("subB", parentDirId: 1, dirId: 3)
                 ],
                 files:
                 [
-                    ("file_root.txt", dirId: 1L, fileId: 10L, size: 123L),
-                    ("file_subA.txt", dirId: 2L, fileId: 20L, size: 456L)
+                    ("file_root.txt", dirId: 1, fileId: 10, size: 123L),
+                    ("file_subA.txt", dirId: 2, fileId: 20, size: 456L)
                 ]);
 
             plugin.Post(new BootstrapEvent
@@ -101,12 +101,12 @@ public sealed class TreeIndexPluginTests
                     scanRootId: 1,
                     dirs:
                     [
-                        ("root", parentDirId: -1L, dirId: 1L),
-                        ("subA", parentDirId: 1L, dirId: 2L)
+                        ("root", parentDirId: -1, dirId: 1),
+                        ("subA", parentDirId: 1, dirId: 2)
                     ],
                     files:
                     [
-                        ("file_subA.txt", dirId: 1L, fileId: 10L, size: 1L)
+                        ("file_subA.txt", dirId: 1, fileId: 10, size: 1L)
                     ]);
 
                 plugin1.Post(new BootstrapEvent
@@ -133,12 +133,12 @@ public sealed class TreeIndexPluginTests
                     scanRootId: 1,
                     dirs:
                     [
-                        ("root", parentDirId: -1L, dirId: 1L),
-                        ("subB", parentDirId: 1L, dirId: 3L)
+                        ("root", parentDirId: -1, dirId: 1),
+                        ("subB", parentDirId: 1, dirId: 3)
                     ],
                     files:
                     [
-                        ("fileB.txt", dirId: 1L, fileId: 99L, size: 2L)
+                        ("fileB.txt", dirId: 1, fileId: 99, size: 2L)
                     ]);
 
                 plugin2.Post(new BootstrapEvent
@@ -176,10 +176,10 @@ public sealed class TreeIndexPluginTests
                 scanRootId: 1,
                 dirs:
                 [
-                    ("root", parentDirId: -1L, dirId: 1L),
-                    ("subA", parentDirId: 1L, dirId: 2L)
+                    ("root", parentDirId: -1, dirId: 1),
+                    ("subA", parentDirId: 1, dirId: 2)
                 ],
-                files: Array.Empty<(string name, long dirId, long fileId, long size)>());
+                files: Array.Empty<(string name, DirId dirId, FileId fileId, long size)>());
 
             plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap1 });
             await plugin.WhenReadyAsync(CancellationToken.None);
@@ -192,10 +192,10 @@ public sealed class TreeIndexPluginTests
                 scanRootId: 1,
                 dirs:
                 [
-                    ("root", parentDirId: -1L, dirId: 1L),
-                    ("subB", parentDirId: 1L, dirId: 3L)
+                    ("root", parentDirId: -1, dirId: 1),
+                    ("subB", parentDirId: 1, dirId: 3)
                 ],
-                files: Array.Empty<(string name, long dirId, long fileId, long size)>());
+                files: Array.Empty<(string name, DirId dirId, FileId fileId, long size)>());
 
             plugin.Post(new ScanRootSnapshotReplacedEvent
             {
@@ -234,14 +234,14 @@ public sealed class TreeIndexPluginTests
                 scanRootId: 1,
                 dirs:
                 [
-                    ("root", parentDirId: -1L, dirId: 1L),
-                    ("subA", parentDirId: 1L, dirId: 2L),
-                    ("subB", parentDirId: 1L, dirId: 3L)
+                    ("root", parentDirId: -1, dirId: 1),
+                    ("subA", parentDirId: 1, dirId: 2),
+                    ("subB", parentDirId: 1, dirId: 3)
                 ],
                 files:
                 [
-                    ("file_root.txt", dirId: 1L, fileId: 10L, size: 123L),
-                    ("file_subA.txt", dirId: 2L, fileId: 20L, size: 456L)
+                    ("file_root.txt", dirId: 1, fileId: 10, size: 123L),
+                    ("file_subA.txt", dirId: 2, fileId: 20, size: 456L)
                 ]);
 
             plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snap });

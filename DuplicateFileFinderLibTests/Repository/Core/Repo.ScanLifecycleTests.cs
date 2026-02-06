@@ -125,7 +125,7 @@ public sealed class Repo_ScanLifecycleTests
         }
     }
 
-    private static ScanRootSnapshotV2 MinimalSnapshot(long scanRootId)
+    private static ScanRootSnapshotV2 MinimalSnapshot(ScanRootId scanRootId)
     {
         return new ScanRootSnapshotV2
         {

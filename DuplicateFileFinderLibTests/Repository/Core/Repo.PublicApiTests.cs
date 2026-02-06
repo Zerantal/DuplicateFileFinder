@@ -256,7 +256,7 @@ public sealed class Repo_PublicApiTests
     // Snapshot builders (minimal but valid for index rebuild + status checks)
     // ---------------------------------------------------------------------
 
-    private static ScanRootSnapshotV2 Snapshot_WithTwoFiles(long scanRootId)
+    private static ScanRootSnapshotV2 Snapshot_WithTwoFiles(ScanRootId scanRootId)
     {
         // pool: [ "root", "fileA.bin", "fileB.bin", "" ]
         var pool = PackedStringPool.FromStrings(["root", "fileA.bin", "fileB.bin", ""]);
@@ -311,7 +311,7 @@ public sealed class Repo_PublicApiTests
         };
     }
 
-    private static ScanRootSnapshotV2 Snapshot_WithDirTreeAndFiles(long scanRootId)
+    private static ScanRootSnapshotV2 Snapshot_WithDirTreeAndFiles(ScanRootId scanRootId)
     {
         // pool: [ "root", "child", "grand", "root.bin", "child.bin", "grand.bin", "" ]
         var pool = PackedStringPool.FromStrings(["root", "child", "grand", "root.bin", "child.bin", "grand.bin", ""]);
@@ -401,7 +401,7 @@ public sealed class Repo_PublicApiTests
         };
     }
 
-    private static ScanRootSnapshotV2 MinimalSnapshot(long scanRootId)
+    private static ScanRootSnapshotV2 MinimalSnapshot(ScanRootId scanRootId)
     {
         return new ScanRootSnapshotV2
         {

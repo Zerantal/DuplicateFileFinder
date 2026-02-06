@@ -9,7 +9,7 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
 {
     private readonly RepoSnapshotView _snapshot;
     private readonly ITreeIndexReadModel _treeIndex;
-    private readonly Func<long, string> _dirRelativePathResolver;
+    private readonly Func<DirId, string> _dirRelativePathResolver;
 
     private long _lastScanRootId = -1;
     private ScanRootSnapshotView? _lastRootSnapshot;
@@ -17,7 +17,7 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
     public TreeMapDataResolver(
         RepoSnapshotView snapshot,
         ITreeIndexReadModel treeIndex,
-        Func<long, string> dirRelativePathResolver)
+        Func<DirId, string> dirRelativePathResolver)
     {
         _snapshot = snapshot;
         _treeIndex = treeIndex;
@@ -44,7 +44,7 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
     public FileRecordV2 GetFileRecord(FileHandle file)
         => GetRootSnapshot(file.ScanRootId).Files[file.Index];
 
-    public string GetRelativePath(long dirId)
+    public string GetRelativePath(DirId dirId)
     {
         try
         { return _dirRelativePathResolver(dirId); }
@@ -54,7 +54,7 @@ public sealed class TreeMapDataResolver : ITreeMapDataResolver
     public DirAggregateStats GetDirStats(DirHandle dir)
         => _treeIndex.GetDirStats(dir);
 
-    private ScanRootSnapshotView GetRootSnapshot(long scanRootId)
+    private ScanRootSnapshotView GetRootSnapshot(ScanRootId scanRootId)
     {
         if (_lastRootSnapshot is not null && _lastScanRootId == scanRootId)
             return _lastRootSnapshot;

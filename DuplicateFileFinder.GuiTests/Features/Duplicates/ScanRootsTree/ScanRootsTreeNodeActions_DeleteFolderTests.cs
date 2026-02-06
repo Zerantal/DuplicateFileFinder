@@ -14,7 +14,7 @@ using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Features.Duplicates.ScanRootsTree;
 
-public sealed class ScanRootsTreeNodeActions_DeleteFolderTests
+public sealed class ScanRootsTreeNodeActionsDeleteFolderTests
 {
     [Fact]
     public async Task DeleteFolderAsync_WhenCancelled_DoesNothing()
@@ -123,25 +123,30 @@ public sealed class ScanRootsTreeNodeActions_DeleteFolderTests
     {
         public bool IsScanning => false;
 
-        public event EventHandler<DuplicateFileFinderLib.Core.DuplicateFileFinderProgressReport>? ProgressChanged;
-        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+        public event EventHandler<DuplicateFileFinderLib.Core.DuplicateFileFinderProgressReport>? ProgressChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler<ScanCompletedEventArgs>? ScanCompleted { add { } remove { } }
 
         public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 
-        public Task RunRescanLocationWithDialogAsync(long scanRootId, CancellationToken cancellationToken)
+        public Task RunRescanLocationWithDialogAsync(ScanRootId scanRootId, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
         public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
-        public Task RemoveScanRoot(long scanRootId)
+        public Task RemoveScanRoot(ScanRootId scanRootId)
             => Task.CompletedTask;
 
         public void CancelScan()
             => throw new NotImplementedException();
 
-        public Task SetScanRootDisplayName(long scanRootId, string? displayName)
+        public Task SetScanRootDisplayName(ScanRootId scanRootId, string? displayName)
             => Task.CompletedTask;
     }
 }

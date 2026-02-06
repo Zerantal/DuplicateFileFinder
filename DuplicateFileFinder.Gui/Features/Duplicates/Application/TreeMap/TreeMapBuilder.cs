@@ -22,7 +22,7 @@ public static class TreeMapBuilder
         IFileDirReadModel fileDirIndex,
         TreeMapMetric metric,
         TreeMapBuildOptions opts,
-        Func<long, string> dirRelativePathResolver)
+        Func<DirId, string> dirRelativePathResolver)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(scanRoots);
@@ -77,7 +77,7 @@ public static class TreeMapBuilder
             IFileDirReadModel fileDirIndex,
             TreeMapMetric metric,
             TreeMapBuildOptions opts,
-            Func<long, string> dirRelativePathResolver)
+            Func<DirId, string> dirRelativePathResolver)
         {
             _snapshot = snapshot;
             _treeIndex = treeIndex;

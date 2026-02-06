@@ -38,7 +38,7 @@ public sealed class BaselineIndexTests
         Assert.Single(map);
 
         Assert.True(map.TryGetValue("Keep-Me", out var v));
-        Assert.Equal(4, v.id);
+        Assert.Equal(4, v.dirId);
         Assert.Equal(ScanEntryStatus.Enumerated, v.status);
         Assert.Equal(7, v.lastSeen);
 
@@ -83,7 +83,7 @@ public sealed class BaselineIndexTests
         Assert.Single(map);
 
         Assert.True(map.TryGetValue("X", out var v));
-        Assert.Equal(2, v.id);
+        Assert.Equal(2, v.dirId);
         Assert.Equal(ScanEntryStatus.Enumerated, v.status);
     }
 
@@ -101,7 +101,7 @@ public sealed class BaselineIndexTests
         Assert.Single(map);
 
         Assert.True(map.TryGetValue("f.bin", out var v));
-        Assert.Equal(11, v.id);
+        Assert.Equal(11, v.fileId);
         Assert.Equal(9, v.lastSeen);
     }
 
@@ -120,7 +120,7 @@ public sealed class BaselineIndexTests
         Assert.Single(map);
 
         Assert.True(map.TryGetValue("Tie", out var v));
-        Assert.Equal(1, v.id);
+        Assert.Equal(1, v.dirId);
         Assert.Equal(5, v.lastSeen);
     }
 }

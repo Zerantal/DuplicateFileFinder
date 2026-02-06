@@ -3,17 +3,17 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class Segment<T>
+public sealed partial class IntMapSegment<T>
     where T : struct
 {
-    public long StartId { get; init; }
+    public int StartId { get; init; }
 
-    public required T[] Values { get; init; }
+    public required T[] Values { get; init; } = [];
 
-    public required ulong[] PresentBits { get; init; }
+    public required ulong[] PresentBits { get; init; } = [];
 
     [MemoryPackIgnore]
-    public long EndId => StartId + Values.Length - 1;
+    public int EndId => StartId + Values.Length - 1;
 
     public bool IsPresent(int index)
     {
@@ -25,16 +25,16 @@ public sealed partial class Segment<T>
         return (PresentBits[word] & (1UL << bit)) != 0;
     }
 
-    public static Segment<T> BuildSegment(
-        KeyValuePair<long, T>[] sorted,
+    public static IntMapSegment<T> BuildSegment(
+        KeyValuePair<int, T>[] sorted,
         int fromInclusive,
         int toInclusive,
-        long segStart,
-        long segEnd)
+        int segStart,
+        int segEnd)
     {
         long lenL = segEnd - segStart + 1;
-        if (lenL <= 0 || lenL > int.MaxValue)
-            throw new InvalidOperationException($"Segment length out of range: {lenL}");
+        if (lenL <= 0)
+            throw new InvalidOperationException($"LongMapSegment length out of range: {lenL}");
 
         int len = (int)lenL;
 
@@ -47,13 +47,13 @@ public sealed partial class Segment<T>
         for (int i = fromInclusive; i <= toInclusive; i++)
         {
             var (k, v) = (sorted[i].Key, sorted[i].Value);
-            int offset = (int)(k - segStart);
+            int offset = k - segStart;
 
             values[offset] = v;
             SetBit(bits, offset);
         }
 
-        return new Segment<T>
+        return new IntMapSegment<T>
         {
             StartId = segStart,
             Values = values,

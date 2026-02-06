@@ -324,19 +324,19 @@ public sealed class TreeMapActionsViewModelTests
 
     private static readonly FakeTreeMapDataResolver s_resolver = new();
 
-    private static DirTreeMapElement NewDirElem(long scanRootId, int dirIndex)
+    private static DirTreeMapElement NewDirElem(ScanRootId scanRootId, int dirIndex)
         => NewDirElem(new DirHandle(scanRootId, dirIndex));
 
     private static DirTreeMapElement NewDirElem(DirHandle h)
         => new(s_resolver, h, NewScanRoot(h.ScanRootId, "/root", null, isDeleted: false), value: 1);
 
-    private static FileTreeMapElement NewFileElem(long scanRootId, int fileIndex)
+    private static FileTreeMapElement NewFileElem(ScanRootId scanRootId, int fileIndex)
         => NewFileElem(new FileHandle(scanRootId, fileIndex));
 
     private static FileTreeMapElement NewFileElem(FileHandle h)
         => new(s_resolver, h, NewScanRoot(h.ScanRootId, "/root", null, isDeleted: false), value: 123);
 
-    private static ScanRoot NewScanRoot(long rootId, string rootPath, string? volumePath, bool isDeleted)
+    private static ScanRoot NewScanRoot(ScanRootId rootId, string rootPath, string? volumePath, bool isDeleted)
         => new()
         {
             RootId = rootId,

@@ -41,9 +41,9 @@ public sealed partial class Repo
         // Snapshot state under lock, then do IO outside
         string repoPath, rootsDirPath;
         RepoMeta meta;
-        Dictionary<long, ScanRoot> scanRoots;
+        Dictionary<ScanRootId, ScanRoot> scanRoots;
         List<ScanRun> scanRuns;
-        Dictionary<long, ScanRootSnapshotV2> scanRootSnapshots;
+        Dictionary<ScanRootId, ScanRootSnapshotV2> scanRootSnapshots;
 
         lock (_sync)
         {
@@ -51,9 +51,9 @@ public sealed partial class Repo
             rootsDirPath = Path.Combine(_repoPath, "roots");
 
             meta = _meta;
-            scanRoots = new Dictionary<long, ScanRoot>(_scanRoots);
-            scanRuns = new List<ScanRun>(_scanRuns);
-            scanRootSnapshots = new Dictionary<long, ScanRootSnapshotV2>(_scanRootSnapshots);
+            scanRoots = new Dictionary<ScanRootId, ScanRoot>(_scanRoots);
+            scanRuns = _scanRunIndex.Values.OrderBy(r => r.ScanSequence).ToList();
+            scanRootSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotV2>(_scanRootSnapshots);
         }
 
         // Flatten in-memory V2 snapshots into dir/file maps for referential checks.
@@ -346,14 +346,14 @@ public sealed partial class Repo
         // ----------------------------------------------------
         // 5. Per-root snapshots on disk (ScanRootSnapshotV2)
         // ----------------------------------------------------
-        var snapshotFilesById = new Dictionary<long, string>();
+        var snapshotFilesById = new Dictionary<ScanRootId, string>();
 
         if (Directory.Exists(rootsDirPath))
         {
             foreach (var path in Directory.GetFiles(rootsDirPath, "*.mp"))
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
-                if (long.TryParse(fileName, out var id))
+                if (int.TryParse(fileName, out var id))
                 {
                     snapshotFilesById[id] = path;
                 }
@@ -459,14 +459,14 @@ public sealed partial class Repo
     }
 
 
-    private readonly record struct DirEntry(long ScanRootId, DirRecordV2 Record);
-    private readonly record struct FileEntry(long ScanRootId, FileRecordV2 Record);
+    private readonly record struct DirEntry(ScanRootId ScanRootId, DirRecordV2 Record);
+    private readonly record struct FileEntry(ScanRootId ScanRootId, FileRecordV2 Record);
 
-    private static (Dictionary<long, DirEntry> Dirs, Dictionary<long, FileEntry> Files, List<RepoIntegrityIssue> Issues)
-        BuildDirFileMapsFromSnapshots(Dictionary<long, ScanRootSnapshotV2> snapshots)
+    private static (Dictionary<DirId, DirEntry> Dirs, Dictionary<FileId, FileEntry> Files, List<RepoIntegrityIssue> Issues)
+        BuildDirFileMapsFromSnapshots(Dictionary<ScanRootId, ScanRootSnapshotV2> snapshots)
     {
-        var dirs = new Dictionary<long, DirEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
-        var files = new Dictionary<long, FileEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
+        var dirs = new Dictionary<DirId, DirEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
+        var files = new Dictionary<FileId, FileEntry>(capacity: Math.Max(1024, snapshots.Count * 1024));
         var issues = new List<RepoIntegrityIssue>();
 
         foreach (var (scanRootId, snap) in snapshots)
@@ -662,16 +662,16 @@ public sealed partial class Repo
 
     private sealed class RebuiltStateV2
     {
-        public Dictionary<long, DirEntry> Dirs { get; init; } = new();
-        public Dictionary<long, FileEntry> Files { get; init; } = new();
+        public Dictionary<DirId, DirEntry> Dirs { get; init; } = new();
+        public Dictionary<FileId, FileEntry> Files { get; init; } = new();
     }
 
     private static RebuiltStateV2 RebuildStateFromStoreV2(
         string rootsDirPath,
         CancellationToken ct)
     {
-        var dirs = new Dictionary<long, DirEntry>();
-        var files = new Dictionary<long, FileEntry>();
+        var dirs = new Dictionary<DirId, DirEntry>();
+        var files = new Dictionary<FileId, FileEntry>();
 
         // Per-root snapshots
         if (Directory.Exists(rootsDirPath))
@@ -694,10 +694,10 @@ public sealed partial class Repo
     }
 
 
-    private static void CompareState<TEntry>(
+    private static void CompareState<TIdType, TEntry>(
         string label,
-        IDictionary<long, TEntry> inMemory,
-        IDictionary<long, TEntry> rebuilt,
+        IDictionary<TIdType, TEntry> inMemory,
+        IDictionary<TIdType, TEntry> rebuilt,
         Func<TEntry, string?> nameSelector,
         IList<RepoIntegrityIssue> issues)
     {
@@ -729,9 +729,9 @@ public sealed partial class Repo
     }
 
     private static void DetectDirCycleV2(
-        long dirId,
-        long expectedRootId,
-        IReadOnlyDictionary<long, DirEntry> dirs,
+        DirId dirId,
+        ScanRootId expectedRootId,
+        IReadOnlyDictionary<DirId, DirEntry> dirs,
         HashSet<long> visited,
         HashSet<long> visiting,
         IList<RepoIntegrityIssue> issues)

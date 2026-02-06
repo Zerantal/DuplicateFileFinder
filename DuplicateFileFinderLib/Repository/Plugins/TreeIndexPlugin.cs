@@ -5,9 +5,8 @@ using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
+using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
-
-using MemoryPack;
 
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
@@ -21,7 +20,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     // Published, read-only snapshots (never mutate after publishing).
     // Rebuilt on plugin worker thread; swapped atomically for readers.
-    private volatile Dictionary<long, RootTreeIndexState> _roots = new();
+    private volatile Dictionary<ScanRootId, RootTreeIndexState> _roots = new();
 
     private readonly string _dataDirectory;
     private long _lastIndexedGeneration;
@@ -167,7 +166,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             return;
         }
 
-        var newRoots = new Dictionary<long, RootTreeIndexState>(Math.Max(0, oldRoots.Count - 1));
+        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(Math.Max(0, oldRoots.Count - 1));
         foreach (var (k, v) in oldRoots)
             if (k != removedRootId)
                 newRoots[k] = v;
@@ -186,10 +185,10 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         using (TimingLog.StartPhase("Rebuilding TreeIndex"))
         {
-            var liveRootIds = new HashSet<long>(
+            var liveRootIds = new HashSet<ScanRootId>(
                 repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
 
-            var liveSnapshots = new Dictionary<long, ScanRootSnapshotView>(capacity: liveRootIds.Count);
+            var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(capacity: liveRootIds.Count);
             foreach (var (rootId, snap) in repoSnapshot.Snapshots)
                 if (liveRootIds.Contains(rootId))
                     liveSnapshots[rootId] = snap;
@@ -225,7 +224,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             // -----------------------------------------------------------------
             // 2) Build per-root pools + slice maps + stats + preorder subtree data
             // -----------------------------------------------------------------
-            var newRoots = new Dictionary<long, RootTreeIndexState>(capacity: liveSnapshots.Count);
+            var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(capacity: liveSnapshots.Count);
 
             foreach (var snapshot in liveSnapshots.Values)
             {
@@ -306,12 +305,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
 
                 var childDirSliceMap = childDirSlices.Length == 0
-                    ? SegmentedIdMap<Slice>.Empty
-                    : SegmentedIdMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
+                    ? SegmentedMap<Slice>.Empty
+                    : SegmentedMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
 
                 var childFileSliceMap = childFileSlices.Length == 0
-                    ? SegmentedIdMap<Slice>.Empty
-                    : SegmentedIdMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
+                    ? SegmentedMap<Slice>.Empty
+                    : SegmentedMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
 
                 var statsMap = ComputeRootDirStats(
                     scanRootId: rootId,
@@ -345,7 +344,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
     }
 
-    private static (SegmentedIdMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
+    private static (SegmentedMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
         ScanRootSnapshotView snapshot,
         IReadOnlyList<int> rootDirIndices,
         Dictionary<int, List<DirHandle>> childrenDirsTmp,
@@ -408,7 +407,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         }
 
         // Build ranges for visited dirs
-        var rangeItems = new List<KeyValuePair<long, SubtreeRange>>(capacity: 1024);
+        var rangeItems = new List<KeyValuePair<DirId, SubtreeRange>>(capacity: 1024);
 
         for (int i = 0; i < preorderByDirIndex.Length; i++)
         {
@@ -417,12 +416,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 continue;
 
             var end = exitByDirIndex[i] >= 0 ? exitByDirIndex[i] : pre + 1;
-            rangeItems.Add(new KeyValuePair<long, SubtreeRange>(i, new SubtreeRange(pre, end)));
+            rangeItems.Add(new KeyValuePair<DirId, SubtreeRange>(i, new SubtreeRange(pre, end)));
         }
 
         var subtreeRangeMap = rangeItems.Count == 0
-            ? SegmentedIdMap<SubtreeRange>.Empty
-            : SegmentedIdMap<SubtreeRange>.Build(rangeItems.ToArray(), gapThreshold: SegmentGapThreshold);
+            ? SegmentedMap<SubtreeRange>.Empty
+            : SegmentedMap<SubtreeRange>.Build(rangeItems.ToArray(), gapThreshold: SegmentGapThreshold);
 
         // Per-file mapping: fileIndex -> preorder(parent dir), or -1
         var dirPreorderByFileIndex = new int[snapshot.Files.Count];
@@ -447,11 +446,11 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         return (subtreeRangeMap, dirPreorderByFileIndex);
     }
 
-    private static (T[] Pool, KeyValuePair<long, Slice>[] SliceItems) BuildPoolAndSlices<T>(
-        Dictionary<int, List<T>> tmp)
+    private static (TData[] Pool, KeyValuePair<TKey, Slice>[] SliceItems) BuildPoolAndSlices<TKey, TData>(
+        Dictionary<TKey, List<TData>> tmp) where TKey : notnull
     {
         if (tmp.Count == 0)
-            return (Array.Empty<T>(), Array.Empty<KeyValuePair<long, Slice>>());
+            return ([], []);
 
         // Deterministic ordering to keep state stable across rebuilds.
         var keys = tmp.Keys.ToArray();
@@ -462,8 +461,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         for (int i = 0; i < keys.Length; i++)
             total += tmp[keys[i]].Count;
 
-        var pool = total == 0 ? Array.Empty<T>() : new T[total];
-        var sliceItems = new KeyValuePair<long, Slice>[keys.Length];
+        var pool = total == 0 ? [] : new TData[total];
+        var sliceItems = new KeyValuePair<TKey, Slice>[keys.Length];
 
         int write = 0;
 
@@ -482,7 +481,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 write += len;
             }
 
-            sliceItems[i] = new KeyValuePair<long, Slice>(dirIndex, new Slice(offset, len));
+            sliceItems[i] = new KeyValuePair<TKey, Slice>(dirIndex, new Slice(offset, len));
         }
 
         // If total was overestimated (shouldn't happen), trim. Otherwise keep as-is.
@@ -492,13 +491,13 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         return (pool, sliceItems);
     }
 
-    private static SegmentedIdMap<DirAggregateStats> ComputeRootDirStats(
+    private static SegmentedMap<DirAggregateStats> ComputeRootDirStats(
         long scanRootId,
         ScanRootSnapshotView snapshot,
         DirHandle[] childDirsPool,
-        SegmentedIdMap<Slice> childDirSliceByDirIndex,
+        SegmentedMap<Slice> childDirSliceByDirIndex,
         FileHandle[] childFilesPool,
-        SegmentedIdMap<Slice> childFileSliceByDirIndex,
+        SegmentedMap<Slice> childFileSliceByDirIndex,
         IReadOnlyList<int> rootDirIndices,
         Dictionary<HashKey, int> globalHashCounts)
     {
@@ -590,14 +589,14 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             _ = Dfs(rootDirIndices[i]);
 
         if (memo.Count == 0)
-            return SegmentedIdMap<DirAggregateStats>.Empty;
+            return SegmentedMap<DirAggregateStats>.Empty;
 
-        var items = new KeyValuePair<long, DirAggregateStats>[memo.Count];
+        var items = new KeyValuePair<DirId, DirAggregateStats>[memo.Count];
         int w = 0;
         foreach (var (dirIndex, stats) in memo)
-            items[w++] = new KeyValuePair<long, DirAggregateStats>(dirIndex, stats);
+            items[w++] = new KeyValuePair<DirId, DirAggregateStats>(dirIndex, stats);
 
-        return SegmentedIdMap<DirAggregateStats>.Build(items);
+        return SegmentedMap<DirAggregateStats>.Build(items);
     }
 
     // ---------------------------------------------------------------------
@@ -617,11 +616,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         };
 
         var path = GetStateFilePath();
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
 
-        File.WriteAllBytes(path, MemoryPackSerializer.Serialize(state));
+        MemoryPackFile.SaveToFile(path, state);
     }
 
     private bool TryLoadState(long expectedGeneration)
@@ -630,28 +626,19 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         if (!File.Exists(path))
             return false;
 
-        try
+        TreeIndexState? state;
+        using (TimingLog.StartPhase("Deserialising TreeIndex state"))
         {
-            TreeIndexState? state;
-            using (TimingLog.StartPhase("Deserialising TreeIndex state"))
-            {
-                var bytes = File.ReadAllBytes(path);
-                state = MemoryPackSerializer.Deserialize<TreeIndexState>(bytes);
-                if (state is null)
-                    return false;
-            }
-
-            if (state.LastIndexedGeneration != expectedGeneration)
+            if (!MemoryPackFile.TryLoadMapped(path, out state, CancellationToken.None) || state is null)
                 return false;
-
-            _lastIndexedGeneration = state.LastIndexedGeneration;
-            _roots = state.Roots;
-
-            return true;
         }
-        catch
-        {
+
+        if (state.LastIndexedGeneration != expectedGeneration)
             return false;
-        }
+
+        _lastIndexedGeneration = state.LastIndexedGeneration;
+        _roots = state.Roots;
+
+        return true;
     }
 }

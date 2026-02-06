@@ -6,9 +6,9 @@ namespace DuplicateFileFinderLib.Repository.Storage.Models;
 [MemoryPackable]
 public partial record ScanRoot
 {
-    [MemoryPackOrder(0)] public required long RootId { get; init; }
+    [MemoryPackOrder(0)] public required ScanRootId RootId { get; init; }
     [MemoryPackOrder(1)] public required string RootPath { get; init; }
-    [MemoryPackOrder(2)] public required long DirId { get; init; }
+    [MemoryPackOrder(2)] public required DirId DirId { get; init; }
     [MemoryPackOrder(3)] public required DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     [MemoryPackOrder(4)] public DateTimeOffset? LastScannedAt { get; init; }
 

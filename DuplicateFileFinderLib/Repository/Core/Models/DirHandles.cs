@@ -1,6 +1,6 @@
 namespace DuplicateFileFinderLib.Repository.Core.Models;
 
-public readonly record struct DirHandle(long ScanRootId, int Index)
+public readonly record struct DirHandle(ScanRootId ScanRootId, int Index)
 {
     public DirHandle() : this(-1, -1) { }
 
