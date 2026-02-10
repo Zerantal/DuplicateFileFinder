@@ -13,6 +13,7 @@ public sealed class FakeRepoHost(IRepo repo) : IRepoHost
 {
     public IRepo Repo { get; } = repo;
     public IFileDirReadModel FileDirIndex { get; set; } = new FakeFileDirReadModel();
+    public long LastIndexedGeneration { get; }
     public ITreeIndexReadModel TreeIndex { get; } = new DummyTreeIndex();
     public IHashIndexReadModel HashIndex { get; } = new DummyHashIndex();
 

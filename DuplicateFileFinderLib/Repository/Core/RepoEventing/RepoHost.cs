@@ -18,6 +18,8 @@ public sealed class RepoHost : IRepoHost
     private readonly List<IIndexGenerationBarrier> _generationBarriers = new();
     private readonly List<IReadyState> _readyStates = new();
 
+    public long LastIndexedGeneration { get; private set; }
+
     public IRepo Repo { get; }
 
     public IHashIndexReadModel HashIndex => Get<IHashIndexReadModel>();
@@ -67,7 +69,10 @@ public sealed class RepoHost : IRepoHost
         var coordinator = new IndexRebuildCoordinator(
             host._generationBarriers,
             (gen, scanRootId) =>
-                host.IndexesRebuilt?.Invoke(host, new RepoIndexesRebuiltEventArgs(gen, scanRootId)));
+            {
+                host.LastIndexedGeneration = gen;
+                host.IndexesRebuilt?.Invoke(host, new RepoIndexesRebuiltEventArgs(gen, scanRootId));
+            });
 
         repo.RegisterEventSink(coordinator);
         host.Track(coordinator);

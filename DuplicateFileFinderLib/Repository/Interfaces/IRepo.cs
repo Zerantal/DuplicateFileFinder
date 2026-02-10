@@ -21,7 +21,7 @@ internal interface IRepoInternal : IRepo
     /// commit the completed snapshot, mark the scan run completed, and delete any scan checkpoint.
     /// This allows the repo to publish a single, reasoned event using the correct generation + snapshot view.
     /// </summary>
-    Task FinaliseCompletedScanAsync(
+    Task<long> FinaliseCompletedScanAsync(
         long scanSequence,
         ScanRootSnapshotV2 completedSnapshot,
         CancellationToken ct = default);

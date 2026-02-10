@@ -269,7 +269,7 @@ public sealed class FullScanOperationTests
             .Returns(Task.CompletedTask);
 
         session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Returns(Task.FromResult(new ScanCompletionInfo {Generation = 1, ScanSequence = 1, ScanRootId = 1}));
 
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
@@ -470,7 +470,8 @@ public sealed class FullScanOperationTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>())).Returns(
+            Task.FromResult(new ScanCompletionInfo { Generation = 1, ScanSequence = 1, ScanRootId = 123 }));
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
         var op = new FullScanOperation(repoHost.Object, fs.Object, hashing.Object, volume.Object);
@@ -576,7 +577,8 @@ public sealed class FullScanOperationTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>())).Returns(
+            Task.FromResult(new ScanCompletionInfo {Generation = 1, ScanRootId = 1, ScanSequence = 1}));
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
         var op = new FullScanOperation(repoHost.Object, fs.Object, hashing.Object, volume.Object);

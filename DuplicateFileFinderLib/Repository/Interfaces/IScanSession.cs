@@ -22,7 +22,7 @@ public interface IScanSession : IAsyncDisposable
 
     void EndDirectory(ref DirEnumerationContext ctx);
 
-    Task CompleteAsync(CancellationToken cancellationToken = default);
+    Task<ScanCompletionInfo> CompleteAsync(CancellationToken cancellationToken = default);
 
     Task FailAsync(string? errorMessage, bool cancelled, CancellationToken cancellationToken = default);
 }

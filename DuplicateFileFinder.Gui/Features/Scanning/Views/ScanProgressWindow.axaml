@@ -41,7 +41,7 @@
                     HorizontalAlignment="Right"
                     Margin="0,8,0,0">
             <Button x:Name="CancelButton"
-                    Content="Cancel"
+                    Content="{Binding CancelButtonText}"
                     Command="{Binding CancelCommand}" />
         </StackPanel>
     </StackPanel>

@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
 using NLog;
@@ -81,7 +82,7 @@ public sealed class ScanCoordinator(
     private async Task RunScanWithDialogCoreAsync(
         object arg,
         CancellationToken cancellationToken,
-        Func<IProgress<Dff.DuplicateFileFinderProgressReport>, CancellationToken, Task> runAsync,
+        Func<IProgress<Dff.DuplicateFileFinderProgressReport>, CancellationToken, Task<ScanCompletionInfo>> runAsync,
         Action logStart,
         Action logCancel,
         Action<Exception> logFail)
@@ -111,6 +112,14 @@ public sealed class ScanCoordinator(
             progressVm.Update(report);
         }
 
+        void DismissHandler(object? _, EventArgs __)
+        {
+            try { if (dialog.IsVisible) dialog.Close(); }
+            catch { /* ignore */ }
+        }
+        progressVm.RequestDismiss += DismissHandler;
+
+
         // Constructed on UI thread => progress callbacks marshal to UI thread
         var progress = new Progress<Dff.DuplicateFileFinderProgressReport>(HandleProgress);
 
@@ -119,6 +128,7 @@ public sealed class ScanCoordinator(
 
         Exception? error = null;
         var cancelled = false;
+        ScanCompletionInfo? completion = null;
 
         var token = _cts.Token;
         try
@@ -129,7 +139,7 @@ public sealed class ScanCoordinator(
             {
                 try
                 {
-                    await runAsync(progress, token).ConfigureAwait(false);
+                    completion = await runAsync(progress, token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
@@ -142,6 +152,20 @@ public sealed class ScanCoordinator(
                     logFail(ex);
                 }
             }, token).ConfigureAwait(false);
+
+            // Successful scan => wait for indexes to be coherent for generation
+            if (!cancelled && error is null && completion is not null)
+            {
+                // Optional: give a subtle UI hint that we're in the "finalizing" phase.
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try { dialog.Title = "Finalizing (updating indexes)..."; }
+                    catch { /* ignore */ }
+                    progressVm.EnterFinalizing();
+                });
+
+                await WaitForIndexesAsync(completion.Value, token).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -156,6 +180,10 @@ public sealed class ScanCoordinator(
                 catch
                 {
                     // ignore close errors
+                }
+                finally
+                {
+                    progressVm.RequestDismiss -= DismissHandler;
                 }
 
                 IsScanning = false;
@@ -172,6 +200,36 @@ public sealed class ScanCoordinator(
 
         if (error is not null) throw error;
         if (cancelled) throw new OperationCanceledException(token);
+    }
+
+    private Task WaitForIndexesAsync(ScanCompletionInfo completion, CancellationToken ct)
+    {
+        // Check if indexes already rebuilt (fixes small-folder race)
+        if (_host.LastIndexedGeneration >= completion.Generation)
+            return Task.CompletedTask;
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void Handler(object? _, RepoIndexesRebuiltEventArgs e)
+        {
+            if (e.Generation >= completion.Generation)
+                tcs.TrySetResult();
+        }
+
+        _host.IndexesRebuilt += Handler;
+
+        // Close the subscribe race window
+        if (_host.LastIndexedGeneration >= completion.Generation)
+            tcs.TrySetResult();
+
+        var reg = ct.Register(() => tcs.TrySetCanceled(ct));
+
+        return tcs.Task.ContinueWith(t =>
+        {
+            _host.IndexesRebuilt -= Handler;
+            reg.Dispose();
+            return t;
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).Unwrap();
     }
 
     public Task RemoveScanRoot(ScanRootId scanRootId)

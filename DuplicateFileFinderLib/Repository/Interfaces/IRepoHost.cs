@@ -11,6 +11,8 @@ public interface IRepoHost : IAsyncDisposable
     ITreeIndexReadModel TreeIndex { get; }
     IFileDirReadModel FileDirIndex { get; }
 
+    long LastIndexedGeneration { get; }
+
     /// <summary>
     /// Fired after all index plugins have processed a repo generation change (e.g., after a scan commit).
     /// Consumers can reload views knowing indices are coherent.
