@@ -4,15 +4,15 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots;
 
-public partial class ScanRootsFlatTreeView : UserControl
+public partial class ScanRootsTreeView : UserControl
 {
-    private ScanRootsFlatTreeViewModel? _vm;
+    private ScanRootsTreeViewModel? _vm;
 
-    public ScanRootsFlatTreeView()
+    public ScanRootsTreeView()
     {
         InitializeComponent();
 
@@ -25,7 +25,7 @@ public partial class ScanRootsFlatTreeView : UserControl
     {
         UnhookVm();
 
-        _vm = DataContext as ScanRootsFlatTreeViewModel;
+        _vm = DataContext as ScanRootsTreeViewModel;
         if (_vm is null)
             return;
 
@@ -51,10 +51,10 @@ public partial class ScanRootsFlatTreeView : UserControl
         if (!point.Properties.IsLeftButtonPressed)
             return;
 
-        if (DataContext is not ScanRootsFlatTreeViewModel vm)
+        if (DataContext is not ScanRootsTreeViewModel vm)
             return;
 
-        if (sender is not Control c || c.DataContext is not ScanRootsFlatRowViewModel row)
+        if (sender is not Control c || c.DataContext is not ScanRootsRowViewModel row)
             return;
 
         vm.SelectedRow = row;

@@ -1,18 +1,17 @@
 <!-- DuplicateFileFinder.Gui/Features/Duplicates/Views/ScanRoots/ScanRootsFlatTreeView.axaml -->
 
 <UserControl
-  x:Class="DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots.ScanRootsFlatTreeView"
+  x:Class="DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots.ScanRootsTreeView"
   xmlns="https://github.com/avaloniaui"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:vm="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat"
   xmlns:scanRoots="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots"
   xmlns:util="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Util"
   xmlns:scanRootsTree="clr-namespace:DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree"
   xmlns:converters="clr-namespace:DuplicateFileFinder.Gui.Infrastructure.Converters"
   mc:Ignorable="d"
-  x:DataType="vm:ScanRootsFlatTreeViewModel">
+  x:DataType="scanRootsTree:ScanRootsTreeViewModel">
 
   <UserControl.Resources>
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
@@ -69,7 +68,7 @@
     <Border DockPanel.Dock="Top"
             Background="#333"
             Padding="4">
-      <Grid x:DataType="vm:ScanRootsFlatTreeViewModel"
+      <Grid x:DataType="scanRootsTree:ScanRootsTreeViewModel"
             ColumnDefinitions="2*,200,100,100,100,100,100">
 
         <Button Grid.Column="0"
@@ -147,7 +146,7 @@
         </ItemsRepeater.KeyBindings>
 
         <ItemsRepeater.ItemTemplate>
-          <DataTemplate x:DataType="vm:ScanRootsFlatRowViewModel">
+          <DataTemplate x:DataType="scanRootsTree:ScanRootsRowViewModel">
 
             <!-- Row wrapper -->
             <Border Classes="scanroots-row"
@@ -157,7 +156,7 @@
               <Border.Background>
                 <MultiBinding Converter="{StaticResource SelectedRowBackgroundConverter}">
                   <Binding /> <!-- the row VM -->
-                  <Binding Path="$parent[UserControl].((vm:ScanRootsFlatTreeViewModel)DataContext).SelectedRow" />
+                  <Binding Path="$parent[UserControl].((scanRootsTree:ScanRootsTreeViewModel)DataContext).SelectedRow" />
                 </MultiBinding>
               </Border.Background>
               <Border.ContextMenu>
@@ -198,7 +197,7 @@
                           Background="Transparent"
                           BorderThickness="0"
                           IsVisible="{Binding HasLazyChildren}"
-                          Command="{Binding $parent[UserControl].((vm:ScanRootsFlatTreeViewModel)DataContext).ToggleExpandedCommand}"
+                          Command="{Binding $parent[UserControl].((scanRootsTree:ScanRootsTreeViewModel)DataContext).ToggleExpandedCommand}"
                           CommandParameter="{Binding}"
                           Content="{Binding IsExpanded, Converter={StaticResource ExpandedToGlyphConverter}}" />
 

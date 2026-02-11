@@ -2,7 +2,7 @@ using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Features.Shell.ViewModels;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
@@ -57,7 +57,7 @@ public static class GuiBootstrapper
         // Scan roots tree + builder
         services.AddSingleton<IScanRootsTreeNodeActions, ScanRootsTreeNodeActions>();
         services.AddSingleton<ScanRootsTreeBuilder>();
-        services.AddSingleton<ScanRootsFlatTreeViewModel>();
+        services.AddSingleton<ScanRootsTreeViewModel>();
 
         // Tree map + actions (+ builder if you have one)
         services.AddSingleton<TreeMapActionsViewModel>();

@@ -48,7 +48,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Update="Features\Duplicates\Views\ScanRoots\ScanRootsFlatTreeView.axaml.cs">
+      <Compile Update="Features\Duplicates\Views\ScanRoots\ScanRootsTreeView.axaml.cs">
         <DependentUpon>ScanRootsFlatTreeView.axaml</DependentUpon>
       </Compile>
     </ItemGroup>

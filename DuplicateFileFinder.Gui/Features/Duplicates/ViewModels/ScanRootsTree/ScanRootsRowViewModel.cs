@@ -5,9 +5,9 @@ using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 
-namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
+namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
-public sealed partial class ScanRootsFlatRowViewModel : ObservableObject
+public sealed partial class ScanRootsRowViewModel : ObservableObject
 {
     private readonly IScanRootsTreeNodeActions? _actions;
 
@@ -17,7 +17,7 @@ public sealed partial class ScanRootsFlatRowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(DisplayName))]
     private bool _showFullPath;
 
-    public ScanRootsFlatRowViewModel(
+    public ScanRootsRowViewModel(
         ScanRootsTreeNode model,
         IScanRootsTreeNodeActions? actions,
         int depth)
@@ -49,7 +49,7 @@ public sealed partial class ScanRootsFlatRowViewModel : ObservableObject
 
     public string RescanOrResumeHeader => HasCheckpoint ? "Resume scan" : "Rescan location";
 
-    public Action<ScanRootsFlatRowViewModel>? OnRootRemoved { get; set; }
+    public Action<ScanRootsRowViewModel>? OnRootRemoved { get; set; }
 
     // Projection
     public string Name => Model.Name;
