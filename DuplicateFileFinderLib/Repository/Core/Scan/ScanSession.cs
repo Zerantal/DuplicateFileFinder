@@ -376,7 +376,7 @@ internal sealed class ScanSession : IScanSession
         }
     }
 
-public async Task<ScanCompletionInfo> CompleteAsync(CancellationToken cancellationToken = default)
+    public async Task<ScanCompletionInfo> CompleteAsync(CancellationToken cancellationToken = default)
     {
         await FlushProgressAsync(cancellationToken).ConfigureAwait(false);
 
@@ -385,14 +385,14 @@ public async Task<ScanCompletionInfo> CompleteAsync(CancellationToken cancellati
 
         // Finalise in one repo-level operation so it can publish a single reasoned event
         // using the correct generation + snapshot view.
-    var generation = await _repo.FinaliseCompletedScanAsync(ScanSequence, snapshot, cancellationToken).ConfigureAwait(false);
+        var generation = await _repo.FinaliseCompletedScanAsync(ScanSequence, snapshot, cancellationToken).ConfigureAwait(false);
 
         _finished = true;
 
-    return new ScanCompletionInfo(
-        ScanRootId: ScanRootId,
-        Generation: generation,
-        ScanSequence: ScanSequence);
+        return new ScanCompletionInfo(
+            ScanRootId: ScanRootId,
+            Generation: generation,
+            ScanSequence: ScanSequence);
     }
 
 

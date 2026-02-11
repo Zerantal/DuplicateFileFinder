@@ -269,7 +269,7 @@ public sealed class FullScanOperationTests
             .Returns(Task.CompletedTask);
 
         session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.FromResult(new ScanCompletionInfo {Generation = 1, ScanSequence = 1, ScanRootId = 1}));
+            .Returns(Task.FromResult(new ScanCompletionInfo { Generation = 1, ScanSequence = 1, ScanRootId = 1 }));
 
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
@@ -578,7 +578,7 @@ public sealed class FullScanOperationTests
             .Returns(Task.CompletedTask);
 
         session.Setup(s => s.CompleteAsync(It.IsAny<CancellationToken>())).Returns(
-            Task.FromResult(new ScanCompletionInfo {Generation = 1, ScanRootId = 1, ScanSequence = 1}));
+            Task.FromResult(new ScanCompletionInfo { Generation = 1, ScanRootId = 1, ScanSequence = 1 }));
         session.Setup(s => s.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
         var op = new FullScanOperation(repoHost.Object, fs.Object, hashing.Object, volume.Object);

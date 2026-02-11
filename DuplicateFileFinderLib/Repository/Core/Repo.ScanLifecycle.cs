@@ -79,11 +79,11 @@ public sealed partial class Repo
         lock (_sync)
         {
             if (!TryUpdateScanRun_NoLock(sequence, run => run with
-                {
-                    Status = ScanRunStatus.Completed,
-                    FinishedAt = DateTimeOffset.UtcNow,
-                    ErrorMessage = null
-                }, out updated) || updated is null)
+            {
+                Status = ScanRunStatus.Completed,
+                FinishedAt = DateTimeOffset.UtcNow,
+                ErrorMessage = null
+            }, out updated) || updated is null)
             {
                 return;
             }
@@ -107,11 +107,11 @@ public sealed partial class Repo
             var status = cancelled ? ScanRunStatus.Cancelled : ScanRunStatus.Failed;
 
             if (!TryUpdateScanRun_NoLock(sequence, run => run with
-                {
-                    Status = status,
-                    FinishedAt = DateTimeOffset.UtcNow,
-                    ErrorMessage = errorMessage
-                }, out updated) || updated is null)
+            {
+                Status = status,
+                FinishedAt = DateTimeOffset.UtcNow,
+                ErrorMessage = errorMessage
+            }, out updated) || updated is null)
             {
                 return;
             }
@@ -311,11 +311,11 @@ public sealed partial class Repo
     private ScanRun MarkScanCompleted_NoLock(long sequence)
     {
         if (!TryUpdateScanRun_NoLock(sequence, run => run with
-            {
-                Status = ScanRunStatus.Completed,
-                FinishedAt = DateTimeOffset.UtcNow,
-                ErrorMessage = null
-            }, out var updated) || updated is null)
+        {
+            Status = ScanRunStatus.Completed,
+            FinishedAt = DateTimeOffset.UtcNow,
+            ErrorMessage = null
+        }, out var updated) || updated is null)
         {
             throw new InvalidOperationException($"ScanRun {sequence} was not found.");
         }
