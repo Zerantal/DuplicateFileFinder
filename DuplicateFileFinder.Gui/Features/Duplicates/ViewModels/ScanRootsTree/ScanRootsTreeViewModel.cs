@@ -28,11 +28,11 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     private readonly HashSet<DirHandle> _expanded = new();
 
     // Handle->row for quick selection
-    private readonly Dictionary<DirHandle, ScanRootsTree.ScanRootsRowViewModel> _rowByHandle = new();
+    private readonly Dictionary<DirHandle, ScanRootsRowViewModel> _rowByHandle = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectedPath))]
-    private ScanRootsTree.ScanRootsRowViewModel? _selectedRow;
+    private ScanRootsRowViewModel? _selectedRow;
 
     private RepoSnapshotView? _snapshot;
 
@@ -51,7 +51,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
-        ToggleExpandedCommand = new RelayCommand<ScanRootsTree.ScanRootsRowViewModel>(ToggleExpanded);
+        ToggleExpandedCommand = new RelayCommand<ScanRootsRowViewModel>(ToggleExpanded);
 
         repoEvents.ScanRootRemoved += ScanRootRemovedEventHandler;
         disposer.Add(() => repoEvents.ScanRootRemoved -= ScanRootRemovedEventHandler);
@@ -63,7 +63,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     }
 
     // Visible, virtualized rows
-    public BulkObservableCollection<ScanRootsTree.ScanRootsRowViewModel> Rows { get; } = [];
+    public BulkObservableCollection<ScanRootsRowViewModel> Rows { get; } = [];
 
     public string? SelectedPath => SelectedRow?.FullPath;
 
@@ -80,7 +80,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     public event Action? RequestCenterSelectedRow;
 
     // ReSharper disable once MemberCanBePrivate.Global
-    public void SelectRowAndCenter(ScanRootsTree.ScanRootsRowViewModel row)
+    public void SelectRowAndCenter(ScanRootsRowViewModel row)
     {
         SelectedRow = row;
         RequestCenterSelectedRow?.Invoke();
@@ -134,9 +134,9 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     }
 
 
-    private ScanRootsTree.ScanRootsRowViewModel CreateRow(ScanRootsTreeNode model, int depth)
+    private ScanRootsRowViewModel CreateRow(ScanRootsTreeNode model, int depth)
     {
-        var row = new ScanRootsTree.ScanRootsRowViewModel(model, _actions, depth);
+        var row = new ScanRootsRowViewModel(model, _actions, depth);
 
         if (model.Dir.IsValid)
             _rowByHandle[model.Dir] = row;
@@ -186,7 +186,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     // ---- Expand/collapse ----
 
-    private void ToggleExpanded(ScanRootsTree.ScanRootsRowViewModel? row)
+    private void ToggleExpanded(ScanRootsRowViewModel? row)
     {
         if (row is null)
             return;
@@ -200,7 +200,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
             Expand(row);
     }
 
-    private void Expand(ScanRootsTree.ScanRootsRowViewModel row)
+    private void Expand(ScanRootsRowViewModel row)
     {
         if (_snapshot is null)
             return;
@@ -240,7 +240,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
-    private void Collapse(ScanRootsTree.ScanRootsRowViewModel row)
+    private void Collapse(ScanRootsRowViewModel row)
     {
         if (!row.IsExpanded)
             return;
@@ -380,7 +380,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         SelectRowAndCenter(current);
     }
 
-    private ScanRootsTree.ScanRootsRowViewModel CreateAndInsertSingleChild(ScanRootsTree.ScanRootsRowViewModel parentRow,
+    private ScanRootsRowViewModel CreateAndInsertSingleChild(ScanRootsRowViewModel parentRow,
         ScanRootsTreeNode childModel)
     {
         var parentIndex = Rows.IndexOf(parentRow);
@@ -390,7 +390,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         return row;
     }
 
-    private ScanRootsTree.ScanRootsRowViewModel? FindInVisibleSubtree(ScanRootsTree.ScanRootsRowViewModel parent, DirHandle wanted)
+    private ScanRootsRowViewModel? FindInVisibleSubtree(ScanRootsRowViewModel parent, DirHandle wanted)
     {
         var start = Rows.IndexOf(parent);
         if (start < 0)
@@ -418,9 +418,9 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
         return list;
 
-        ScanRootsTree.ScanRootsRowViewModel Project(ScanRootsTreeNode m)
+        ScanRootsRowViewModel Project(ScanRootsTreeNode m)
         {
-            return new ScanRootsTree.ScanRootsRowViewModel(m, null, 0);
+            return new ScanRootsRowViewModel(m, null, 0);
         }
     }
 
@@ -467,7 +467,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
                 Expand(row);
     }
 
-    private Comparison<ScanRootsTree.ScanRootsRowViewModel> GetComparison()
+    private Comparison<ScanRootsRowViewModel> GetComparison()
     {
         return SortColumn switch
         {
