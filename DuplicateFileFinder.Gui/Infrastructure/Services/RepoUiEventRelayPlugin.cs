@@ -20,23 +20,41 @@ public sealed class RepoUiEventRelayPlugin(IUiDispatcher ui) : ChannelRepoPlugin
     public event EventHandler<ScanRunFinalisedEvent>? ScanRunFinalised;
     public event EventHandler<ScanRootMetaChangedEvent>? ScanRootMetaChanged;
 
-    protected override void OnRepoFileDeletedEvent(RepoFileDeletedEvent evt)
-        => RaiseOnUiThread(FileDeleted, evt);
+    protected override ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(FileDeleted, evt);
+        return  ValueTask.CompletedTask;
+    }
 
-    protected override void OnRepoDirDeletedEvent(RepoDirDeletedEvent evt)
-        => RaiseOnUiThread(DirDeleted, evt);
+    protected override ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(DirDeleted, evt);
+        return ValueTask.CompletedTask;
+    }
 
-    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
-        => RaiseOnUiThread(ScanRootRemoved, evt);
+    protected override ValueTask OnRepoScanRootRemovedEventAsync(RepoScanRootRemovedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(ScanRootRemoved, evt);
+        return ValueTask.CompletedTask;
+    }
 
-    protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
-        => RaiseOnUiThread(SnapshotReplaced, evt);
+    protected override ValueTask OnScanRootSnapshotReplacedEventAsync(ScanRootSnapshotReplacedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(SnapshotReplaced, evt);
+        return ValueTask.CompletedTask;
+    }
 
-    protected override void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt)
-        => RaiseOnUiThread(ScanRunFinalised, evt);
+    protected override ValueTask OnScanRunFinalisedEventAsync(ScanRunFinalisedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(ScanRunFinalised, evt);
+        return ValueTask.CompletedTask;
+    }
 
-    protected override void OnScanRootMetaChangedEvent(ScanRootMetaChangedEvent evt)
-        => RaiseOnUiThread(ScanRootMetaChanged, evt);
+    protected override ValueTask OnScanRootMetaChangedEventAsync(ScanRootMetaChangedEvent evt, CancellationToken ct)
+    {
+        RaiseOnUiThread(ScanRootMetaChanged, evt);
+        return ValueTask.CompletedTask;
+    }
 
     private void RaiseOnUiThread<T>(EventHandler<T>? handler, T evt) where T : RepoEvent
     {

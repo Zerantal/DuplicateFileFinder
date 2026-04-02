@@ -191,32 +191,40 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Event handlers
     // ---------------------------------------------------------------------
 
-    protected override void OnBootstrapEvent(BootstrapEvent evt)
+    protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
         if (TryLoadState(evt.Generation))
         {
             _lastIndexedGeneration = evt.Generation;
-            return;
+            return ValueTask.CompletedTask;
         }
 
         RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
+
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
+    protected override ValueTask OnScanRootSnapshotReplacedEventAsync(
+        ScanRootSnapshotReplacedEvent evt,
+        CancellationToken ct)
     {
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    protected override ValueTask OnRepoScanRootRemovedEventAsync(
+        RepoScanRootRemovedEvent evt,
+        CancellationToken ct)
     {
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         RebuildAndCommit(evt.Generation, () => RebuildExcludingScanRoot(evt.ScanRootId));
+        return ValueTask.CompletedTask;
     }
 
     private void RebuildAndCommit(long generation, Action rebuild)
