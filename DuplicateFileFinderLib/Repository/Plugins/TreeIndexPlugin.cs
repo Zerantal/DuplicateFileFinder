@@ -8,10 +8,14 @@ using DuplicateFileFinderLib.Repository.Plugins.Models;
 using DuplicateFileFinderLib.Repository.Storage;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
+using NLog;
+
 namespace DuplicateFileFinderLib.Repository.Plugins;
 
 public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
+
     private const string StateFileName = "tree-index.bin";
 
     // Dir indices are mostly dense per scan root, but some holes exist (Deleted/None).
@@ -120,7 +124,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // Event handlers
     // ---------------------------------------------------------------------
 
-    protected override void OnBootstrapEvent(BootstrapEvent evt)
+    protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
         if (!TryLoadState(evt.Generation))
         {
@@ -133,26 +137,36 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         {
             _lastIndexedGeneration = evt.Generation;
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
+    protected override ValueTask OnScanRootSnapshotReplacedEventAsync(
+        ScanRootSnapshotReplacedEvent evt,
+        CancellationToken ct)
     {
+        s_log.Info("Rebuilding TreeIndex (generation = {0}).", evt.Generation);
+
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         // Rebuild from the new snapshot view and persist.
         RebuildFromSnapshot(evt.RepoSnapshotView);
 
         _lastIndexedGeneration = evt.Generation;
         SaveState();
+
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    protected override ValueTask OnRepoScanRootRemovedEventAsync(
+        RepoScanRootRemovedEvent evt,
+        CancellationToken ct)
     {
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         var removedRootId = evt.ScanRootId;
 
@@ -163,7 +177,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         {
             _lastIndexedGeneration = evt.Generation;
             SaveState();
-            return;
+            return ValueTask.CompletedTask;
         }
 
         var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(Math.Max(0, oldRoots.Count - 1));
@@ -175,6 +189,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
         _lastIndexedGeneration = evt.Generation;
         SaveState();
+
+        return ValueTask.CompletedTask;
     }
 
     // ---------------------------------------------------------------------
@@ -239,7 +255,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     var dir = snapshot.Dirs[i];
 
                     // Skip deleted/absent dirs entirely.
-                    if (dir.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    if (dir.Status is ScanEntryStatus.Deleted)
                         continue;
 
                     dirIdToIndex[dir.DirId] = i;
@@ -257,7 +273,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                 {
                     var dir = snapshot.Dirs[i];
 
-                    if (dir.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    if (dir.Status is ScanEntryStatus.Deleted)
                         continue;
 
                     if (dir.ParentDirId < 0)

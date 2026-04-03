@@ -62,61 +62,60 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
         }
     }
 
-    protected virtual ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
+    protected virtual async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
     {
         switch (evt)
         {
             case BootstrapEvent bootstrap:
                 using (TimingLog.Start($"Processing BootstrapEvent ({GetType().Name})"))
                 {
-                    OnBootstrapEvent(bootstrap);
+                    await OnBootstrapEventAsync(bootstrap, ct).ConfigureAwait(false);
                 }
                 SignalReady();
                 break;
 
             case ScanRunFinalisedEvent finalised:
-                OnScanRunFinalisedEvent(finalised);
+                await OnScanRunFinalisedEventAsync(finalised, ct).ConfigureAwait(false);
                 break;
 
             case ScanRootSnapshotReplacedEvent replaced:
                 using (TimingLog.Start($"Processing ScanRootSnapshotReplacedEvent ({GetType().Name})"))
                 {
-                    OnScanRootSnapshotReplacedEvent(replaced);
+                    await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
                 }
                 break;
 
             case RepoFileDeletedEvent fileDeleted:
-                OnRepoFileDeletedEvent(fileDeleted);
+                await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
                 break;
 
             case RepoDirDeletedEvent dirDeleted:
-                OnRepoDirDeletedEvent(dirDeleted);
+                await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
                 break;
 
             case RepoScanRootRemovedEvent rootRemoved:
-                OnRepoScanRootRemovedEvent(rootRemoved);
+                await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
                 break;
+
             case ScanRootMetaChangedEvent metaChanged:
-                OnScanRootMetaChangedEvent(metaChanged);
+                await OnScanRootMetaChangedEventAsync(metaChanged, ct).ConfigureAwait(false);
                 break;
         }
 
         UpdateLastProcessedGeneration(evt.Generation);
-        return ValueTask.CompletedTask;
     }
 
-    protected virtual void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt) { }
-    protected virtual void OnRepoFileDeletedEvent(RepoFileDeletedEvent evt) { }
-    protected virtual void OnRepoDirDeletedEvent(RepoDirDeletedEvent evt) { }
-    protected virtual void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt) { }
-    protected virtual void OnBootstrapEvent(BootstrapEvent evt) { }
-    protected virtual void OnScanRunFinalisedEvent(ScanRunFinalisedEvent evt) { }
-    protected virtual void OnScanRootMetaChangedEvent(ScanRootMetaChangedEvent evt) { }
+    // New async overridables (default no-op)
+    protected virtual ValueTask OnScanRootSnapshotReplacedEventAsync(ScanRootSnapshotReplacedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnRepoScanRootRemovedEventAsync(RepoScanRootRemovedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnScanRunFinalisedEventAsync(ScanRunFinalisedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnScanRootMetaChangedEventAsync(ScanRootMetaChangedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
 
-    protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt)
-    {
+    protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt) =>
         Console.Error.WriteLine($"[{GetType().Name}] Error handling {evt.GetType().Name}: {ex}");
-    }
 
     /// <summary>
     /// Call this from derived class once the bootstrap event is fully processed.

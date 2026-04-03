@@ -75,9 +75,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _scanCoordinator.ScanCompleted += scanCompleted;
         _disposer.Add(() => _scanCoordinator.ScanCompleted -= scanCompleted);
 
-        // Indexes rebuilt -> reload duplicates
+        // Scan fully indexed -> reload duplicates
+        EventHandler<ScanIndexedEventArgs> scanIndexed = (_, _) =>
+        {
+            if (Dispatcher.UIThread.CheckAccess())
+                Duplicates.LoadFromRepo();
+            else
+                Dispatcher.UIThread.InvokeAsync(() => Duplicates.LoadFromRepo());
+        };
+        _scanCoordinator.ScanIndexed += scanIndexed;
+        _disposer.Add(() => _scanCoordinator.ScanIndexed -= scanIndexed);
+
+        // Non-scan index rebuilds (for example delete operations) -> reload duplicates.
+        // Skip rebuilds that occur while a scan is still in-flight; those are handled by ScanIndexed.
         EventHandler<RepoIndexesRebuiltEventArgs> indexesRebuilt = (_, _) =>
         {
+            if (_scanCoordinator.IsScanning)
+                return;
+
             if (Dispatcher.UIThread.CheckAccess())
                 Duplicates.LoadFromRepo();
             else

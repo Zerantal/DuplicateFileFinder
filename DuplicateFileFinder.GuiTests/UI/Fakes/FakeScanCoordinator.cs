@@ -28,6 +28,8 @@ public sealed class FakeScanCoordinator : IScanCoordinator
     public bool IsScanning { get; }
     public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged;
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+    public event EventHandler<ScanIndexedEventArgs>? ScanIndexed;
+
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
         => throw new NotImplementedException();
 

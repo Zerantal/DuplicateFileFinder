@@ -5,6 +5,8 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
+using NLog;
+
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 /// <summary>
@@ -15,11 +17,14 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 /// </summary>
 public sealed class ScanRootsTreeBuilder(IRepoHost host)
 {
-    private readonly IFileDirReadModel _mainIndex = host.FileDirIndex ?? throw new ArgumentNullException(nameof(host));
-    private readonly Dictionary<DirHandle, ScanRootsTreeNode> _nodesByDirHandle = new();
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
+    private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
     private readonly IRepo _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
-    private readonly ITreeIndexReadModel _treeIndex = host.TreeIndex ?? throw new ArgumentNullException(nameof(host));
+
+    private readonly Dictionary<DirHandle, ScanRootsTreeNode> _nodesByDirHandle = new();
+    private ITreeIndexReadModel TreeIndex => _host.TreeIndex;
+    private IFileDirReadModel MainIndex => _host.FileDirIndex;
 
     // dirId (of scanroot dir) -> scanroot display info
     private Dictionary<DirId, ScanRootViewEntry> _scanRootByDirId = new();
@@ -31,6 +36,9 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     /// </summary>
     public List<ScanRootsTreeNode> Build(RepoSnapshotView snapshot)
     {
+        s_log.Info("Building scan-root tree (lastIndexedGeneration={0})...",
+            host.LastIndexedGeneration);
+
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
 
         _nodesByDirHandle.Clear();
@@ -76,7 +84,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             }
 
             // Stats for root from index
-            var rootStats = _treeIndex.GetDirStats(rootHandle);
+            var rootStats = TreeIndex.GetDirStats(rootHandle);
             rootNode.ApplyAggregateStats(rootStats, rootStats.TotalBytes);
 
             // Mark lazy children support
@@ -92,7 +100,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         => _nodesByDirHandle.TryGetValue(dirHandle, out node!);
 
     public bool TryGetDirHandle(DirId dirId, out DirHandle handle)
-        => _mainIndex.TryGetDir(dirId, out handle);
+        => MainIndex.TryGetDir(dirId, out handle);
 
     public bool TryGetParentDirHandle(FileHandle fileHandle, out DirHandle parentDirHandle)
     {
@@ -103,7 +111,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
 
         var fileRec = _snapshot.GetFileRecord(fileHandle);
 
-        if (!_mainIndex.TryGetDir(fileRec.DirId, out parentDirHandle))
+        if (!MainIndex.TryGetDir(fileRec.DirId, out parentDirHandle))
             return false;
 
         return true;
@@ -133,7 +141,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             if (parentDirId <= 0)
                 return false;
 
-            if (!_mainIndex.TryGetDir(parentDirId, out var parentHandle))
+            if (!MainIndex.TryGetDir(parentDirId, out var parentHandle))
                 return false;
 
             current = parentHandle;
@@ -188,7 +196,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         node.Children.Clear();
 
         var scanRootTotal = node.ScanRootTotalBytes;
-        var childHandles = _treeIndex.GetChildDirs(node.Dir);
+        var childHandles = TreeIndex.GetChildDirs(node.Dir);
 
         var children = new List<ScanRootsTreeNode>(childHandles.Length);
 
@@ -263,7 +271,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         _nodesByDirHandle[childHandle] = node;
 
         // Stats from index
-        var stats = _treeIndex.GetDirStats(childHandle);
+        var stats = TreeIndex.GetDirStats(childHandle);
         node.ApplyAggregateStats(stats, parentNode.ScanRootTotalBytes);
 
         // Has children?
@@ -291,12 +299,12 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         rootHandle = DirHandle.Invalid;
 
         // Try to resolve the root dir into the current main index.
-        if (!_mainIndex.TryGetDir(rootDirId, out var handle))
+        if (!MainIndex.TryGetDir(rootDirId, out var handle))
             return CreatePlaceholderRootNodeModel(label, fullPath, scanRootId, hasCheckpoint);
 
         // If the snapshot record is absent/deleted, treat it as placeholder so it still shows.
         var rootRec = _snapshot.GetDirRecord(handle);
-        if (rootRec.Status is ScanEntryStatus.None or ScanEntryStatus.Deleted)
+        if (rootRec.Status is ScanEntryStatus.Deleted)
             return CreatePlaceholderRootNodeModel(label, fullPath, scanRootId, hasCheckpoint);
 
         rootHandle = handle;
@@ -373,7 +381,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         _nodesByDirHandle[dirHandle] = node;
 
         // Stats from index
-        var stats = _treeIndex.GetDirStats(dirHandle);
+        var stats = TreeIndex.GetDirStats(dirHandle);
         node.ApplyAggregateStats(stats, scanRootTotalBytes);
 
         node.HasLazyChildren = HasChildDirs(dirHandle);
@@ -381,7 +389,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         return node;
     }
 
-    private bool HasChildDirs(DirHandle dirHandle) => _treeIndex.GetChildDirs(dirHandle).Length > 0;
+    private bool HasChildDirs(DirHandle dirHandle) => TreeIndex.GetChildDirs(dirHandle).Length > 0;
 
     // ---------------------------------------------------------------------
     // Scan root labeling / status
@@ -421,9 +429,9 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         }
 
         // Fallback to index path
-        if (_mainIndex.TryGetDir(rootDirId, out var h))
+        if (MainIndex.TryGetDir(rootDirId, out var h))
         {
-            _mainIndex.TryGetDirPathByHandle(h, out var relativePath);
+            MainIndex.TryGetDirPathByHandle(h, out var relativePath);
             return Path.Combine(relativePath);
         }
 

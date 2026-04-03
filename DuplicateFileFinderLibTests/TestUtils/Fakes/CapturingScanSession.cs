@@ -58,10 +58,10 @@ internal sealed class CapturingScanSession : IScanSession
     {
     }
 
-    public Task CompleteAsync(CancellationToken ct = default)
+    public Task<ScanCompletionInfo> CompleteAsync(CancellationToken ct = default)
     {
         _methodCounter.IncrementMethodCalCount();
-        return Task.CompletedTask;
+        return Task.FromResult(new ScanCompletionInfo { Generation = 1, ScanRootId = 1, ScanSequence = 1 });
     }
 
     public Task FailAsync(string? errorMessage, bool cancelled, CancellationToken ct = default)

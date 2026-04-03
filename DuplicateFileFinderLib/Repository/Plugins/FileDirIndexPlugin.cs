@@ -50,7 +50,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
     // Event handlers
     // ---------------------------------------------------------------------
 
-    protected override void OnBootstrapEvent(BootstrapEvent evt)
+    protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
         _snapshotView = evt.RepoSnapshotView;
 
@@ -68,13 +68,17 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
             EnsureCountsFromSnapshotIfMissing(evt.RepoSnapshotView);
             _lastIndexedGeneration = evt.Generation;
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnScanRootSnapshotReplacedEvent(ScanRootSnapshotReplacedEvent evt)
+    protected override ValueTask OnScanRootSnapshotReplacedEventAsync(
+        ScanRootSnapshotReplacedEvent evt,
+        CancellationToken ct)
     {
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         _snapshotView = evt.RepoSnapshotView;
 
@@ -85,12 +89,15 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         _lastIndexedGeneration = evt.Generation;
         SaveState();
+        return ValueTask.CompletedTask;
     }
 
-    protected override void OnRepoScanRootRemovedEvent(RepoScanRootRemovedEvent evt)
+    protected override ValueTask OnRepoScanRootRemovedEventAsync(
+        RepoScanRootRemovedEvent evt,
+        CancellationToken ct)
     {
         if (evt.Generation <= _lastIndexedGeneration)
-            return;
+            return ValueTask.CompletedTask;
 
         var rootId = evt.ScanRootId;
 
@@ -107,6 +114,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         _lastIndexedGeneration = evt.Generation;
         SaveState();
+        return ValueTask.CompletedTask;
     }
 
     // ---------------------------------------------------------------------

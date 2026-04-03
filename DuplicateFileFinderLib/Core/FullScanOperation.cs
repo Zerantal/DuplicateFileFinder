@@ -21,26 +21,26 @@ internal sealed class FullScanOperation(
                                            throw new InvalidOperationException(
                                                "Repo does not implement IRepoInternal.");
 
-    public Task ExecuteAsync(
+    public Task<ScanCompletionInfo> ExecuteAsync(
         string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct)
         => ExecuteAsync(rootPath, new ScanOptions(), progress, ct);
 
-    public Task ExecuteAsync(
+    public Task<ScanCompletionInfo> ExecuteAsync(
         ScanRootId scanRootId,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct) =>
         ExecuteAsync(scanRootId, new ScanOptions(), progress, ct);
 
-    public Task ExecuteAsync(
+    public Task<ScanCompletionInfo> ExecuteAsync(
         DirHandle startDir,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct) =>
         ExecuteAsync(startDir, new ScanOptions(), progress, ct);
 
     // New location scan
-    public async Task ExecuteAsync(
+    public async Task<ScanCompletionInfo> ExecuteAsync(
         string rootPath,
         ScanOptions options,
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -62,11 +62,12 @@ internal sealed class FullScanOperation(
                 indeterminate: true);
             ctx = await _repo.BeginNewScanAsync(rootPath, options, vInfo, ct).ConfigureAwait(false);
         }
-        await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
+
+        return await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
     }
 
     // Location re-scanning
-    private async Task ExecuteAsync(
+    private async Task<ScanCompletionInfo> ExecuteAsync(
         ScanRootId scanRootId,
         ScanOptions options,
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -92,11 +93,12 @@ internal sealed class FullScanOperation(
                 indeterminate: true);
             ctx = await _repo.BeginRescanAsync(scanRootId, options, vInfo, ct).ConfigureAwait(false);
         }
-        await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
+
+        return await ExecuteWithContextAsync(ctx, progress, ct, startPending: null).ConfigureAwait(false);
     }
 
     // Folder re-scanning
-    public async Task ExecuteAsync(
+    public async Task<ScanCompletionInfo> ExecuteAsync(
         DirHandle startDir,
         ScanOptions options,
         IProgress<DuplicateFileFinderProgressReport>? progress,
@@ -136,10 +138,10 @@ internal sealed class FullScanOperation(
         var (dirId, fullPath) = ResolveStartDir(ctx.Run.RootPath, snap, startDir.Index);
         var startPending = new PendingDir(dirId, fullPath);
 
-        await ExecuteWithContextAsync(ctx, progress, ct, startPending).ConfigureAwait(false);
+        return await ExecuteWithContextAsync(ctx, progress, ct, startPending).ConfigureAwait(false);
     }
 
-    private async Task ExecuteWithContextAsync(
+    private async Task<ScanCompletionInfo> ExecuteWithContextAsync(
         ScanContext ctx,
         IProgress<DuplicateFileFinderProgressReport>? progress,
         CancellationToken ct,
@@ -190,7 +192,7 @@ internal sealed class FullScanOperation(
                     ct).ConfigureAwait(false);
             }
 
-            await session.CompleteAsync(ct).ConfigureAwait(false);
+            var completion = await session.CompleteAsync(ct).ConfigureAwait(false);
 
             DuplicateFileFinderHelpers.Report(
                 progress,
@@ -198,6 +200,8 @@ internal sealed class FullScanOperation(
                 "Finished scanning",
                 1.0,
                 running: false);
+
+            return completion;
         }
         catch (OperationCanceledException)
         {

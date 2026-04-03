@@ -47,19 +47,19 @@ public sealed class DuplicateFileFinder
     internal DuplicateFileFinder(IRepoHost host, bool throttleProgress) : this(host) =>
         _throttleProgress = throttleProgress;
 
-    public Task FullScanAsync(
+    public Task<ScanCompletionInfo> FullScanAsync(
         string rootPath,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
         CancellationToken ct = default) =>
         _fullScan.ExecuteAsync(rootPath, ThrottledProgress(progress), ct);
 
-    public Task FullScanAsync(
+    public Task<ScanCompletionInfo> FullScanAsync(
         ScanRootId scanRootId,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
         CancellationToken ct = default) =>
         _fullScan.ExecuteAsync(scanRootId, ThrottledProgress(progress), ct);
 
-    public Task FullScanAsync(
+    public Task<ScanCompletionInfo> FullScanAsync(
         DirHandle startDir,
         IProgress<DuplicateFileFinderProgressReport>? progress = null,
         CancellationToken ct = default) =>

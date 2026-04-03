@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
-using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTreeFlat;
+using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 using DuplicateFileFinderLib.Logging;
@@ -18,13 +18,13 @@ public partial class DuplicatesViewModel : ObservableObject
 
     private bool _syncingSelection;
 
-    public ScanRootsFlatTreeViewModel ScanRootsTree { get; }
+    public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
     public DuplicateGroupsViewModel DuplicateGroups { get; }
 
     public DuplicatesViewModel(
         IRepoHost host,
-        ScanRootsFlatTreeViewModel scanRootsTree,
+        ScanRootsTreeViewModel scanRootsTree,
         TreeMapController treeMapController,
         TreeMapActionsViewModel treeMapActions,
         DuplicateGroupsViewModel duplicateGroups)

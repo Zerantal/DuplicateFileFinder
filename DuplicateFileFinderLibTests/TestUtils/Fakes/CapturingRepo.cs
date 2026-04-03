@@ -36,12 +36,12 @@ internal sealed class CapturingRepo : IRepoInternal
         return Task.CompletedTask;
     }
 
-    public Task FinaliseCompletedScanAsync(long scanSequence, ScanRootSnapshotV2 completedSnapshot,
+    public Task<long> FinaliseCompletedScanAsync(long scanSequence, ScanRootSnapshotV2 completedSnapshot,
         CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
         LastCommittedSnapshot = completedSnapshot;
-        return Task.CompletedTask;
+        return Task.FromResult(1L);
     }
 
     Task<ScanContext> IRepoInternal.BeginNewScanAsync(string rootPath, ScanOptions options,

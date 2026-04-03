@@ -199,7 +199,10 @@ public sealed partial class Repo
     Task IRepoInternal.CommitScanRootSnapshotV2Async(ScanRootSnapshotV2 snapshot, CancellationToken cancellationToken)
         => CommitAndPublishSnapshotAsync(snapshot, RepoSnapshotCommitReason.Maintenance, cancellationToken);
 
-    async Task IRepoInternal.FinaliseCompletedScanAsync(long scanSequence, ScanRootSnapshotV2 completedSnapshot, CancellationToken ct)
+    async Task<long> IRepoInternal.FinaliseCompletedScanAsync(
+        long scanSequence,
+        ScanRootSnapshotV2 completedSnapshot,
+        CancellationToken ct)
     {
         var (generation, snapshotView, updatedRun) =
             await FinaliseCompletedScanAsync(scanSequence, completedSnapshot, ct).ConfigureAwait(false);
@@ -217,6 +220,8 @@ public sealed partial class Repo
             RepoSnapshotView = snapshotView,
             Reason = RepoSnapshotCommitReason.ScanCompleted
         });
+
+        return generation;
     }
 
     private async Task CommitAndPublishSnapshotAsync(ScanRootSnapshotV2 snapshot, RepoSnapshotCommitReason reason, CancellationToken ct)

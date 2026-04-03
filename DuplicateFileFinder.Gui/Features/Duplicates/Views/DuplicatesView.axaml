@@ -18,7 +18,7 @@
     <Grid Grid.Row="0"
           x:Name="ScanRootsHost">
 
-      <scanRoots:ScanRootsFlatTreeView
+      <scanRoots:ScanRootsTreeView
         x:Name="ScanRootsTree"
         DataContext="{Binding ScanRootsTree}" />
     </Grid>

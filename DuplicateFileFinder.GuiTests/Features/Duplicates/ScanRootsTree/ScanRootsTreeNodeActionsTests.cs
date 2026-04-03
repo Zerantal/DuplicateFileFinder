@@ -149,6 +149,7 @@ public sealed class ScanRootsTreeNodeActionsTests
 
         public event EventHandler<DuplicateFileFinderProgressReport>? ProgressChanged { add { } remove { } }
         public event EventHandler<ScanCompletedEventArgs>? ScanCompleted { add { } remove { } }
+        public event EventHandler<ScanIndexedEventArgs>? ScanIndexed { add { } remove { } }
 
         public readonly List<ScanRootId> RescannedScanRoots = [];
         public readonly List<DirHandle> RescannedFolders = [];
