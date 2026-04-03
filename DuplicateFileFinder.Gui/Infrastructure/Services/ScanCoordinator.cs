@@ -31,6 +31,7 @@ public sealed class ScanCoordinator(
 
     public event EventHandler<Dff.DuplicateFileFinderProgressReport>? ProgressChanged;
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+    public event EventHandler<ScanIndexedEventArgs>? ScanIndexed;
 
     public bool IsScanning { get; private set; }
 
@@ -156,7 +157,6 @@ public sealed class ScanCoordinator(
             // Successful scan => wait for indexes to be coherent for generation
             if (!cancelled && error is null && completion is not null)
             {
-                // Optional: give a subtle UI hint that we're in the "finalizing" phase.
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     try { dialog.Title = "Finalizing (updating indexes)..."; }
@@ -165,7 +165,17 @@ public sealed class ScanCoordinator(
                 });
 
                 await WaitForIndexesAsync(completion.Value, token).ConfigureAwait(false);
+
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                    ScanIndexed?.Invoke(
+                        this,
+                        new ScanIndexedEventArgs(
+                            arg,
+                            completion.Value.ScanRootId,
+                            completion.Value.Generation)));
             }
+
+
         }
         finally
         {

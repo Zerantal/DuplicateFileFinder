@@ -18,6 +18,17 @@ namespace DuplicateFileFinderLib.Repository.Core;
 public sealed partial class Repo
 {
 
+    public long Generation
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _meta.Generation;
+            }
+        }
+    }
+
     // Public read-only views
     public IReadOnlyList<ScanRoot> ScanRootsView
     {

@@ -64,6 +64,8 @@ public sealed class RepoHost : IRepoHost
         foreach (var ready in host._readyStates)
             await ready.WhenReadyAsync(ct).ConfigureAwait(false);
 
+        host.LastIndexedGeneration = repo.Generation;
+
         // ---- Coordinator ----
 
         var coordinator = new IndexRebuildCoordinator(

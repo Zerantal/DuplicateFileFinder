@@ -130,6 +130,7 @@ public sealed class ScanRootsTreeNodeActionsDeleteFolderTests
         }
 
         public event EventHandler<ScanCompletedEventArgs>? ScanCompleted { add { } remove { } }
+        public event EventHandler<ScanIndexedEventArgs>? ScanIndexed { add { } remove { } }
 
         public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken)
             => throw new NotImplementedException();

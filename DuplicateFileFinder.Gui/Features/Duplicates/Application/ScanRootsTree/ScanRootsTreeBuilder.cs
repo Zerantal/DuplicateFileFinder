@@ -37,7 +37,7 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
     public List<ScanRootsTreeNode> Build(RepoSnapshotView snapshot)
     {
         s_log.Info("Building scan-root tree (lastIndexedGeneration={0})...",
-            host.LastIndexedGeneration );
+            host.LastIndexedGeneration);
 
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
 

@@ -23,7 +23,7 @@ public sealed class RepoUiEventRelayPlugin(IUiDispatcher ui) : ChannelRepoPlugin
     protected override ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct)
     {
         RaiseOnUiThread(FileDeleted, evt);
-        return  ValueTask.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     protected override ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct)

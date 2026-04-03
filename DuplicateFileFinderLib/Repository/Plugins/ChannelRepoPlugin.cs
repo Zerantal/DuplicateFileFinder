@@ -173,7 +173,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
         lock (_processedSync)
         {
-            if (generation <=_lastProcessedGeneration)
+            if (generation <= _lastProcessedGeneration)
                 return;
 
             _lastProcessedGeneration = generation;

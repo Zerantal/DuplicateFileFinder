@@ -12,6 +12,13 @@ public sealed class ScanCompletedEventArgs(object arg, bool cancelled, Exception
     public Exception? Error { get; } = error;
 }
 
+public sealed class ScanIndexedEventArgs(object arg, ScanRootId scanRootId, long generation) : EventArgs
+{
+    public object Arg { get; } = arg;
+    public ScanRootId ScanRootId { get; } = scanRootId;
+    public long Generation { get; } = generation;
+}
+
 public interface IScanCoordinator
 {
     bool IsScanning { get; }
@@ -19,8 +26,8 @@ public interface IScanCoordinator
 
 #pragma warning disable 0067
     public event EventHandler<ScanCompletedEventArgs>? ScanCompleted;
+    public event EventHandler<ScanIndexedEventArgs>? ScanIndexed;
 #pragma warning restore 0067
-
 
     public Task RunScanNewLocationWithDialogAsync(string rootPath, CancellationToken cancellationToken = default);
 
