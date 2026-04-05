@@ -8,6 +8,8 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 
+using LoadingIndicators.Avalonia;
+
 namespace DuplicateFileFinder.Gui.Infrastructure.Services;
 
 public sealed class DialogService : IDialogService
@@ -149,6 +151,173 @@ public sealed class DialogService : IDialogService
             content.Children.Add(textBlock);
             content.Children.Add(buttonsPanel);
             window.Content = content;
+
+            await window.ShowDialog(owner);
+            return await tcs.Task;
+        });
+    }
+
+    public async Task<bool> ShowActionDialogAsync(
+        string title,
+        string message,
+        Func<CancellationToken, Action<string>, Task<(bool ok, string? error)>> action,
+        string okText = "OK",
+        string cancelText = "Cancel",
+        string workingText = "Working...")
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var owner = GetOwnerWindow();
+
+        return await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            var cts = new CancellationTokenSource();
+
+            var window = CreateBasicDialogWindow(title);
+            window.Width = 480;
+            window.Height = 260;
+
+            var root = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 12,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var messageBlock = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap };
+
+            var progressPanel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                Spacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                IsVisible = false
+            };
+
+            var loadingIndicator = new LoadingIndicator
+            {
+                IsActive = true,
+                Mode = LoadingIndicatorMode.ArcsRing,
+                SpeedRatio = 1.1,
+                Width = 40,
+                Height = 40,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            var progressText = new TextBlock { Text = workingText, TextWrapping = TextWrapping.Wrap };
+
+            progressPanel.Children.Add(loadingIndicator);
+            progressPanel.Children.Add(progressText);
+
+            var errorBlock = new TextBlock
+            {
+                IsVisible = false, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.IndianRed
+            };
+
+            var buttonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8
+            };
+
+            var okButton = new Button { Content = okText, MinWidth = 80, IsDefault = true };
+
+            var cancelButton = new Button { Content = cancelText, MinWidth = 80, IsCancel = true };
+
+            void SetWorkingText(string text)
+            {
+                if (Dispatcher.UIThread.CheckAccess())
+                {
+                    progressText.Text = text;
+                }
+                else
+                {
+                    Dispatcher.UIThread.Post(() => progressText.Text = text);
+                }
+            }
+
+            async Task RunActionAsync()
+            {
+                okButton.IsEnabled = false;
+                cancelButton.IsEnabled = false;
+                window.CanResize = false;
+
+                progressText.Text = workingText;
+                errorBlock.Text = string.Empty;
+                errorBlock.IsVisible = false;
+                progressPanel.IsVisible = true;
+
+                await Task.Yield();
+
+                try
+                {
+                    var (ok, error) = await Task.Run(
+                        () => action(cts.Token, SetWorkingText),
+                        cts.Token);
+
+                    if (ok)
+                    {
+                        tcs.TrySetResult(true);
+                        window.Close();
+                        return;
+                    }
+
+                    progressPanel.IsVisible = false;
+                    errorBlock.Text = error ?? "Unknown error.";
+                    errorBlock.IsVisible = true;
+
+                    okButton.IsVisible = false;
+                    cancelButton.Content = "Close";
+                    cancelButton.IsEnabled = true;
+                    cancelButton.IsCancel = true;
+                }
+                catch (OperationCanceledException)
+                {
+                    progressPanel.IsVisible = false;
+                    okButton.IsEnabled = true;
+                    cancelButton.IsEnabled = true;
+                }
+                catch (Exception ex)
+                {
+                    progressPanel.IsVisible = false;
+                    errorBlock.Text = ex.Message;
+                    errorBlock.IsVisible = true;
+
+                    okButton.IsVisible = false;
+                    cancelButton.Content = "Close";
+                    cancelButton.IsEnabled = true;
+                    cancelButton.IsCancel = true;
+                }
+            }
+
+            okButton.Click += async (_, _) => await RunActionAsync();
+
+            cancelButton.Click += (_, _) =>
+            {
+                tcs.TrySetResult(false);
+                window.Close();
+            };
+
+            window.Closed += (_, _) =>
+            {
+                cts.Cancel();
+
+                if (!tcs.Task.IsCompleted)
+                    tcs.TrySetResult(false);
+
+                cts.Dispose();
+            };
+
+            root.Children.Add(messageBlock);
+            root.Children.Add(progressPanel);
+            root.Children.Add(errorBlock);
+
+            buttonsPanel.Children.Add(okButton);
+            buttonsPanel.Children.Add(cancelButton);
+            root.Children.Add(buttonsPanel);
+
+            window.Content = root;
 
             await window.ShowDialog(owner);
             return await tcs.Task;

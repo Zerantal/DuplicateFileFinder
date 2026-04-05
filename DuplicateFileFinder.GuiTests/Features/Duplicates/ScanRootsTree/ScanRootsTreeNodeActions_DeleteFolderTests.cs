@@ -20,43 +20,61 @@ public sealed class ScanRootsTreeNodeActionsDeleteFolderTests
     public async Task DeleteFolderAsync_WhenCancelled_DoesNothing()
     {
         var env = CreateSut();
-        env.Dialogs.NextConfirmResult = false;
+        env.Dialogs.NextProgressConfirmationResult = false;
 
         var dir = new DirHandle(1, 10);
 
         await env.Actions.DeleteFolderAsync(dir, "/tmp/folder");
 
-        Assert.Single(env.Dialogs.Confirmations);
+        var dlg = Assert.Single(env.Dialogs.ProgressConfirmations);
+        Assert.Equal("Delete folder", dlg.Title);
+        Assert.Contains("/tmp/folder", dlg.Message, StringComparison.Ordinal);
+        Assert.Equal("Delete", dlg.OkText);
+        Assert.Equal("Cancel", dlg.CancelText);
+        Assert.Equal("Deleting folder...", dlg.WorkingText);
+
+        Assert.Empty(env.Dialogs.Confirmations);
         Assert.Empty(env.Deleter.DeletedDirectories);
         Assert.Empty(env.Repo.DeletedDirs);
         Assert.Empty(env.Dialogs.Errors);
+        Assert.Null(env.Dialogs.LastProgressActionResult);
+        Assert.Empty(env.Dialogs.LastProgressPhaseTexts);
     }
 
     [Fact]
-    public async Task DeleteFolderAsync_WhenFsDeleteFails_ShowsError_AndDoesNotTouchRepo()
+    public async Task DeleteFolderAsync_WhenFsDeleteFails_DoesNotTouchRepo_AndDoesNotShowSeparateErrorPopup()
     {
         var env = CreateSut();
-        env.Dialogs.NextConfirmResult = true;
+        env.Dialogs.NextProgressConfirmationResult = true;
         env.Deleter.NextDeleteDirectoryResult = (ok: false, error: "nope");
 
         var dir = new DirHandle(1, 10);
 
         await env.Actions.DeleteFolderAsync(dir, "/tmp/folder");
 
-        Assert.Single(env.Dialogs.Confirmations);
+        var dlg = Assert.Single(env.Dialogs.ProgressConfirmations);
+        Assert.Equal("Delete folder", dlg.Title);
+        Assert.Contains("/tmp/folder", dlg.Message, StringComparison.Ordinal);
+        Assert.Equal("Delete", dlg.OkText);
+        Assert.Equal("Cancel", dlg.CancelText);
+        Assert.Equal("Deleting folder...", dlg.WorkingText);
+
+        Assert.Empty(env.Dialogs.Confirmations);
         Assert.Single(env.Deleter.DeletedDirectories);
         Assert.Empty(env.Repo.DeletedDirs);
+        Assert.Empty(env.Dialogs.Errors);
 
-        var err = Assert.Single(env.Dialogs.Errors);
-        Assert.Equal("Delete failed", err.Title);
-        Assert.Contains("nope", err.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal((false, "nope"), env.Dialogs.LastProgressActionResult);
+        Assert.Equal(
+            ["Deleting folder from disk..."],
+            env.Dialogs.LastProgressPhaseTexts);
     }
 
     [Fact]
-    public async Task DeleteFolderAsync_WhenFsDeleteOk_AndRepoDeleteFails_ShowsError()
+    public async Task DeleteFolderAsync_WhenFsDeleteOk_AndRepoDeleteFails_DoesNotShowSeparateErrorPopup()
     {
         var env = CreateSut();
-        env.Dialogs.NextConfirmResult = true;
+        env.Dialogs.NextProgressConfirmationResult = true;
         env.Deleter.NextDeleteDirectoryResult = (ok: true, error: null);
 
         // Make repo delete fail
@@ -66,31 +84,97 @@ public sealed class ScanRootsTreeNodeActionsDeleteFolderTests
 
         await env.Actions.DeleteFolderAsync(dir, "/tmp/folder");
 
-        Assert.Single(env.Deleter.DeletedDirectories);
-        Assert.Single(env.Repo.DeletedDirs);
+        var dlg = Assert.Single(env.Dialogs.ProgressConfirmations);
+        Assert.Equal("Delete folder", dlg.Title);
+        Assert.Contains("/tmp/folder", dlg.Message, StringComparison.Ordinal);
+        Assert.Equal("Delete", dlg.OkText);
+        Assert.Equal("Cancel", dlg.CancelText);
+        Assert.Equal("Deleting folder...", dlg.WorkingText);
 
-        var err = Assert.Single(env.Dialogs.Errors);
-        Assert.Equal("Delete error", err.Title);
-        Assert.Contains("repo nope", err.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task DeleteFolderAsync_WhenFsDeleteOk_AndRepoDeleteOk_NoError()
-    {
-        var env = CreateSut();
-        env.Dialogs.NextConfirmResult = true;
-        env.Deleter.NextDeleteDirectoryResult = (ok: true, error: null);
-
-        var dir = new DirHandle(1, 10);
-
-        await env.Actions.DeleteFolderAsync(dir, "/tmp/folder");
-
+        Assert.Empty(env.Dialogs.Confirmations);
         Assert.Single(env.Deleter.DeletedDirectories);
 
         var deleted = Assert.Single(env.Repo.DeletedDirs);
         Assert.Equal(dir, deleted);
 
         Assert.Empty(env.Dialogs.Errors);
+
+        Assert.Equal(
+            (false, "Deleting entry from repository failed: repo nope"),
+            env.Dialogs.LastProgressActionResult);
+        Assert.Equal(
+            [
+                "Deleting folder from disk...",
+                "Updating indexes..."
+            ],
+            env.Dialogs.LastProgressPhaseTexts);
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_WhenFsDeleteOk_AndRepoDeleteOk_NoSeparateErrorPopup()
+    {
+        var env = CreateSut();
+        env.Dialogs.NextProgressConfirmationResult = true;
+        env.Deleter.NextDeleteDirectoryResult = (ok: true, error: null);
+
+        var dir = new DirHandle(1, 10);
+
+        await env.Actions.DeleteFolderAsync(dir, "/tmp/folder");
+
+        var dlg = Assert.Single(env.Dialogs.ProgressConfirmations);
+        Assert.Equal("Delete folder", dlg.Title);
+        Assert.Contains("/tmp/folder", dlg.Message, StringComparison.Ordinal);
+        Assert.Equal("Delete", dlg.OkText);
+        Assert.Equal("Cancel", dlg.CancelText);
+        Assert.Equal("Deleting folder...", dlg.WorkingText);
+
+        Assert.Empty(env.Dialogs.Confirmations);
+        Assert.Single(env.Deleter.DeletedDirectories);
+
+        var deleted = Assert.Single(env.Repo.DeletedDirs);
+        Assert.Equal(dir, deleted);
+
+        Assert.Empty(env.Dialogs.Errors);
+        Assert.Equal((true, null), env.Dialogs.LastProgressActionResult);
+        Assert.Equal(
+            [
+                "Deleting folder from disk...",
+                "Updating indexes..."
+            ],
+            env.Dialogs.LastProgressPhaseTexts);
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_WhenDirInvalid_DoesNothing()
+    {
+        var env = CreateSut();
+
+        await env.Actions.DeleteFolderAsync(DirHandle.Invalid, "/tmp/folder");
+
+        Assert.Empty(env.Dialogs.Confirmations);
+        Assert.Empty(env.Dialogs.ProgressConfirmations);
+        Assert.Empty(env.Deleter.DeletedDirectories);
+        Assert.Empty(env.Repo.DeletedDirs);
+        Assert.Empty(env.Dialogs.Errors);
+        Assert.Null(env.Dialogs.LastProgressActionResult);
+        Assert.Empty(env.Dialogs.LastProgressPhaseTexts);
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_WhenPathBlank_DoesNothing()
+    {
+        var env = CreateSut();
+        var dir = new DirHandle(1, 10);
+
+        await env.Actions.DeleteFolderAsync(dir, "");
+
+        Assert.Empty(env.Dialogs.Confirmations);
+        Assert.Empty(env.Dialogs.ProgressConfirmations);
+        Assert.Empty(env.Deleter.DeletedDirectories);
+        Assert.Empty(env.Repo.DeletedDirs);
+        Assert.Empty(env.Dialogs.Errors);
+        Assert.Null(env.Dialogs.LastProgressActionResult);
+        Assert.Empty(env.Dialogs.LastProgressPhaseTexts);
     }
 
     // ---------------------------------------------------------------------

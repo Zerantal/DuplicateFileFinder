@@ -20,6 +20,19 @@ public interface IDialogService
         string okText = "OK",
         string cancelText = "Cancel");
 
+    /// <summary>
+    /// Shows a confirmation dialog that stays open while the confirmed async action runs.
+    /// Returns true if the action completed successfully, false otherwise/cancelled.
+    /// On failure, the dialog stays open and shows the error inline.
+    /// </summary>
+    Task<bool> ShowActionDialogAsync(
+        string title,
+        string message,
+        Func<CancellationToken, Action<string>, Task<(bool ok, string? error)>> action,
+        string okText = "OK",
+        string cancelText = "Cancel",
+        string workingText = "Working...");
+
     Task<string?> ShowFolderPickerDialogAsync(
         string title,
         string? initialDirectory = null);

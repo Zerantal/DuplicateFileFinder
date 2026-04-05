@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
@@ -18,6 +19,15 @@ public sealed class FakeDialogService : IDialogService
 
     public string? NextTextInput { get; set; }
 
+    public bool NextProgressConfirmationResult { get; set; } = true;
+
+    public List<(string Title, string Message, string OkText, string CancelText, string WorkingText)>
+        ProgressConfirmations { get; } = [];
+
+    public List<string> LastProgressPhaseTexts { get; } = [];
+
+    public (bool ok, string? error)? LastProgressActionResult { get; private set; }
+
     public readonly List<(
         string Title,
         string Message,
@@ -31,6 +41,28 @@ public sealed class FakeDialogService : IDialogService
     {
         Confirmations.Add((title, message, okText, cancelText));
         return Task.FromResult(NextConfirmResult);
+    }
+
+    public async Task<bool> ShowActionDialogAsync(
+        string title,
+        string message,
+        Func<CancellationToken, Action<string>, Task<(bool ok, string? error)>> action,
+        string okText = "OK",
+        string cancelText = "Cancel",
+        string workingText = "Working...")
+    {
+        ProgressConfirmations.Add((title, message, okText, cancelText, workingText));
+
+        if (!NextProgressConfirmationResult)
+            return false;
+
+        LastProgressPhaseTexts.Clear();
+
+        LastProgressActionResult = await action(
+            CancellationToken.None,
+            text => LastProgressPhaseTexts.Add(text));
+
+        return LastProgressActionResult.Value.ok;
     }
 
     public Task<string?> ShowFolderPickerDialogAsync(string title, string? initialDirectory = null) =>

@@ -11,10 +11,16 @@
     </Application.Styles>
 
     <Application.Resources>
-        <conv:BytesToHumanConverter x:Key="BytesToHuman" />
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://LoadingIndicators.Avalonia/LoadingIndicators.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <conv:BytesToHumanConverter x:Key="BytesToHuman" />
         <conv:OneThirdConverter x:Key="OneThirdConverter"/>
         <conv:DepthToIndentWidthConverter x:Key="DepthToIndentWidthConverter"/>
         <conv:ExpandedToGlyphConverter x:Key="ExpandedToGlyphConverter"/>
+    </ResourceDictionary>
     </Application.Resources>
 
     <Application.DataTemplates>
