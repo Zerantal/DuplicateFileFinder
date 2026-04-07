@@ -3,10 +3,12 @@
 using System;
 using System.Threading.Tasks;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Application;
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
+
+using DuplicateFileFinderLib.Repository.Core.Models;
 
 using Xunit;
 
@@ -18,15 +20,24 @@ public sealed class DuplicateGroupsViewModelDeletionTests
     public async Task DeleteSelectedDuplicateFile_OnSuccess_ClearsSelectedDuplicateFile_AndCallsService()
     {
         var env = CreateSut();
-        env.DeleteService.NextResult = new DuplicateFileDeletionResult(true);
+        env.DeleteWorkflowService.NextResult = new DeleteItemResult(true);
+
+        var expectedHandle = new FileHandle(1, 7);
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
+        env.FileDir.TryGetFileImpl = (fileId, out handle) =>
+        {
+            Assert.Equal(777, fileId);
+            handle = expectedHandle;
+            return true;
+        };
 
         env.Vm.SelectedDuplicateFile = MakeFileItem(id: 777, fullPath: "/tmp/a.bin");
 
         await env.Vm.DeleteSelectedDuplicateFileCommand.ExecuteAsync(null);
 
-        Assert.Single(env.DeleteService.Calls);
-        Assert.Equal(777, env.DeleteService.Calls[0].FileId);
-        Assert.Equal("/tmp/a.bin", env.DeleteService.Calls[0].FullPath);
+        Assert.Single(env.DeleteWorkflowService.DeleteFileCalls);
+        Assert.Equal(expectedHandle, env.DeleteWorkflowService.DeleteFileCalls[0].File);
+        Assert.Equal("/tmp/a.bin", env.DeleteWorkflowService.DeleteFileCalls[0].FullPath);
 
         Assert.Null(env.Vm.SelectedDuplicateFile);
     }
@@ -35,14 +46,45 @@ public sealed class DuplicateGroupsViewModelDeletionTests
     public async Task DeleteSelectedDuplicateFile_OnFailure_DoesNotClearSelection()
     {
         var env = CreateSut();
-        env.DeleteService.NextResult = new DuplicateFileDeletionResult(false, DuplicateFileDeletionFailure.CancelledByUser);
+        env.DeleteWorkflowService.NextResult = new DeleteItemResult(false, DeleteItemFailure.CancelledByUser);
+
+        var expectedHandle = new FileHandle(1, 7);
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
+        env.FileDir.TryGetFileImpl = (fileId, out handle) =>
+        {
+            Assert.Equal(777, fileId);
+            handle = expectedHandle;
+            return true;
+        };
 
         var item = MakeFileItem(id: 777, fullPath: "/tmp/a.bin");
         env.Vm.SelectedDuplicateFile = item;
 
         await env.Vm.DeleteSelectedDuplicateFileCommand.ExecuteAsync(null);
 
-        Assert.Single(env.DeleteService.Calls);
+        Assert.Single(env.DeleteWorkflowService.DeleteFileCalls);
+        Assert.Equal(expectedHandle, env.DeleteWorkflowService.DeleteFileCalls[0].File);
+        Assert.Equal("/tmp/a.bin", env.DeleteWorkflowService.DeleteFileCalls[0].FullPath);
+        Assert.Equal(item, env.Vm.SelectedDuplicateFile);
+    }
+
+    [Fact]
+    public async Task DeleteSelectedDuplicateFile_WhenHandleCannotBeResolved_DoesNotCallService_AndDoesNotClearSelection()
+    {
+        var env = CreateSut();
+
+        env.FileDir.TryGetFileImpl = (_, out handle) =>
+        {
+            handle = FileHandle.Invalid;
+            return false;
+        };
+
+        var item = MakeFileItem(id: 777, fullPath: "/tmp/a.bin");
+        env.Vm.SelectedDuplicateFile = item;
+
+        await env.Vm.DeleteSelectedDuplicateFileCommand.ExecuteAsync(null);
+
+        Assert.Empty(env.DeleteWorkflowService.DeleteFileCalls);
         Assert.Equal(item, env.Vm.SelectedDuplicateFile);
     }
 
@@ -65,18 +107,19 @@ public sealed class DuplicateGroupsViewModelDeletionTests
         var repo = new FakeRepo();
         var host = new FakeRepoHost(repo);
 
-        var controller = new DuplicateGroupsController(host);
+        var fileDir = new FakeFileDirReadModel();
+        host.FileDirIndex = fileDir;
 
-        var deleteSvc = new FakeDuplicateFileDeletionService();
+        var controller = new DuplicateGroupsController(host);
+        var deleteSvc = new FakeDeletionWorkflowService();
 
         var vm = new DuplicateGroupsViewModel(host, controller, deleteSvc);
 
-        return new Sut(vm, deleteSvc);
+        return new Sut(vm, deleteSvc, fileDir);
     }
 
     private sealed record Sut(
         DuplicateGroupsViewModel Vm,
-        FakeDuplicateFileDeletionService DeleteService);
-
+        FakeDeletionWorkflowService DeleteWorkflowService,
+        FakeFileDirReadModel FileDir);
 }
-

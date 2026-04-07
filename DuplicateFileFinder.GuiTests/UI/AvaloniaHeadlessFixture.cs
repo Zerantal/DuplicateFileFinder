@@ -38,7 +38,7 @@ public sealed class AvaloniaHeadlessFixture : IDisposable
     {
         try
         {
-            if (Application.Current == null)
+            if (Avalonia.Application.Current == null)
             {
                 AppBuilder.Configure<App>()
                     .UseHeadless(new AvaloniaHeadlessPlatformOptions

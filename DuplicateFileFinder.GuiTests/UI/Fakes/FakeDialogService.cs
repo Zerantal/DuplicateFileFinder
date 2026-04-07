@@ -14,19 +14,20 @@ public sealed class FakeDialogService : IDialogService
 {
     public bool NextConfirmResult { get; set; } = true;
 
+    public List<string> LastActionPhaseTexts { get; } = [];
+    public bool NextActionConfirmationResult { get; set; } = true;
+    public (bool ok, string? error)? LastActionResult { get; private set; }
+
     public List<(string Title, string Message, string OkText, string CancelText)> Confirmations { get; } = [];
     public List<(string Title, string Message)> Errors { get; } = [];
 
     public string? NextTextInput { get; set; }
 
-    public bool NextProgressConfirmationResult { get; set; } = true;
-
     public List<(string Title, string Message, string OkText, string CancelText, string WorkingText)>
-        ProgressConfirmations { get; } = [];
+        ActionConfirmations
+    { get; } = [];
 
-    public List<string> LastProgressPhaseTexts { get; } = [];
 
-    public (bool ok, string? error)? LastProgressActionResult { get; private set; }
 
     public readonly List<(
         string Title,
@@ -51,18 +52,18 @@ public sealed class FakeDialogService : IDialogService
         string cancelText = "Cancel",
         string workingText = "Working...")
     {
-        ProgressConfirmations.Add((title, message, okText, cancelText, workingText));
+        ActionConfirmations.Add((title, message, okText, cancelText, workingText));
 
-        if (!NextProgressConfirmationResult)
+        if (!NextActionConfirmationResult)
             return false;
 
-        LastProgressPhaseTexts.Clear();
+        LastActionPhaseTexts.Clear();
 
-        LastProgressActionResult = await action(
+        LastActionResult = await action(
             CancellationToken.None,
-            text => LastProgressPhaseTexts.Add(text));
+            text => LastActionPhaseTexts.Add(text));
 
-        return LastProgressActionResult.Value.ok;
+        return LastActionResult.Value.ok;
     }
 
     public Task<string?> ShowFolderPickerDialogAsync(string title, string? initialDirectory = null) =>

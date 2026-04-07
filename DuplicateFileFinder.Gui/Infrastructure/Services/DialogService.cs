@@ -213,12 +213,16 @@ public sealed class DialogService : IDialogService
 
             var errorBlock = new TextBlock
             {
-                IsVisible = false, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.IndianRed
+                IsVisible = false,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Brushes.IndianRed
             };
 
             var buttonsPanel = new StackPanel
             {
-                Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8
             };
 
             var okButton = new Button { Content = okText, MinWidth = 80, IsDefault = true };
@@ -387,7 +391,7 @@ public sealed class DialogService : IDialogService
 
     public Window GetOwnerWindow()
     {
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
+        if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime
             {
                 MainWindow: { } main
             })
@@ -403,7 +407,7 @@ public sealed class DialogService : IDialogService
         string message,
         string okText)
     {
-        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
+        if (Avalonia.Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
             desktop.MainWindow is null)
             return;
 
