@@ -187,7 +187,9 @@ public sealed class RepoHost : IRepoHost
 
             _channel = Channel.CreateBounded<RepoEvent>(new BoundedChannelOptions(capacity)
             {
-                FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = false
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = false
             });
 
             _worker = Task.Run(ProcessLoopAsync);

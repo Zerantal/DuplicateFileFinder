@@ -64,7 +64,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
     protected virtual async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
     {
-    var advancesBarrier = false;
+        var advancesBarrier = false;
 
         switch (evt)
         {
@@ -87,7 +87,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
                     await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
                 }
 
-            advancesBarrier = true;
+                advancesBarrier = true;
                 break;
 
             case RepoFileDeletedEvent fileDeleted:
@@ -100,7 +100,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
             case RepoScanRootRemovedEvent rootRemoved:
                 await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
-            advancesBarrier = true;
+                advancesBarrier = true;
                 break;
 
             case ScanRootMetaChangedEvent metaChanged:
@@ -108,8 +108,8 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
                 break;
         }
 
-    if (advancesBarrier)
-        UpdateLastProcessedGeneration(evt.Generation);
+        if (advancesBarrier)
+            UpdateLastProcessedGeneration(evt.Generation);
     }
 
     // New async overridables (default no-op)
