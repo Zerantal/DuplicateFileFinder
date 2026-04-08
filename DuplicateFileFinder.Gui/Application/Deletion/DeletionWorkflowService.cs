@@ -9,6 +9,7 @@ public sealed class DeletionWorkflowService : IDeletionWorkflowService
 {
     private static readonly TimeSpan s_deleteTimeout = TimeSpan.FromMinutes(1);
 
+    private readonly IRepoHost _host;
     private readonly IRepo _repo;
     private readonly IDialogService _dialogs;
     private readonly IFileSystemDeleteService _deleter;
@@ -20,6 +21,7 @@ public sealed class DeletionWorkflowService : IDeletionWorkflowService
     {
         ArgumentNullException.ThrowIfNull(host);
 
+        _host = host;
         _repo = host.Repo;
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
         _deleter = deleter ?? throw new ArgumentNullException(nameof(deleter));
@@ -70,6 +72,8 @@ public sealed class DeletionWorkflowService : IDeletionWorkflowService
                             false,
                             $"Deleted file from disk, but deleting entry from repository failed: {repoResult.Error}");
                     }
+
+                    await _host.WhenIndexesRebuiltAsync(repoResult.Generation, linkedCt).ConfigureAwait(false);
 
                     return (true, null);
                 }
@@ -132,6 +136,8 @@ public sealed class DeletionWorkflowService : IDeletionWorkflowService
                         failure = DeleteItemFailure.RepoDeleteFailed;
                         return (false, $"Deleting entry from repository failed: {repoResult.Error}");
                     }
+
+                    await _host.WhenIndexesRebuiltAsync(repoResult.Generation, linkedCt).ConfigureAwait(false);
 
                     return (true, null);
                 }

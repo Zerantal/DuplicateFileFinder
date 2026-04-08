@@ -1,5 +1,3 @@
-// DuplicateFileFinderLib/Repository/Interfaces/IRepoHost.cs
-
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinderLib.Repository.Interfaces;
@@ -18,6 +16,11 @@ public interface IRepoHost : IAsyncDisposable
     /// Consumers can reload views knowing indices are coherent.
     /// </summary>
     event EventHandler<RepoIndexesRebuiltEventArgs>? IndexesRebuilt;
+
+    /// <summary>
+    /// Wait until all index plugins have rebuilt through the specified generation.
+    /// </summary>
+    Task WhenIndexesRebuiltAsync(long generation, CancellationToken ct = default);
 }
 
 public sealed class RepoIndexesRebuiltEventArgs(long generation, long? scanRootId) : EventArgs
