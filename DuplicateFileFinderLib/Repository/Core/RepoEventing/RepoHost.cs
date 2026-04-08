@@ -6,10 +6,14 @@ using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
+using NLog;
+
 namespace DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 public sealed class RepoHost : IRepoHost
 {
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
+
     private readonly Dictionary<Type, object> _services = new();
     // Track disposables in deterministic order
     private readonly List<IAsyncDisposable> _disposables = new();
@@ -72,8 +76,10 @@ public sealed class RepoHost : IRepoHost
             host._generationBarriers,
             (gen, scanRootId) =>
             {
+                var evt = new RepoIndexesRebuiltEventArgs(gen, scanRootId);
+                s_log.Info("RepoIndexesRebuilt event: " + evt);
                 host.LastIndexedGeneration = gen;
-                host.IndexesRebuilt?.Invoke(host, new RepoIndexesRebuiltEventArgs(gen, scanRootId));
+                host.IndexesRebuilt?.Invoke(host, evt);
             });
 
         repo.RegisterEventSink(coordinator);
