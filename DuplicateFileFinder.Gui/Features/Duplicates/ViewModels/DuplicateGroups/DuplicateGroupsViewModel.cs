@@ -235,14 +235,8 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         if (!result.Success)
             return;
 
-        // Optimistic: update UI immediately.
-        SelectedSet?.TryRemoveItemByFileId(item.Value.Id);
-
-        if (SelectedDuplicateFile.Equals(item))
-            SelectedDuplicateFile = null;
-
-        if (SelectedSet is { Count: < 2 })
-            SelectedSet = null;
+        SelectedDuplicateFile = null;
+        SelectedSet = null;
     }
 
     private static string BytesToHuman(long bytes)

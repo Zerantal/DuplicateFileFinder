@@ -1,12 +1,15 @@
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Interfaces;
 
+using NLog;
+
 namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-    private readonly List<IRepoEventSink> _eventSinks = new();
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
+    private readonly List<IRepoEventSink> _eventSinks = new();
 
     public void RegisterEventSink(IRepoEventSink sink)
     {
@@ -38,6 +41,8 @@ public sealed partial class Repo
 
     private void PublishEvent(RepoEvent evt)
     {
+        s_log.Info("Publishing repo event: " + evt);
+
         IRepoEventSink[] sinks;
         lock (_sync)
         {
