@@ -14,6 +14,9 @@ public sealed class PagingList<T> : AvaloniaList<T>
     private bool _isFetching;
     private int _nextOffset;
 
+    // Incremented on every logical reset so stale in-flight fetches can be ignored.
+    private int _version;
+
     // open-ended paging sentinel.
     // true  => keep fetching while we haven't satisfied requestedThrough
     // false => backend said "end-of-data"
@@ -31,6 +34,7 @@ public sealed class PagingList<T> : AvaloniaList<T>
 
     public void Reset()
     {
+        _version++;
         _total = -1;
         _requestedThrough = -1;
         _isFetching = false;
@@ -61,11 +65,20 @@ public sealed class PagingList<T> : AvaloniaList<T>
             return;
 
         _isFetching = true;
+        var version = _version;
+
         try
         {
             while (Count <= _requestedThrough && _hasMore)
             {
-                var (total, items) = _fetchPage(_nextOffset, _pageSize);
+                if (version != _version)
+                    return;
+
+                var offset = _nextOffset;
+                var (total, items) = _fetchPage(offset, _pageSize);
+
+                if (version != _version)
+                    return;
 
                 if (total >= 0)
                 {
@@ -85,7 +98,16 @@ public sealed class PagingList<T> : AvaloniaList<T>
                 _nextOffset += items.Length;
 
                 // Must mutate the list on the UI thread so ItemsRepeater updates reliably.
-                await Dispatcher.UIThread.InvokeAsync(() => AddRange(items), DispatcherPriority.Background);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (version != _version)
+                        return;
+
+                    AddRange(items);
+                }, DispatcherPriority.Background);
+
+                if (version != _version)
+                    return;
 
                 // If backend didn't provide totals, treat a short page as end-of-data.
                 if (_total < 0 && items.Length < _pageSize)
