@@ -18,7 +18,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly Lock _processedSync = new();
-    private long _lastProcessedGeneration;
+    private long _lastBarrierSatisfiedGeneration;
     private readonly List<GenerationWaiter> _generationWaiters = new();
 
     protected ChannelRepoPlugin(int capacity = 1024)
@@ -64,6 +64,8 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
     protected virtual async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
     {
+        var advancesBarrier = false;
+
         switch (evt)
         {
             case BootstrapEvent bootstrap:
@@ -71,6 +73,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
                 {
                     await OnBootstrapEventAsync(bootstrap, ct).ConfigureAwait(false);
                 }
+
                 SignalReady();
                 break;
 
@@ -83,6 +86,8 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
                 {
                     await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
                 }
+
+                advancesBarrier = true;
                 break;
 
             case RepoFileDeletedEvent fileDeleted:
@@ -95,6 +100,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
             case RepoScanRootRemovedEvent rootRemoved:
                 await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
+                advancesBarrier = true;
                 break;
 
             case ScanRootMetaChangedEvent metaChanged:
@@ -102,7 +108,8 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
                 break;
         }
 
-        UpdateLastProcessedGeneration(evt.Generation);
+        if (advancesBarrier)
+            UpdateLastProcessedGeneration(evt.Generation);
     }
 
     // New async overridables (default no-op)
@@ -141,7 +148,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
     /// </summary>
     public Task WhenProcessedGenerationAsync(long generation, CancellationToken ct = default)
     {
-        if (Volatile.Read(ref _lastProcessedGeneration) >= generation)
+        if (Volatile.Read(ref _lastBarrierSatisfiedGeneration) >= generation)
             return Task.CompletedTask;
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -149,7 +156,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
         lock (_processedSync)
         {
-            if (_lastProcessedGeneration >= generation)
+            if (_lastBarrierSatisfiedGeneration >= generation)
                 return Task.CompletedTask;
 
             _generationWaiters.Add(waiter);
@@ -173,10 +180,10 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
         lock (_processedSync)
         {
-            if (generation <= _lastProcessedGeneration)
+            if (generation <= _lastBarrierSatisfiedGeneration)
                 return;
 
-            _lastProcessedGeneration = generation;
+            _lastBarrierSatisfiedGeneration = generation;
 
             if (_generationWaiters.Count == 0)
                 return;

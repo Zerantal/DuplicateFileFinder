@@ -1,22 +1,28 @@
 // DuplicateFileFinderLib/Repository/Core/RepoHost.cs
 
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
+using NLog;
+
 namespace DuplicateFileFinderLib.Repository.Core.RepoEventing;
 
 public sealed class RepoHost : IRepoHost
 {
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
+
     private readonly Dictionary<Type, object> _services = new();
-    // Track disposables in deterministic order
     private readonly List<IAsyncDisposable> _disposables = new();
 
     // Explicit, ordered barriers
     private readonly List<IIndexGenerationBarrier> _generationBarriers = new();
     private readonly List<IReadyState> _readyStates = new();
+
+    private IndexRebuildCoordinator? _indexRebuildCoordinator;
 
     public long LastIndexedGeneration { get; private set; }
 
@@ -59,7 +65,6 @@ public sealed class RepoHost : IRepoHost
             repo);
 
 
-
         // Wait until all plugins processed bootstrap
         foreach (var ready in host._readyStates)
             await ready.WhenReadyAsync(ct).ConfigureAwait(false);
@@ -70,16 +75,30 @@ public sealed class RepoHost : IRepoHost
 
         var coordinator = new IndexRebuildCoordinator(
             host._generationBarriers,
-            (gen, scanRootId) =>
+            initialCompletedGeneration: host.LastIndexedGeneration,
+            onIndexesRebuilt: (gen, scanRootId) =>
             {
+                var evt = new RepoIndexesRebuiltEventArgs(gen, scanRootId);
+                s_log.Info("RepoIndexesRebuilt event: " + evt);
                 host.LastIndexedGeneration = gen;
-                host.IndexesRebuilt?.Invoke(host, new RepoIndexesRebuiltEventArgs(gen, scanRootId));
+                host.IndexesRebuilt?.Invoke(host, evt);
             });
+
+        host._indexRebuildCoordinator = coordinator;
 
         repo.RegisterEventSink(coordinator);
         host.Track(coordinator);
 
         return host;
+    }
+
+    public Task WhenIndexesRebuiltAsync(long generation, CancellationToken ct = default)
+    {
+        if (LastIndexedGeneration >= generation)
+            return Task.CompletedTask;
+
+        return _indexRebuildCoordinator?.WhenIndexesRebuiltAsync(generation, ct)
+               ?? Task.CompletedTask;
     }
 
     // -------------------------------------------------
@@ -132,7 +151,10 @@ public sealed class RepoHost : IRepoHost
         for (var i = _disposables.Count - 1; i >= 0; i--)
         {
             try { await _disposables[i].DisposeAsync().ConfigureAwait(false); }
-            catch { /* swallow/log */ }
+            catch
+            {
+                /* swallow/log */
+            }
         }
     }
 
@@ -149,12 +171,18 @@ public sealed class RepoHost : IRepoHost
         private readonly Channel<RepoEvent> _channel;
         private readonly Task _worker;
 
+        private readonly Lock _waitersSync = new();
+        private long _lastCompletedGeneration;
+        private readonly List<GenerationWaiter> _generationWaiters = new();
+
         public IndexRebuildCoordinator(
             IReadOnlyList<IIndexGenerationBarrier> barriers,
+            long initialCompletedGeneration,
             Action<long, long?> onIndexesRebuilt,
             int capacity = 256)
         {
             _barriers = barriers;
+            _lastCompletedGeneration = initialCompletedGeneration;
             _onIndexesRebuilt = onIndexesRebuilt;
 
             _channel = Channel.CreateBounded<RepoEvent>(new BoundedChannelOptions(capacity)
@@ -168,6 +196,34 @@ public sealed class RepoHost : IRepoHost
         }
 
         public void Post(RepoEvent evt) => _channel.Writer.TryWrite(evt);
+
+        public Task WhenIndexesRebuiltAsync(long generation, CancellationToken ct = default)
+        {
+            if (Volatile.Read(ref _lastCompletedGeneration) >= generation)
+                return Task.CompletedTask;
+
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            GenerationWaiter waiter = new(generation, tcs);
+
+            lock (_waitersSync)
+            {
+                if (_lastCompletedGeneration >= generation)
+                    return Task.CompletedTask;
+
+                _generationWaiters.Add(waiter);
+            }
+
+            if (!ct.CanBeCanceled)
+                return tcs.Task;
+
+            return WaitWithCancellationAsync(waiter, ct);
+        }
+
+        private async Task WaitWithCancellationAsync(GenerationWaiter waiter, CancellationToken ct)
+        {
+            await using var reg = ct.Register(() => waiter.Tcs.TrySetCanceled(ct));
+            await waiter.Tcs.Task.ConfigureAwait(false);
+        }
 
         private async Task ProcessLoopAsync()
         {
@@ -197,13 +253,46 @@ public sealed class RepoHost : IRepoHost
                     foreach (var barrier in _barriers)
                         await barrier.WhenProcessedGenerationAsync(gen, _cts.Token).ConfigureAwait(false);
 
+                    CompleteThroughGeneration(gen);
                     _onIndexesRebuilt(gen, scanRootId);
                 }
             }
             catch (OperationCanceledException)
             {
-                // shutdown
             }
+        }
+
+        private void CompleteThroughGeneration(long generation)
+        {
+            List<GenerationWaiter>? toRelease = null;
+
+            lock (_waitersSync)
+            {
+                if (generation <= _lastCompletedGeneration)
+                    return;
+
+                _lastCompletedGeneration = generation;
+
+                if (_generationWaiters.Count == 0)
+                    return;
+
+                for (var i = _generationWaiters.Count - 1; i >= 0; i--)
+                {
+                    var waiter = _generationWaiters[i];
+                    if (waiter.TargetGeneration <= generation)
+                    {
+                        toRelease ??= [];
+                        toRelease.Add(waiter);
+                        _generationWaiters.RemoveAt(i);
+                    }
+                }
+            }
+
+            if (toRelease is null)
+                return;
+
+            foreach (var waiter in toRelease)
+                waiter.Tcs.TrySetResult();
         }
 
         public async ValueTask DisposeAsync()
@@ -211,7 +300,18 @@ public sealed class RepoHost : IRepoHost
             await _cts.CancelAsync().ConfigureAwait(false);
             _channel.Writer.TryComplete();
             await _worker.ConfigureAwait(false);
+
+            lock (_waitersSync)
+            {
+                foreach (var waiter in _generationWaiters)
+                    waiter.Tcs.TrySetCanceled();
+
+                _generationWaiters.Clear();
+            }
+
             _cts.Dispose();
         }
+
+        private readonly record struct GenerationWaiter(long TargetGeneration, TaskCompletionSource Tcs);
     }
 }

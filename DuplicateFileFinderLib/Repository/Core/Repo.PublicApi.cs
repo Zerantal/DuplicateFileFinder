@@ -17,7 +17,6 @@ namespace DuplicateFileFinderLib.Repository.Core;
 
 public sealed partial class Repo
 {
-
     public long Generation
     {
         get
@@ -39,6 +38,7 @@ public sealed partial class Repo
             {
                 roots = _scanRoots.Values.ToList();
             }
+
             return roots;
         }
     }
@@ -101,10 +101,8 @@ public sealed partial class Repo
             Snapshots = new ProjectedReadOnlyDictionary<ScanRootId, ScanRootSnapshotV2, ScanRootSnapshotView>(
                 _scanRootSnapshots,
                 static snap => ToView(snap)),
-
             ScanRoots = new ReadOnlyDictionary<ScanRootId, ScanRoot>(_scanRoots)
         };
-
 
 
     public async Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
@@ -119,11 +117,7 @@ public sealed partial class Repo
             // 2) Mark ScanRoot as deleted (metadata)
             if (_scanRoots.TryGetValue(scanRootId, out var scanRoot))
             {
-                var updated = scanRoot with
-                {
-                    IsDeleted = true,
-                    DeletedAtUtc = DateTimeOffset.UtcNow
-                };
+                var updated = scanRoot with { IsDeleted = true, DeletedAtUtc = DateTimeOffset.UtcNow };
 
                 UpsertScanRoot_NoLock(updated);
             }
@@ -143,14 +137,11 @@ public sealed partial class Repo
         // NOTE: We intentionally do NOT delete the on-disk scanroot snapshot file here.
         // A later prune/compaction operation can reclaim these files.
 
-        PublishEvent(new RepoScanRootRemovedEvent
-        {
-            Generation = generation,
-            ScanRootId = scanRootId
-        });
+        PublishEvent(new RepoScanRootRemovedEvent { Generation = generation, ScanRootId = scanRootId });
     }
 
-    public async Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct = default)
+    public async Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName,
+        CancellationToken ct = default)
     {
         long generation;
         ScanRoot? updatedScanRoot;
@@ -171,17 +162,13 @@ public sealed partial class Repo
                     out updatedScanRoot) || updatedScanRoot is null)
                 return;
 
-            generation = _meta.Generation;  // don't bump generation
+            generation = _meta.Generation; // don't bump generation
             MarkMetaDirty_NoLock();
         }
 
         await PersistMetaIfDirtyAsync(ct).ConfigureAwait(false);
 
-        PublishEvent(new ScanRootMetaChangedEvent
-        {
-            Generation = generation,
-            UpdatedScanRoot = updatedScanRoot
-        });
+        PublishEvent(new ScanRootMetaChangedEvent { Generation = generation, UpdatedScanRoot = updatedScanRoot });
     }
 
     // -------- Scan bootstrap (creates ScanRun + ScanSession) --------
@@ -208,7 +195,8 @@ public sealed partial class Repo
             throw new InvalidOperationException("Subtree scans must be started fresh (StartFresh=true).");
 
         // Begin rescan (this will delete checkpoints due to StartFresh=true).
-        var ctx = await ((IRepoInternal)this).BeginRescanAsync(scanRootId, options, volumeInfo, ct).ConfigureAwait(false);
+        var ctx = await ((IRepoInternal)this).BeginRescanAsync(scanRootId, options, volumeInfo, ct)
+            .ConfigureAwait(false);
 
         // Subtree scan must not be resumed from a checkpoint.
         if (ctx.Checkpoint is not null)
@@ -219,7 +207,8 @@ public sealed partial class Repo
         lock (_sync)
         {
             if (!_scanRootSnapshots.TryGetValue(scanRootId, out baseline))
-                throw new InvalidOperationException("Cannot rescan a folder unless a snapshot is loaded for the scan root.");
+                throw new InvalidOperationException(
+                    "Cannot rescan a folder unless a snapshot is loaded for the scan root.");
         }
 
         // Import baseline snapshot into the session so final snapshot retains everything outside the scanned subtree.
@@ -318,7 +307,8 @@ public sealed partial class Repo
         }
         else
         {
-            checkpoints = await RepoStore.LoadScanCheckpointsAsync(_repoPath, scanRoot.RootId, ct).ConfigureAwait(false);
+            checkpoints = await RepoStore.LoadScanCheckpointsAsync(_repoPath, scanRoot.RootId, ct)
+                .ConfigureAwait(false);
         }
 
         // Create session + import checkpoint(s)
@@ -379,7 +369,6 @@ public sealed partial class Repo
             IsDeleted = false,
             DeletedAtUtc = null,
             LastScannedAt = now,
-
             VolumeId = volumeInfo?.VolumeId ?? scanRoot.VolumeId,
             VolumePath = volumeInfo?.VolumePath ?? scanRoot.VolumePath,
             VolumeLabel = volumeInfo?.Label ?? scanRoot.VolumeLabel,
@@ -470,6 +459,8 @@ public sealed partial class Repo
 
     public async Task<DeleteResult> DeleteFileAsync(FileHandle file, CancellationToken ct = default)
     {
+        s_log.Info($"Deleting file from repo. ScanRootId: {file.ScanRootId}, FileIndex: {file.Index}");
+
         if (!file.IsValid)
             return DeleteResult.Fail(_meta.Generation, file.ScanRootId, "Invalid file handle.");
 
@@ -495,14 +486,20 @@ public sealed partial class Repo
 
         var updated = snap with { Files = newFiles };
 
-        // Commit + publish ScanRootSnapshotCommittedEvent (full rebuild)
-        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
+        // Commit updated snapshot and publish a full snapshot-replaced event so
+        // index plugins rebuild and RepoHost raises IndexesRebuilt.
+        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
-        PublishEvent(new RepoFileDeletedEvent
+        PublishEvent(new ScanRootSnapshotReplacedEvent
         {
             Generation = gen,
-            File = file
+            ScanRootId = updated.ScanRootId,
+            RepoSnapshotView = snapshotView,
+            Reason = RepoSnapshotCommitReason.Mutation
         });
+
+        // Optional secondary notification for any lightweight UI listeners.
+        PublishEvent(new RepoFileDeletedEvent { Generation = gen, File = file });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
     }
@@ -537,7 +534,6 @@ public sealed partial class Repo
         int deletedFiles = 0;
 
         // Mark dirs
-        // We must scan array because we only have dirId set; snapshot is "array-of-records"
         for (int i = 0; i < newDirs.Length; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -571,7 +567,15 @@ public sealed partial class Repo
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
 
-        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
+        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
+
+        PublishEvent(new ScanRootSnapshotReplacedEvent
+        {
+            Generation = gen,
+            ScanRootId = updated.ScanRootId,
+            RepoSnapshotView = snapshotView,
+            Reason = RepoSnapshotCommitReason.Mutation
+        });
 
         PublishEvent(new RepoDirDeletedEvent
         {
