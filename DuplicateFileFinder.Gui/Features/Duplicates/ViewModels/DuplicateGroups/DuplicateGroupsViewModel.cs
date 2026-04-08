@@ -65,9 +65,6 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         PagedSets = new PagingList<DuplicateSetRow>(
             300,
             FetchSetsPage);
-
-        // initial load
-        PagedSets.EnsureLoadedThroughIndex(0);
     }
 
     public PagingList<DuplicateSetRow> PagedSets { get; }
