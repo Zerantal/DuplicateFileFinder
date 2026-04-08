@@ -62,7 +62,7 @@ public sealed class DeletionWorkflowServiceTests
         var env = CreateSut();
         env.Dialogs.NextActionConfirmationResult = false;
 
-        var handle = new  FileHandle(1, 123);
+        var handle = new FileHandle(1, 123);
         var result = await env.Svc.DeleteFileAsync(handle, fullPath: "/tmp/a.bin", ct: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
@@ -89,7 +89,7 @@ public sealed class DeletionWorkflowServiceTests
         env.Dialogs.NextActionConfirmationResult = true;
         env.Deleter.NextDeleteFileResult = (ok: false, error: "nope");
 
-        var handle = new  FileHandle(1, 123);
+        var handle = new FileHandle(1, 123);
         var result = await env.Svc.DeleteFileAsync(handle, fullPath: "/tmp/a.bin", ct: TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
