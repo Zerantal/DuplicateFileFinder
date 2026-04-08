@@ -1,10 +1,9 @@
-using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
 namespace DuplicateFileFinder.GuiTests.Ui;
 
-public sealed class TestApp : Application
+public sealed class TestApp : Avalonia.Application
 {
     public override void Initialize()
     {

@@ -85,14 +85,23 @@
       "CommunityToolkit.Mvvm": {
         "type": "Direct",
         "requested": "[8.*, )",
-        "resolved": "8.4.0",
-        "contentHash": "tqVU8yc/ADO9oiTRyTnwhFN68hCwvkliMierptWOudIAvWY1mWCh5VFh+guwHJmpMwfg0J0rY+yyd5Oy7ty9Uw=="
+        "resolved": "8.4.2",
+        "contentHash": "WadCzGEc2U+3e20avRLng4qNtt4zoOGWrdUISqJWrHe3/FSnrYjuM5Sb4yQb09LhkBXrrI4Zt3dLKgRMbItsrg=="
       },
       "JetBrains.Annotations": {
         "type": "Direct",
         "requested": "[2025.2.2, )",
         "resolved": "2025.2.2",
         "contentHash": "0X56ZRizuHdrnPpgXjWV7f2tQO1FlQg5O1967OGKnI/4ZRNOK642J8L7brM1nYvrxTTU5TP1yRyXLRLaXLPQ8A=="
+      },
+      "LoadingIndicators.Avalonia": {
+        "type": "Direct",
+        "requested": "[11.0.11.1, )",
+        "resolved": "11.0.11.1",
+        "contentHash": "A4hPrrOMRtgcGRqnc1sscaWudF99C+YKhRBaYnf1wVxfOVOwTVEM4I7qdUU4gyAL2oiBzXw/zuC4dD1XrdR9PA==",
+        "dependencies": {
+          "Avalonia": "11.0.11"
+        }
       },
       "MessageBox.Avalonia": {
         "type": "Direct",

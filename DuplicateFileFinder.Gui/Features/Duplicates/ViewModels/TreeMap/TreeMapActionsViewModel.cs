@@ -1,12 +1,15 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+
+using NLog;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
@@ -15,29 +18,28 @@ public partial class TreeMapActionsViewModel : ObservableObject
     private readonly IRepo _repo;
     private readonly IFileDirReadModel _fileDir;
     private readonly IScanCoordinator _scanner;
-    private readonly IDialogService _dialogs;
-    private readonly IFileSystemDeleteService _deleter;
+    private readonly IDeletionWorkflowService _deletionService;
+
+    private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
     private Dictionary<ScanRootId, string> _scanRootFullPathById = new();
 
     public TreeMapActionsViewModel(
         IRepoHost host,
         IScanCoordinator scanner,
-        IDialogService dialogs,
-        IFileSystemDeleteService deleter,
+        IDeletionWorkflowService deletionService,
         DisposableManager disposer)
     {
         _repo = host.Repo;
         _fileDir = host.FileDirIndex;
         _scanner = scanner;
-        _dialogs = dialogs;
-        _deleter = deleter;
-
         RebuildScanRootPaths();
 
         EventHandler<RepoIndexesRebuiltEventArgs> handler = (_, _) => RebuildScanRootPaths();
         host.IndexesRebuilt += handler;
         disposer.Add(() => host.IndexesRebuilt -= handler);
+
+        _deletionService = deletionService ?? throw new ArgumentNullException(nameof(deletionService));
     }
 
     private void RebuildScanRootPaths()
@@ -87,79 +89,37 @@ public partial class TreeMapActionsViewModel : ObservableObject
     {
         if (!_fileDir.TryGetDirPathByHandle(dirElement.Dir, out var rel) || string.IsNullOrWhiteSpace(rel))
         {
-            await _dialogs.ShowErrorAsync("Delete failed", "Could not resolve folder path from index.");
+            s_log.Warn("TreeMap delete skipped: could not resolve relative path for dir {DirHandle}.", dirElement.Dir);
             return;
         }
 
         if (!_scanRootFullPathById.TryGetValue(dirElement.Dir.ScanRootId, out var root))
         {
-            await _dialogs.ShowErrorAsync("Delete failed", "Could not resolve scan root path.");
+            s_log.Warn("TreeMap delete skipped: could not resolve scan root path for root {ScanRootId}.", dirElement.Dir.ScanRootId);
             return;
         }
 
         var fullPath = Path.Combine(root, rel);
 
-        var ok = await _dialogs.ShowConfirmationAsync(
-            "Delete folder",
-            $"Delete this folder from disk?\n\n{fullPath}",
-            okText: "Delete",
-            cancelText: "Cancel");
-
-        if (!ok) return;
-
-        var (deleted, err) = await _deleter.DeleteDirectoryAsync(fullPath, recursive: true);
-        if (!deleted)
-        {
-            await _dialogs.ShowErrorAsync("Delete failed", err ?? "Unknown error.");
-            return;
-        }
-
-        var result = await _repo.DeleteDirAsync(dirElement.Dir);
-        if (!result.Success)
-        {
-            await _dialogs.ShowErrorAsync(
-                "Delete error",
-                $"Deleting entry from repository failed: {result.Error}");
-        }
+        await _deletionService.DeleteFolderAsync(dirElement.Dir, fullPath);
     }
 
     private async Task DeleteFileAsync(FileTreeMapElement fileElement)
     {
         if (!_fileDir.TryGetFilePathByHandle(fileElement.File, out var rel) || string.IsNullOrWhiteSpace(rel))
         {
-            await _dialogs.ShowErrorAsync("Delete failed", "Could not resolve file path from index.");
+            s_log.Warn("TreeMap delete skipped: could not resolve relative path for file {FileHandle}.", fileElement.File);
             return;
         }
 
         if (!_scanRootFullPathById.TryGetValue(fileElement.File.ScanRootId, out var root))
         {
-            await _dialogs.ShowErrorAsync("Delete failed", "Could not resolve scan root path.");
+            s_log.Warn("TreeMap delete skipped: could not resolve scan root path for root {ScanRootId}.", fileElement.File.ScanRootId);
             return;
         }
 
         var fullPath = Path.Combine(root, rel);
 
-        var ok = await _dialogs.ShowConfirmationAsync(
-            "Delete file",
-            $"Delete this file from disk?\n\n{fullPath}",
-            okText: "Delete",
-            cancelText: "Cancel");
-
-        if (!ok) return;
-
-        var (deleted, err) = await _deleter.DeleteFileAsync(fullPath);
-        if (!deleted)
-        {
-            await _dialogs.ShowErrorAsync("Delete failed", err ?? "Unknown error.");
-            return;
-        }
-
-        var result = await _repo.DeleteFileAsync(fileElement.File);
-        if (!result.Success)
-        {
-            await _dialogs.ShowErrorAsync(
-                "Delete error",
-                $"Deleting entry from repository failed: {result.Error}");
-        }
+        await _deletionService.DeleteFileAsync(fileElement.File, fullPath);
     }
 }

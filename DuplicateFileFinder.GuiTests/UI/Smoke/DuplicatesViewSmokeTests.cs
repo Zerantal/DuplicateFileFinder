@@ -34,13 +34,12 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var host = new FakeRepoHost(repo);
             var scan = new FakeScanCoordinator();
             var dialogs = new FakeDialogService();
-            var deleter = new FakeFileSystemDeleteService();
 
             using var disposer = new DisposableManager();
 
             // Assemble graph (DI-style)
             var dupController = new DuplicateGroupsController(host);
-            var fakeDeletionService = new FakeDuplicateFileDeletionService();
+            var fakeDeletionService = new FakeDeletionWorkflowService();
             var duplicateGroupsVm = new DuplicateGroupsViewModel(host, dupController, fakeDeletionService);
             var repoEventRelay = new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher());
 
@@ -50,13 +49,13 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
             var scanRootsActions = new ScanRootsTreeNodeActions(
                 host: host,
                 scanner: scan,
-                dialogs: dialogs,
-                deleter: deleter);
+                dialogs: dialogs);
 
             var scanRootsVm = new ScanRootsTreeViewModel(
                 repoEvents: repoEventRelay,
                 builder: scanRootsBuilder,
                 actions: scanRootsActions,
+                deletionService: fakeDeletionService,
                 disposer: new DisposableManager());
 
             // ---- TreeMap ----
@@ -65,7 +64,7 @@ public sealed class DuplicatesViewSmokeTests(AvaloniaHeadlessFixture ui)
                 Options = new TreeMapBuildOptions { MaxDepth = 8 }
             };
 
-            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, dialogs, deleter, disposer);
+            var treeMapActionsVm = new TreeMapActionsViewModel(host, scan, fakeDeletionService, disposer);
 
             var vm = new DuplicatesViewModel(
                 host,

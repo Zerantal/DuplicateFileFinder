@@ -18,7 +18,4 @@ public interface IScanRootsTreeNodeActions
     /// <summary>Prompt for and set the scan root display name.</summary>
     /// <returns>true if a change was applied (user didn’t cancel).</returns>
     Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel);
-
-    /// <summary>Confirm and delete folder from disk, then remove from repo.</summary>
-    Task DeleteFolderAsync(DirHandle dir, string fullPath);
 }

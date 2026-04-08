@@ -126,14 +126,12 @@ public sealed class ScanRootsTreeNodeActionsTests
         var host = new FakeRepoHost(repo);
 
         var dialogs = new FakeDialogService();
-        var deleter = new FakeFileSystemDeleteService();
         var scanner = new RecordingScanCoordinator();
 
         var actions = new ScanRootsTreeNodeActions(
             host: host,
             scanner: scanner,
-            dialogs: dialogs,
-            deleter: deleter);
+            dialogs: dialogs);
 
         return new Sut(actions, scanner, dialogs);
     }

@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
@@ -10,6 +11,7 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 public sealed partial class ScanRootsRowViewModel : ObservableObject
 {
     private readonly IScanRootsTreeNodeActions? _actions;
+    private readonly IDeletionWorkflowService? _deletionService;
 
     [ObservableProperty] private bool _isExpanded;
 
@@ -20,10 +22,12 @@ public sealed partial class ScanRootsRowViewModel : ObservableObject
     public ScanRootsRowViewModel(
         ScanRootsTreeNode model,
         IScanRootsTreeNodeActions? actions,
+        IDeletionWorkflowService? deletionService,
         int depth)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
         _actions = actions;
+        _deletionService = deletionService;
         Depth = depth;
     }
 
@@ -105,7 +109,7 @@ public sealed partial class ScanRootsRowViewModel : ObservableObject
     [RelayCommand]
     private Task RescanFolderAsync()
     {
-        if (_actions is null || !Dir.IsValid)
+        if (!Dir.IsValid || _actions is null)
             return Task.CompletedTask;
 
         return _actions.RescanFolderAsync(Dir);
@@ -124,10 +128,10 @@ public sealed partial class ScanRootsRowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanDeleteFromDisk))]
     private async Task DeleteFromDiskAsync()
     {
-        if (IsScanRoot || _actions is null)
+        if (IsScanRoot || _deletionService is null)
             return;
 
-        await _actions.DeleteFolderAsync(Dir, FullPath);
+        await _deletionService.DeleteFolderAsync(Dir, FullPath);
     }
 
     [RelayCommand]

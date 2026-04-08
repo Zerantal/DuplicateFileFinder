@@ -1,8 +1,10 @@
 // DuplicateFileFinder.GuiTests/Features/Controller/TreeMap/TreeMapActionsViewModelTests.cs
+
 using System;
 using System.Linq;
 using System.Threading.Tasks;
 
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
@@ -25,16 +27,14 @@ public sealed class TreeMapActionsViewModelTests
             NewScanRoot(rootId: 1, rootPath: "/root", volumePath: null, isDeleted: false)
         ]);
 
-        var host = new FakeRepoHost(repo)
-        {
-            FileDirIndex = new FakeFileDirReadModel()
-        };
+        var host = new FakeRepoHost(repo) { FileDirIndex = new FakeFileDirReadModel() };
 
         var scanner = new FakeScanCoordinator();
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
 
         Assert.False(vm.HasContextTarget);
         Assert.False(vm.IsContextDir);
@@ -78,9 +78,12 @@ public sealed class TreeMapActionsViewModelTests
         var scanner = new FakeScanCoordinator();
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, dialogs, deleter, _disposer)
-        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42) };
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        {
+            ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42)
+        };
 
         await vm.RescanSelectedFolderCommand.ExecuteAsync(null);
 
@@ -89,7 +92,7 @@ public sealed class TreeMapActionsViewModelTests
     }
 
     [Fact]
-    public async Task DeleteSelected_Dir_WhenCantResolveRelPath_ShowsError_NoConfirm()
+    public async Task DeleteSelected_Dir_WhenCantResolveRelPath_DoesNothing_ShowsNoDialog()
     {
         var repo = new FakeRepo([NewScanRoot(1, "/root", null, isDeleted: false)]);
 
@@ -105,21 +108,29 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService(), _disposer)
+        var dialogs = new FakeDialogService();
+        var deleter = new FakeFileSystemDeleteService();
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
+
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
         };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Contains(VmDialogs(vm).Errors, e => e.Title == "Delete failed" && e.Message.Contains("resolve folder path", StringComparison.OrdinalIgnoreCase));
-        Assert.Empty(VmDialogs(vm).Confirmations);
-        Assert.Empty(VmDeleter(vm).DeletedDirectories);
+        Assert.Empty(dialogs.Errors);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Empty(dialogs.ActionConfirmations);
+        Assert.Null(dialogs.LastActionResult);
+        Assert.Empty(dialogs.LastActionPhaseTexts);
+        Assert.Empty(deleter.DeletedDirectories);
         Assert.Empty(repo.DeletedDirs);
     }
 
     [Fact]
-    public async Task DeleteSelected_Dir_WhenRootMissing_ShowsError()
+    public async Task DeleteSelected_Dir_WhenRootMissing_DoesNothing_ShowsNoDialog()
     {
         var repo = new FakeRepo([NewScanRoot(99, "/other", null, isDeleted: false)]);
 
@@ -135,16 +146,24 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), new FakeDialogService(), new FakeFileSystemDeleteService(), _disposer)
+        var dialogs = new FakeDialogService();
+        var deleter = new FakeFileSystemDeleteService();
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
+
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) // scan root 1 not in map
         };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Contains(VmDialogs(vm).Errors, e => e.Title == "Delete failed" && e.Message.Contains("scan root path", StringComparison.OrdinalIgnoreCase));
-        Assert.Empty(VmDialogs(vm).Confirmations);
-        Assert.Empty(VmDeleter(vm).DeletedDirectories);
+        Assert.Empty(dialogs.Errors);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Empty(dialogs.ActionConfirmations);
+        Assert.Null(dialogs.LastActionResult);
+        Assert.Empty(dialogs.LastActionPhaseTexts);
+        Assert.Empty(deleter.DeletedDirectories);
         Assert.Empty(repo.DeletedDirs);
     }
 
@@ -165,20 +184,27 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var dialogs = new FakeDialogService { NextConfirmResult = false };
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = false };
         var deleter = new FakeFileSystemDeleteService();
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
-        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
+
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        {
+            ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
+        };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
+        Assert.Single(dialogs.ActionConfirmations);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Empty(dialogs.LastActionPhaseTexts);
         Assert.Empty(deleter.DeletedDirectories);
         Assert.Empty(repo.DeletedDirs);
     }
 
     [Fact]
-    public async Task DeleteSelected_Dir_WhenDiskDeleteFails_ShowsError_DoesNotCallRepo()
+    public async Task DeleteSelected_Dir_WhenDiskDeleteFails_UsesProgressWorkflow_AndDoesNotCallRepo()
     {
         var repo = new FakeRepo([NewScanRoot(1, "/root", null, isDeleted: false)]);
 
@@ -194,16 +220,26 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (false, "nope") };
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer)
-        { ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) };
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        {
+            ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
+        };
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
-        Assert.Contains(dialogs.Errors, e => e.Title == "Delete failed" && e.Message.Contains("nope", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(dialogs.ActionConfirmations);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Empty(dialogs.Errors);
+        Assert.Equal((false, "nope"), dialogs.LastActionResult);
+        Assert.Equal(
+            ["Deleting folder from disk..."],
+            dialogs.LastActionPhaseTexts);
+
         Assert.Single(deleter.DeletedDirectories);
         Assert.Empty(repo.DeletedDirs);
     }
@@ -225,17 +261,24 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (true, null) };
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
 
         var handle = new DirHandle(1, 10);
         vm.ContextTarget = NewDirElem(handle);
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
+        Assert.Single(dialogs.ActionConfirmations);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Equal((true, null), dialogs.LastActionResult);
+        Assert.Equal(
+            ["Deleting folder from disk...", "Updating indexes..."],
+            dialogs.LastActionPhaseTexts);
 
         var deletedPath = deleter.DeletedDirectories.Single().Path.Replace('\\', '/');
         Assert.Equal("/root/sub", deletedPath);
@@ -263,17 +306,27 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
 
         var handle = new FileHandle(1, 7);
         vm.ContextTarget = NewFileElem(handle);
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
 
-        Assert.Single(dialogs.Confirmations);
+        Assert.Single(dialogs.ActionConfirmations);
+        Assert.Empty(dialogs.Confirmations);
+        Assert.Equal((true, null), dialogs.LastActionResult);
+        Assert.Equal(
+            [
+                "Deleting file from disk...",
+                "Updating indexes..."
+            ],
+            dialogs.LastActionPhaseTexts);
 
         var deletedPath = deleter.DeletedFiles.Single().Replace('\\', '/');
         Assert.Equal("/root/a.bin", deletedPath);
@@ -301,10 +354,12 @@ public sealed class TreeMapActionsViewModelTests
             }
         };
 
-        var dialogs = new FakeDialogService { NextConfirmResult = true };
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
+        var scanner = new FakeScanCoordinator();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, new FakeScanCoordinator(), dialogs, deleter, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
 
         // Update scan root path, notify
         repo.SetScanRoots([NewScanRoot(1, "/new", null, isDeleted: false)]);
@@ -313,6 +368,14 @@ public sealed class TreeMapActionsViewModelTests
         vm.ContextTarget = NewFileElem(scanRootId: 1, fileIndex: 7);
 
         await vm.DeleteSelectedCommand.ExecuteAsync(null);
+
+        Assert.Single(dialogs.ActionConfirmations);
+        Assert.Equal(
+            [
+                "Deleting file from disk...",
+                "Updating indexes..."
+            ],
+            dialogs.LastActionPhaseTexts);
 
         var deletedPath = deleter.DeletedFiles.Single().Replace('\\', '/');
         Assert.Equal("/new/a.bin", deletedPath);
@@ -346,14 +409,4 @@ public sealed class TreeMapActionsViewModelTests
             DirId = 1,
             CreatedAt = DateTimeOffset.UtcNow
         };
-
-    private static FakeDialogService VmDialogs(TreeMapActionsViewModel vm)
-        => (FakeDialogService)typeof(TreeMapActionsViewModel)
-            .GetField("_dialogs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(vm)!;
-
-    private static FakeFileSystemDeleteService VmDeleter(TreeMapActionsViewModel vm)
-        => (FakeFileSystemDeleteService)typeof(TreeMapActionsViewModel)
-            .GetField("_deleter", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(vm)!;
 }

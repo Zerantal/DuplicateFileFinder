@@ -1,4 +1,4 @@
-using DuplicateFileFinder.Gui.Features.Duplicates.Application;
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
@@ -48,7 +48,7 @@ public static class GuiBootstrapper
                 maxVisible: 4));
 
         // Application
-        services.AddSingleton<IDuplicateFileDeletionService, DuplicateFileDeletionService>();
+        services.AddSingleton<IDeletionWorkflowService, DeletionWorkflowService>();
 
         // Duplicate groups
         services.AddSingleton<DuplicateGroupsViewModel>();

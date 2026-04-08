@@ -6,7 +6,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
-using DuplicateFileFinder.Gui.Features.Duplicates.Application;
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Converters;
 using DuplicateFileFinder.Gui.Infrastructure.Status;
@@ -23,9 +23,10 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 {
     private static readonly ReadOnlyObservableCollection<FileItem> s_emptyItems = new([]);
     private readonly DuplicateGroupsController _controller;
-    private readonly IDuplicateFileDeletionService _deleteService;
+    private readonly IDeletionWorkflowService _deleteService;
     private readonly IHashIndexReadModel _hashIndex;
     private readonly ITreeIndexReadModel _treeIndex;
+    private readonly IFileDirReadModel _fileDirIndex;
 
     private DuplicateQuery _query = DuplicateQuery.Default;
 
@@ -38,12 +39,13 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
     public DuplicateGroupsViewModel(
         IRepoHost repoHost,
         DuplicateGroupsController controller,
-        IDuplicateFileDeletionService deleteService)
+        IDeletionWorkflowService deleteService)
     {
         ArgumentNullException.ThrowIfNull(repoHost);
 
         _hashIndex = repoHost.HashIndex;
         _treeIndex = repoHost.TreeIndex;
+        _fileDirIndex = repoHost.FileDirIndex;
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _deleteService = deleteService ?? throw new ArgumentNullException(nameof(deleteService));
 
@@ -231,7 +233,8 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         if (item is null)
             return;
 
-        var result = await _deleteService.DeleteAsync(item.Value.Id, item.Value.FullPath);
+        if (!_fileDirIndex.TryGetFile(item.Value.Id, out var handle)) return;
+        var result = await _deleteService.DeleteFileAsync(handle, item.Value.FullPath);
         if (!result.Success)
             return;
 

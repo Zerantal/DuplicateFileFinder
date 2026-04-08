@@ -130,7 +130,9 @@
     </Border>
 
     <!-- Virtualized "tree" -->
+    <!-- ReSharper disable once InconsistentNaming -->
     <ScrollViewer x:Name="PART_Scroller">
+      <!-- ReSharper disable once InconsistentNaming -->
       <ItemsRepeater x:Name="PART_Repeater"
                      ItemsSource="{Binding Rows}">
         <ItemsRepeater.Layout>

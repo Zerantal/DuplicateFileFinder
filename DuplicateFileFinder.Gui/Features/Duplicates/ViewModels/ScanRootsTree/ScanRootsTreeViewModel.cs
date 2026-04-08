@@ -3,6 +3,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
@@ -19,6 +20,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     private readonly DisposableManager _disposer;
 
     private readonly IScanRootsTreeNodeActions _actions;
+    private readonly IDeletionWorkflowService _deletionService;
     private readonly ScanRootsTreeBuilder _builder;
 
     // ScanRootId -> index in Rows where the depth-0 root row currently lives
@@ -44,10 +46,12 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         RepoUiEventRelayPlugin repoEvents,
         ScanRootsTreeBuilder builder,
         IScanRootsTreeNodeActions actions,
+        IDeletionWorkflowService deletionService,
         DisposableManager disposer)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+        _deletionService = deletionService ?? throw new ArgumentNullException(nameof(deletionService));
         _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
@@ -136,7 +140,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     private ScanRootsRowViewModel CreateRow(ScanRootsTreeNode model, int depth)
     {
-        var row = new ScanRootsRowViewModel(model, _actions, depth);
+        var row = new ScanRootsRowViewModel(model, _actions, _deletionService, depth);
 
         if (model.Dir.IsValid)
             _rowByHandle[model.Dir] = row;
@@ -420,7 +424,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
         ScanRootsRowViewModel Project(ScanRootsTreeNode m)
         {
-            return new ScanRootsRowViewModel(m, null, 0);
+            return new ScanRootsRowViewModel(m, null, null, 0);
         }
     }
 

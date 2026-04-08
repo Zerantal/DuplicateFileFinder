@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -16,10 +15,11 @@ using Microsoft.Extensions.DependencyInjection;
 using NLog;
 
 using MainWindowViewModel = DuplicateFileFinder.Gui.Features.Shell.ViewModels.MainWindowViewModel;
+// ReSharper disable PartialTypeWithSinglePart
 
 namespace DuplicateFileFinder.Gui;
 
-public partial class App : Application
+public partial class App : Avalonia.Application
 {
     public static readonly string AppDir;
 

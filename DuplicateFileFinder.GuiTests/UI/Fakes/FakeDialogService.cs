@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
@@ -13,10 +14,20 @@ public sealed class FakeDialogService : IDialogService
 {
     public bool NextConfirmResult { get; set; } = true;
 
+    public List<string> LastActionPhaseTexts { get; } = [];
+    public bool NextActionConfirmationResult { get; set; } = true;
+    public (bool ok, string? error)? LastActionResult { get; private set; }
+
     public List<(string Title, string Message, string OkText, string CancelText)> Confirmations { get; } = [];
     public List<(string Title, string Message)> Errors { get; } = [];
 
     public string? NextTextInput { get; set; }
+
+    public List<(string Title, string Message, string OkText, string CancelText, string WorkingText)>
+        ActionConfirmations
+    { get; } = [];
+
+
 
     public readonly List<(
         string Title,
@@ -31,6 +42,28 @@ public sealed class FakeDialogService : IDialogService
     {
         Confirmations.Add((title, message, okText, cancelText));
         return Task.FromResult(NextConfirmResult);
+    }
+
+    public async Task<bool> ShowActionDialogAsync(
+        string title,
+        string message,
+        Func<CancellationToken, Action<string>, Task<(bool ok, string? error)>> action,
+        string okText = "OK",
+        string cancelText = "Cancel",
+        string workingText = "Working...")
+    {
+        ActionConfirmations.Add((title, message, okText, cancelText, workingText));
+
+        if (!NextActionConfirmationResult)
+            return false;
+
+        LastActionPhaseTexts.Clear();
+
+        LastActionResult = await action(
+            CancellationToken.None,
+            text => LastActionPhaseTexts.Add(text));
+
+        return LastActionResult.Value.ok;
     }
 
     public Task<string?> ShowFolderPickerDialogAsync(string title, string? initialDirectory = null) =>
