@@ -29,6 +29,7 @@ internal sealed class CapturingRepo : IRepoInternal
 
     public FileId NextFileId { get; set; } = 1;
     public ScanRootId NextScanRootId { get; set; } = 1;
+    public long NextGenerationId { get; set; } = 1;
 
     public Task DeleteScanCheckpointAsync(ScanRootId scanRootId, CancellationToken ct = default)
     {
@@ -183,11 +184,11 @@ internal sealed class CapturingRepo : IRepoInternal
         return Task.FromResult(new DeleteResult());
     }
 
-    public Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
+    public Task<long> DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
     {
         _methodCounter.IncrementMethodCalCount();
 
-        return Task.CompletedTask;
+        return Task.FromResult(NextGenerationId++);
     }
 
     public long AllocateRunId() => NextRunId++;

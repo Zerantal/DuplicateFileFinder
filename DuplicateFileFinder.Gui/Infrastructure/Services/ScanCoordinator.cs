@@ -23,7 +23,9 @@ public sealed class ScanCoordinator(
 {
     private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
-    private readonly IDialogService _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+    private readonly IDialogService _dialogService =
+        dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+
     private readonly IRepoHost _host = host ?? throw new ArgumentNullException(nameof(host));
     private readonly Dff.DuplicateFileFinder _finder = finder ?? throw new ArgumentNullException(nameof(finder));
 
@@ -63,7 +65,14 @@ public sealed class ScanCoordinator(
             runAsync: (progress, ct) => _finder.FullScanAsync(scanRootId, progress, ct),
             logStart: () => s_log.Info("Starting rescan of location {root}", scanRootId),
             logCancel: () => s_log.Info("Location rescan cancelled for {root}", scanRootId),
-            logFail: ex => s_log.Error(ex, "Location rescan failed for {root}", scanRootId));
+            logFail: ex => s_log.Error(ex, "Location rescan failed for {root}", scanRootId),
+            tryRecoverMissingPathAsync: async (_, ct) =>
+            {
+                var generation = await _host.Repo.DeleteScanRootAsync(scanRootId, ct).ConfigureAwait(false);
+                await _host.WhenIndexesRebuiltAsync(generation, ct).ConfigureAwait(false);
+                return (true, generation, scanRootId);
+            },
+            recoveryWorkingText: "Location no longer exists. Removing it from the repo...");
     }
 
     public Task RunFolderRescanWithDialogAsync(DirHandle startDir, CancellationToken cancellationToken = default)
@@ -77,7 +86,17 @@ public sealed class ScanCoordinator(
             runAsync: (progress, ct) => _finder.FullScanAsync(startDir, progress, ct),
             logStart: () => s_log.Info("Starting folder rescan of {dir}", startDir),
             logCancel: () => s_log.Info("Folder rescan cancelled for {dir}", startDir),
-            logFail: ex => s_log.Error(ex, "Folder rescan failed for {dir}", startDir));
+            logFail: ex => s_log.Error(ex, "Folder rescan failed for {dir}", startDir),
+            tryRecoverMissingPathAsync: async (_, ct) =>
+            {
+                var result = await _host.Repo.DeleteDirAsync(startDir, ct).ConfigureAwait(false);
+                if (!result.Success)
+                    return (false, null, null);
+
+                await _host.WhenIndexesRebuiltAsync(result.Generation, ct).ConfigureAwait(false);
+                return (true, result.Generation, startDir.ScanRootId);
+            },
+            recoveryWorkingText: "Folder no longer exists. Removing it from the repo...");
     }
 
     private async Task RunScanWithDialogCoreAsync(
@@ -86,7 +105,10 @@ public sealed class ScanCoordinator(
         Func<IProgress<Dff.DuplicateFileFinderProgressReport>, CancellationToken, Task<ScanCompletionInfo>> runAsync,
         Action logStart,
         Action logCancel,
-        Action<Exception> logFail)
+        Action<Exception> logFail,
+        Func<DirectoryNotFoundException, CancellationToken,
+            Task<(bool success, long? generation, int? scanRootId)>>? tryRecoverMissingPathAsync = null,
+        string? recoveryWorkingText = null)
     {
         // Ensure we run the UI bits on UI thread exactly once.
         if (!Dispatcher.UIThread.CheckAccess())
@@ -115,9 +137,16 @@ public sealed class ScanCoordinator(
 
         void DismissHandler(object? _, EventArgs __)
         {
-            try { if (dialog.IsVisible) dialog.Close(); }
-            catch { /* ignore */ }
+            try
+            {
+                if (dialog.IsVisible) dialog.Close();
+            }
+            catch
+            {
+                /* ignore */
+            }
         }
+
         progressVm.RequestDismiss += DismissHandler;
 
 
@@ -129,12 +158,14 @@ public sealed class ScanCoordinator(
 
         Exception? error = null;
         var cancelled = false;
+        var recoveredMissingPath = false;
+        long? recoveredGeneration = null;
+        int? recoveredScanRootId = null;
         ScanCompletionInfo? completion = null;
 
         var token = _cts.Token;
         try
         {
-
             // Off-UI execution
             await Task.Run(async () =>
             {
@@ -146,6 +177,45 @@ public sealed class ScanCoordinator(
                 {
                     cancelled = true;
                     logCancel();
+                }
+                catch (DirectoryNotFoundException ex) when (!token.IsCancellationRequested &&
+                                                            tryRecoverMissingPathAsync is not null)
+                {
+                    try
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            try { dialog.Title = "Finalizing (updating repo)..."; }
+                            catch
+                            {
+                                /* ignore */
+                            }
+
+                            progressVm.EnterFinalizing();
+                            progressVm.StatusMessage = recoveryWorkingText ?? "Path no longer exists. Updating repo...";
+                        });
+
+                        var recovery = await tryRecoverMissingPathAsync(ex, token).ConfigureAwait(false);
+                        recoveredMissingPath = recovery.success;
+                        recoveredGeneration = recovery.generation;
+                        recoveredScanRootId = recovery.scanRootId;
+
+                        if (!recoveredMissingPath)
+                        {
+                            error = ex;
+                            logFail(ex);
+                        }
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        cancelled = true;
+                        logCancel();
+                    }
+                    catch (Exception recoveryEx)
+                    {
+                        error = recoveryEx;
+                        logFail(recoveryEx);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -160,7 +230,11 @@ public sealed class ScanCoordinator(
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     try { dialog.Title = "Finalizing (updating indexes)..."; }
-                    catch { /* ignore */ }
+                    catch
+                    {
+                        /* ignore */
+                    }
+
                     progressVm.EnterFinalizing();
                 });
 
@@ -174,8 +248,16 @@ public sealed class ScanCoordinator(
                             completion.Value.ScanRootId,
                             completion.Value.Generation)));
             }
-
-
+            if (!cancelled && error is null && recoveredMissingPath && recoveredGeneration is { } gen)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                    ScanIndexed?.Invoke(
+                        this,
+                        new ScanIndexedEventArgs(
+                            arg,
+                            recoveredScanRootId ?? -1,
+                            gen)));
+            }
         }
         finally
         {
@@ -201,7 +283,11 @@ public sealed class ScanCoordinator(
             });
 
             // Ensure the dialog has actually finished closing
-            try { await dialogTask; } catch { /* ignore dialog close errors */ }
+            try { await dialogTask; }
+            catch
+            {
+                /* ignore dialog close errors */
+            }
 
             var cts = _cts;
             _cts = null;
@@ -252,6 +338,10 @@ public sealed class ScanCoordinator(
 
         var cts = _cts;
 
-        try { cts?.Cancel(); } catch { /* best-effort */ }
+        try { cts?.Cancel(); }
+        catch
+        {
+            /* best-effort */
+        }
     }
 }

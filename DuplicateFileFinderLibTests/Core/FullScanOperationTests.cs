@@ -56,7 +56,7 @@ public sealed class FullScanOperationTests
             RootPath = missing,
             DirId = 1,
             CreatedAt = DateTimeOffset.UtcNow,
-            VolumePath = _fs.Root // doesn't matter for this test
+            VolumePath = _fs.Root
         };
 
         var run = new ScanRun
@@ -95,8 +95,6 @@ public sealed class FullScanOperationTests
                 expectedDirs: new Dictionary<string, BaseLineDirMapValue>(StringComparer.Ordinal),
                 expectedFiles: new Dictionary<string, BaseLineFileMapValue>(StringComparer.Ordinal)));
 
-        session.Setup(s => s.EndDirectory(ref It.Ref<DirEnumerationContext>.IsAny));
-
         session.Setup(s => s.FailAsync(It.IsAny<string>(), cancelled: false, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -115,8 +113,9 @@ public sealed class FullScanOperationTests
 
         session.Verify(s => s.FailAsync(It.IsAny<string>(), cancelled: false, It.IsAny<CancellationToken>()), Times.Once);
         session.Verify(s => s.DisposeAsync(), Times.Once);
-        // ensure no enumeration lifecycle is entered:
-        session.Verify(s => s.BeginDirectory(It.IsAny<DirCursor>()), Times.Never);
+
+        // New scan still enters enumeration before the directory-not-found is observed.
+        session.Verify(s => s.BeginDirectory(It.IsAny<DirCursor>()), Times.Once);
     }
 
     [Fact]
@@ -216,7 +215,8 @@ public sealed class FullScanOperationTests
         repoHost.SetupGet(h => h.Repo).Returns(repo.Object);
 
         volume.Setup(v => v.GetVolumeInfoForPath(It.IsAny<string>()))
-            .Returns((string volPath) => new VolumeInfo { DevicePath = "/dev/sda", IsRotational = true, VolumePath = volPath });
+            .Returns((string volPath) =>
+                new VolumeInfo { DevicePath = "/dev/sda", IsRotational = true, VolumePath = volPath });
 
         // Verify exact values (rotational => dop 1, buffer 512k)
         hashing.SetupSet(h => h.ReadBufferSize = 512 * 1024).Verifiable();
@@ -244,7 +244,13 @@ public sealed class FullScanOperationTests
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ScanContext { Session = session.Object, Run = run, ScanRoot = scanRoot, Options = new ScanOptions() });
+            .ReturnsAsync(new ScanContext
+            {
+                Session = session.Object,
+                Run = run,
+                ScanRoot = scanRoot,
+                Options = new ScanOptions()
+            });
 
         session.SetupGet(s => s.RootDirCursor).Returns(new DirCursor(1));
 
@@ -333,18 +339,27 @@ public sealed class FullScanOperationTests
                 It.IsAny<ScanOptions>(),
                 It.IsAny<VolumeInfo?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ScanContext { Session = session, Run = run, ScanRoot = scanRoot, Options = new ScanOptions() });
+            .ReturnsAsync(new ScanContext
+            {
+                Session = session,
+                Run = run,
+                ScanRoot = scanRoot,
+                Options = new ScanOptions()
+            });
 
         var normRoot = PathUtils.NormalizePath(_fs.Root);
 
         var entries = new[]
         {
             // size==0 => never queued even if ShouldHash == true
-            new FsEntry(false, Path.Combine(normRoot, "zero.bin"), "zero.bin", 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch),
+            new FsEntry(false, Path.Combine(normRoot, "zero.bin"), "zero.bin", 0, DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch),
             // should hash
-            new FsEntry(false, Path.Combine(normRoot, "ten.bin"), "ten.bin", 10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch),
+            new FsEntry(false, Path.Combine(normRoot, "ten.bin"), "ten.bin", 10, DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch),
             // should NOT hash (decision)
-            new FsEntry(false, Path.Combine(normRoot, "skip.bin"), "skip.bin", 10, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch),
+            new FsEntry(false, Path.Combine(normRoot, "skip.bin"), "skip.bin", 10, DateTimeOffset.UnixEpoch,
+                DateTimeOffset.UnixEpoch),
         };
 
         fs.Setup(f => f.EnumerateChildren(
@@ -359,19 +374,19 @@ public sealed class FullScanOperationTests
                 It.IsAny<IProgress<DuplicateFileFinderProgressReport>?>(),
                 It.IsAny<Action<FileHashToken, ReadOnlyMemory<byte>, string?>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<List<FileToHash<FileHashToken>>, IProgress<DuplicateFileFinderProgressReport>?, Action<FileHashToken, ReadOnlyMemory<byte>, string?>, CancellationToken>(
-                (list, _, onFileHashed, _) =>
-                {
-                    captured = list;
+            .Callback<List<FileToHash<FileHashToken>>, IProgress<DuplicateFileFinderProgressReport>?,
+                Action<FileHashToken, ReadOnlyMemory<byte>, string?>, CancellationToken>((list, _, onFileHashed, _) =>
+            {
+                captured = list;
 
-                    // simulate hashing success for queued files
-                    foreach (var item in list)
-                    {
-                        var bytes = new byte[16];
-                        bytes[0] = 1;
-                        onFileHashed(item.Token, bytes, null);
-                    }
-                })
+                // simulate hashing success for queued files
+                foreach (var item in list)
+                {
+                    var bytes = new byte[16];
+                    bytes[0] = 1;
+                    onFileHashed(item.Token, bytes, null);
+                }
+            })
             .Returns(Task.CompletedTask);
 
         var op = new FullScanOperation(repoHost.Object, fs.Object, hashing.Object, volume.Object);
@@ -398,7 +413,7 @@ public sealed class FullScanOperationTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ByScanRootId_CallsBeginNewScanAsyncOverloadAndCompletes()
+    public async Task ExecuteAsync_ByScanRootId_CallsBeginRescanAsyncOverloadAndCompletes()
     {
         var repoHost = new Mock<IRepoHost>(MockBehavior.Strict);
         var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
@@ -411,6 +426,9 @@ public sealed class FullScanOperationTests
 
         // FullScanOperation probes using ResolveScanRootPath(scanRoot)
         var volPath = PathUtils.NormalizePath(_fs.Dir("vol"));
+        var rootDir = PathUtils.NormalizePath(Path.Combine(volPath, "root"));
+        Directory.CreateDirectory(rootDir);
+
         var scanRoot = new ScanRoot
         {
             RootId = 123,
@@ -427,8 +445,6 @@ public sealed class FullScanOperationTests
         hashing.SetupSet(h => h.ReadBufferSize = It.IsAny<int>());
         hashing.SetupSet(h => h.MaxDegreeOfParallelism = It.IsAny<int>());
 
-        // Return a context with a real existing root path (used for Directory.Exists)
-        var runRoot = PathUtils.NormalizePath(_fs.Dir("scanRoot"));
         repo.Setup(r => r.BeginRescanAsync(
                 It.Is<ScanRootId>(id => id == 123),
                 It.IsAny<ScanOptions>(),
@@ -442,7 +458,7 @@ public sealed class FullScanOperationTests
                 {
                     ScanRootId = 123,
                     ScanSequence = 1,
-                    RootPath = runRoot,
+                    RootPath = rootDir,
                     StartedAt = DateTimeOffset.UtcNow,
                     Status = ScanRunStatus.InProgress
                 },
@@ -452,8 +468,10 @@ public sealed class FullScanOperationTests
         session.SetupGet(s => s.RootDirCursor).Returns(new DirCursor(1));
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
 
-        fs.Setup(f => f.EnumerateChildren(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns([]);
+        fs.Setup(f => f.EnumerateChildren(
+                It.Is<string>(p => PathUtils.NormalizePath(p) == rootDir),
+                It.IsAny<CancellationToken>()))
+                .Returns([]);
 
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
@@ -498,8 +516,9 @@ public sealed class FullScanOperationTests
 
         repoHost.SetupGet(h => h.Repo).Returns(repo.Object);
 
-        // Arrange real folder paths
-        var root = PathUtils.NormalizePath(_fs.Dir("root"));
+        // Arrange real folder paths that match ResolveScanRootPath(scanRoot)
+        var volPath = PathUtils.NormalizePath(_fs.Dir("vol"));
+        var root = PathUtils.NormalizePath(Path.Combine(volPath, "root"));
         var sub = PathUtils.NormalizePath(Path.Combine(root, "sub"));
         Directory.CreateDirectory(sub);
 
@@ -509,7 +528,7 @@ public sealed class FullScanOperationTests
             RootPath = "root",
             DirId = 1,
             CreatedAt = DateTimeOffset.UtcNow,
-            VolumePath = PathUtils.NormalizePath(_fs.Dir("vol"))
+            VolumePath = volPath
         };
         repo.SetupGet(r => r.ScanRootsView).Returns([scanRoot]);
 
@@ -519,8 +538,8 @@ public sealed class FullScanOperationTests
             StringPool = PackedStringPool.FromStrings(["", "sub"]),
             Dirs =
             [
-                new DirRecordV2 { DirId = 1, ParentDirId = -1, NameStrIdx = 0, ErrorMessageStrIdx = 0, LastSeenScanSequence = 1, Status = ScanEntryStatus.Enumerated },
-                new DirRecordV2 { DirId = 2, ParentDirId = 1, NameStrIdx = 1, ErrorMessageStrIdx = 0, LastSeenScanSequence = 1, Status = ScanEntryStatus.Enumerated }
+            new DirRecordV2 { DirId = 1, ParentDirId = -1, NameStrIdx = 0, ErrorMessageStrIdx = 0, LastSeenScanSequence = 1, Status = ScanEntryStatus.Enumerated },
+            new DirRecordV2 { DirId = 2, ParentDirId = 1, NameStrIdx = 1, ErrorMessageStrIdx = 0, LastSeenScanSequence = 1, Status = ScanEntryStatus.Enumerated }
             ],
             Files = []
         };
@@ -555,13 +574,10 @@ public sealed class FullScanOperationTests
         session.SetupGet(s => s.RootDirCursor).Returns(new DirCursor(1));
         session.Setup(s => s.SetPendingDirsProvider(It.IsAny<Func<PendingDir[]>>()));
 
-        // Enumerate only the subtree (match suffix to avoid normalization pitfalls)
-        var expectedSuffix = PathUtils.NormalizePath(Path.Combine("root", "sub"));
         fs.Setup(f => f.EnumerateChildren(
-                It.Is<string>(p => PathUtils.NormalizePath(p).EndsWith(expectedSuffix, StringComparison.Ordinal)),
+            It.Is<string>(p => PathUtils.NormalizePath(p) == sub),
                 It.IsAny<CancellationToken>()))
             .Returns([]);
-
 
         session.Setup(s => s.BeginDirectory(It.IsAny<DirCursor>()))
             .Returns(new DirEnumerationContext(
@@ -586,7 +602,7 @@ public sealed class FullScanOperationTests
         await op.ExecuteAsync(new DirHandle(ScanRootId: 7, Index: 1), progress: null, ct: CancellationToken.None);
 
         Assert.NotNull(capturedOptions);
-        Assert.True(capturedOptions!.Value.StartFresh); // forced for subtree rescans
+        Assert.True(capturedOptions!.Value.StartFresh);
 
         repo.VerifyAll();
         repoHost.VerifyAll();
@@ -603,5 +619,4 @@ public sealed class FullScanOperationTests
             It.Is<string>(p => PathUtils.NormalizePath(p) == root),
             It.IsAny<CancellationToken>()), Times.Never);
     }
-
 }
