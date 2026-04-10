@@ -96,7 +96,7 @@ public sealed class ScanCoordinator(
                 StartLog: () => s_log.Info("Starting folder rescan of {dir}", startDir),
                 CancelLog: () => s_log.Info("Folder rescan cancelled for {dir}", startDir),
                 FailLog: ex => s_log.Error(ex, "Folder rescan failed for {dir}", startDir),
-                TryHandleMissingPathAsync: (_, ct) => HandleMissingFolderAsync(startDir, ct),
+            TryHandleMissingPathAsync: (_, ct) => HandleMissingFolderAsync(startDir, ct),
                 MissingPathWorkingText: "Folder no longer exists. Removing it from the repo..."),
             cancellationToken);
     }

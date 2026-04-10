@@ -78,12 +78,13 @@ internal sealed class FullScanOperation(
 
         // Use the scan root's last-known mount point to probe the currently mounted volume.
         var probePath = ResolveScanRootPath(scanRoot);
+        var vInfo = TryGetVolumeInfo(probePath);
+        EnsureScanRootLocationMounted(scanRoot, vInfo);
 
         // Pre-check existence before creating a ScanRun / ScanSession.
         if (!Directory.Exists(probePath))
             throw new DirectoryNotFoundException($"Root scan path does not exist: {probePath}");
 
-        var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
         ScanContext ctx;
@@ -124,14 +125,18 @@ internal sealed class FullScanOperation(
 
         var probePath = ResolveScanRootPath(scanRoot);
 
+        // Distinguish "location not mounted / wrong volume" from "folder deleted".
+        var vInfo = TryGetVolumeInfo(probePath);
+        EnsureScanRootLocationMounted(scanRoot, vInfo);
+
         // Compute the starting directory path before creating a ScanRun / ScanSession.
         var (dirId, fullPath) = ResolveStartDir(probePath, snap, startDir.Index);
 
-        // Pre-check existence before beginning the subtree scan.
+        // Only once the correct scan root volume is confirmed should a missing subtree
+        // be treated as "folder deleted".
         if (!Directory.Exists(fullPath))
             throw new DirectoryNotFoundException($"Folder rescan path does not exist: {fullPath}");
 
-        var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
         ScanContext ctx;
@@ -382,5 +387,21 @@ internal sealed class FullScanOperation(
             fullPath = PathUtils.JoinNormalized(fullPath, parts.Pop());
 
         return (startDirId, PathUtils.NormalizePath(fullPath));
+    }
+
+    private static void EnsureScanRootLocationMounted(ScanRoot scanRoot, VolumeInfo? currentVolume)
+    {
+        // If we have no stored volume identity, we cannot distinguish "not mounted"
+        // from "path genuinely missing", so do nothing here.
+        if (string.IsNullOrWhiteSpace(scanRoot.VolumeId))
+            return;
+
+        if (string.IsNullOrWhiteSpace(currentVolume?.VolumeId) ||
+            !string.Equals(currentVolume.VolumeId, scanRoot.VolumeId, StringComparison.Ordinal))
+        {
+            throw new ScanLocationNotMountedException(
+                $"Scan location is not mounted for ScanRootId {scanRoot.RootId}. " +
+                $"Expected VolumeId '{scanRoot.VolumeId}', got '{currentVolume?.VolumeId ?? "<none>"}'.");
+        }
     }
 }
