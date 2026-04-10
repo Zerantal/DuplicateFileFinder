@@ -32,7 +32,7 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
 
 
 
-    public Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct) => throw new NotImplementedException();
+    public Task<long> DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct) => throw new NotImplementedException();
 
     public Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct)
         => throw new NotImplementedException();

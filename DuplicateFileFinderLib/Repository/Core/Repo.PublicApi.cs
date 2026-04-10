@@ -105,7 +105,7 @@ public sealed partial class Repo
         };
 
 
-    public async Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
+    public async Task<long> DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct)
     {
         long generation;
 
@@ -138,6 +138,8 @@ public sealed partial class Repo
         // A later prune/compaction operation can reclaim these files.
 
         PublishEvent(new RepoScanRootRemovedEvent { Generation = generation, ScanRootId = scanRootId });
+
+        return generation;
     }
 
     public async Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName,

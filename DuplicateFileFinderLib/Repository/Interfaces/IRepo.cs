@@ -49,7 +49,7 @@ internal interface IRepoInternal : IRepo
 
 public interface IRepo : IDisposable, IAsyncDisposable
 {
-    public Task DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct = default);
+    public Task<long> DeleteScanRootAsync(ScanRootId scanRootId, CancellationToken ct = default);
     public Task SetScanRootDisplayNameAsync(ScanRootId scanRootId, string? displayName, CancellationToken ct = default);
     public IReadOnlyList<ScanRun> ScanRunsView { get; }
     public IReadOnlyList<ScanRoot> ScanRootsView { get; }

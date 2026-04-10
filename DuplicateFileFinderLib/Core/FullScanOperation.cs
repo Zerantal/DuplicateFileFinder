@@ -79,6 +79,10 @@ internal sealed class FullScanOperation(
         // Use the scan root's last-known mount point to probe the currently mounted volume.
         var probePath = ResolveScanRootPath(scanRoot);
 
+        // Pre-check existence before creating a ScanRun / ScanSession.
+        if (!Directory.Exists(probePath))
+            throw new DirectoryNotFoundException($"Root scan path does not exist: {probePath}");
+
         var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
@@ -119,6 +123,14 @@ internal sealed class FullScanOperation(
                        ?? throw new KeyNotFoundException($"ScanRootId not found: {startDir.ScanRootId}");
 
         var probePath = ResolveScanRootPath(scanRoot);
+
+        // Compute the starting directory path before creating a ScanRun / ScanSession.
+        var (dirId, fullPath) = ResolveStartDir(probePath, snap, startDir.Index);
+
+        // Pre-check existence before beginning the subtree scan.
+        if (!Directory.Exists(fullPath))
+            throw new DirectoryNotFoundException($"Folder rescan path does not exist: {fullPath}");
+
         var vInfo = TryGetVolumeInfo(probePath);
         ConfigureHashingRunner(vInfo);
 
@@ -129,13 +141,11 @@ internal sealed class FullScanOperation(
             DuplicateFileFinderHelpers.Report(
                 progress,
                 ScanPhase.Preparing,
-                $"Preparing folder re-scan for {probePath}...",
+                $"Preparing folder re-scan for {fullPath}...",
                 indeterminate: true);
             ctx = await _repo.BeginSubtreeScanAsync(startDir.ScanRootId, options, vInfo, ct).ConfigureAwait(false);
         }
 
-        // Compute the starting directory path from the loaded snapshot.
-        var (dirId, fullPath) = ResolveStartDir(ctx.Run.RootPath, snap, startDir.Index);
         var startPending = new PendingDir(dirId, fullPath);
 
         return await ExecuteWithContextAsync(ctx, progress, ct, startPending).ConfigureAwait(false);
@@ -156,19 +166,6 @@ internal sealed class FullScanOperation(
 
         try
         {
-            //TODO simplify if statement?
-            if (startPending is not null)
-            {
-                if (!Directory.Exists(startPending.Value.FullPath))
-                    throw new DirectoryNotFoundException(
-                        $"Folder rescan path does not exist: {startPending.Value.FullPath}");
-            }
-            else
-            {
-                if (!Directory.Exists(rootPath))
-                    throw new DirectoryNotFoundException($"Root scan path does not exist: {rootPath}");
-            }
-
             FilesToHashList filesToHash;
 
             using (PhaseScope.Begin(ScanPhase.Enumerating))
