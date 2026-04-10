@@ -98,7 +98,7 @@ public sealed class ScanCoordinator(
                 FailLog: ex => s_log.Error(ex, "Folder rescan failed for {dir}", startDir),
                 TryHandleMissingPathAsync: (_, ct) => HandleMissingFolderAsync(startDir, ct),
                 MissingPathWorkingText: "Folder no longer exists. Removing it from the repo..."),
-            cancellationToken);
+                cancellationToken);
     }
 
     internal async Task RunScanWithDialogCoreAsync(ScanRunSpec spec, CancellationToken cancellationToken)
