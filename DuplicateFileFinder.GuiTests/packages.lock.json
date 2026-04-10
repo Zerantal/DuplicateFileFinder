@@ -71,15 +71,6 @@
         "resolved": "11.3.2",
         "contentHash": "qHDToxto1e3hci5YqbG9n0Ty8mlp3zBUN5wT66wKqaDVzXyQ0do3EnRILd4Ke9jpvsktaPpgE0YjEk7hornryQ=="
       },
-      "Avalonia.Controls.ColorPicker": {
-        "type": "Transitive",
-        "resolved": "11.3.6",
-        "contentHash": "zgJFM7P7hOS9qcuSUqL2tjBFIsi03qiwAztYjtjtKjfBvLBOrVcmL5qHwjfjeLRLtjHprjMraAHtu3O2vi+51g==",
-        "dependencies": {
-          "Avalonia": "11.3.6",
-          "Avalonia.Remote.Protocol": "11.3.6"
-        }
-      },
       "Avalonia.Controls.DataGrid": {
         "type": "Transitive",
         "resolved": "11.3.6",
@@ -106,16 +97,6 @@
           "Avalonia.Skia": "11.3.6",
           "Avalonia.Win32": "11.3.6",
           "Avalonia.X11": "11.3.6"
-        }
-      },
-      "Avalonia.Diagnostics": {
-        "type": "Transitive",
-        "resolved": "11.3.6",
-        "contentHash": "iOGrfU/0TudsfHARpsreVt5V1oaer838IghYdgZjlOvGKmh5J1uc5GOSBmBodUpuPDE78wmdVrJZLC57qsndzg==",
-        "dependencies": {
-          "Avalonia": "11.3.6",
-          "Avalonia.Controls.ColorPicker": "11.3.6",
-          "Avalonia.Themes.Simple": "11.3.6"
         }
       },
       "Avalonia.Fonts.Inter": {
@@ -166,14 +147,6 @@
         "type": "Transitive",
         "resolved": "11.3.6",
         "contentHash": "YQ3x66qgMqDxbQoLTqYKGA7yXnxi8fzDL9+CITPrXrVZimlemWmjYqE0NWgd2c78gpp7dNEV4eYzwbbr8bH+9A==",
-        "dependencies": {
-          "Avalonia": "11.3.6"
-        }
-      },
-      "Avalonia.Themes.Simple": {
-        "type": "Transitive",
-        "resolved": "11.3.6",
-        "contentHash": "MuwYjUI9qMdu7TYyJbBntWlZRJWi6QmAYhMEBEdDgiEO0yUpTiKNLpYSn+MS8Xh9Jm9N4krclBigW7FYJkqLOA==",
         "dependencies": {
           "Avalonia": "11.3.6"
         }
@@ -509,7 +482,6 @@
           "Avalonia.Controls.DataGrid": "[11.3.6, )",
           "Avalonia.Controls.ItemsRepeater": "[11.1.5, )",
           "Avalonia.Desktop": "[11.3.6, )",
-          "Avalonia.Diagnostics": "[11.3.6, )",
           "Avalonia.Fonts.Inter": "[11.3.6, )",
           "Avalonia.Themes.Fluent": "[11.3.6, )",
           "Castle.Core": "[5.2.1, )",
