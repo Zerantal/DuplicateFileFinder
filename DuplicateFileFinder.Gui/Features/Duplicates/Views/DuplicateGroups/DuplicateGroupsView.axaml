@@ -95,6 +95,8 @@
 
       <dgrid:DataGrid.ContextMenu>
         <ContextMenu>
+          <MenuItem Header="Copy path"
+                    Command="{Binding CopySelectedDuplicateFilePathCommand}" />
           <MenuItem Header="Delete"
                     Command="{Binding DeleteSelectedDuplicateFileCommand}" />
         </ContextMenu>

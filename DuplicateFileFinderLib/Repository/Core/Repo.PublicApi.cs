@@ -508,6 +508,8 @@ public sealed partial class Repo
 
     public async Task<DeleteResult> DeleteDirAsync(DirHandle dir, CancellationToken ct = default)
     {
+        s_log.Info(nameof(DeleteDirAsync) + $" called. " + dir);
+
         if (!dir.IsValid)
             return DeleteResult.Fail(_meta.Generation, dir.ScanRootId, "Invalid dir handle.");
 

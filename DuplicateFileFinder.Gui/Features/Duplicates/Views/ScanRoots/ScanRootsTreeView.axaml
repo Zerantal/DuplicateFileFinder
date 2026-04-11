@@ -163,6 +163,8 @@
               </Border.Background>
               <Border.ContextMenu>
                 <ContextMenu>
+                  <MenuItem Header="Copy path"
+                            Command="{Binding CopyPathCommand}" />
                   <MenuItem Header="{Binding RescanOrResumeHeader}"
                             Command="{Binding RescanLocationCommand}"
                             IsVisible="{Binding IsScanRoot}" />

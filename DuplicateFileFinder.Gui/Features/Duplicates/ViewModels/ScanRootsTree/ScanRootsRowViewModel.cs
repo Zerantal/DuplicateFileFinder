@@ -125,6 +125,15 @@ public sealed partial class ScanRootsRowViewModel : ObservableObject
             OnRootRemoved?.Invoke(this);
     }
 
+    [RelayCommand]
+    private Task CopyPathAsync()
+    {
+        if (_actions is null)
+            return Task.CompletedTask;
+
+        return _actions.CopyPathAsync(FullPath);
+    }
+
     [RelayCommand(CanExecute = nameof(CanDeleteFromDisk))]
     private async Task DeleteFromDiskAsync()
     {

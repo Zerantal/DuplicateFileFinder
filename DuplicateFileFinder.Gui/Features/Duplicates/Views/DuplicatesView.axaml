@@ -85,6 +85,10 @@
 
               <treeMap:TreeMapControl.ContextMenu>
                 <ContextMenu>
+                  <MenuItem Header="Copy path"
+                            Command="{Binding TreeMapActions.CopySelectedPathCommand}"
+                            IsVisible="{Binding TreeMapActions.HasContextTarget}" />
+
                   <MenuItem Header="Rescan folder"
                             Command="{Binding TreeMapActions.RescanSelectedFolderCommand}"
                             IsVisible="{Binding TreeMapActions.IsContextDir}" />

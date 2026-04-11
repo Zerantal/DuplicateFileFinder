@@ -116,6 +116,16 @@ public sealed class ScanRootsTreeNodeActionsTests
         Assert.Equal("My Root", update.DisplayName);
     }
 
+    [Fact]
+    public async Task CopyPathAsync_CopiesPathToClipboard()
+    {
+        var env = CreateSut();
+
+        await env.Actions.CopyPathAsync("/tmp/example");
+
+        Assert.Equal(["/tmp/example"], env.Clipboard.CopiedTexts);
+    }
+
     // ---------------------------------------------------------------------
     // Harness
     // ---------------------------------------------------------------------
@@ -127,19 +137,22 @@ public sealed class ScanRootsTreeNodeActionsTests
 
         var dialogs = new FakeDialogService();
         var scanner = new RecordingScanCoordinator();
+        var clipboard = new FakeClipboardService();
 
         var actions = new ScanRootsTreeNodeActions(
             host: host,
             scanner: scanner,
-            dialogs: dialogs);
+            dialogs: dialogs,
+            clipboard: clipboard);
 
-        return new Sut(actions, scanner, dialogs);
+        return new Sut(actions, scanner, dialogs, clipboard);
     }
 
     private sealed record Sut(
         ScanRootsTreeNodeActions Actions,
         RecordingScanCoordinator Scanner,
-        FakeDialogService Dialogs);
+        FakeDialogService Dialogs,
+        FakeClipboardService Clipboard);
 
     private sealed class RecordingScanCoordinator : IScanCoordinator
     {

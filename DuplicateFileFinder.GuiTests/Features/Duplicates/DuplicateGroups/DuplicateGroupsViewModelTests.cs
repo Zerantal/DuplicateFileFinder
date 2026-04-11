@@ -88,6 +88,17 @@ public sealed class DuplicateGroupsViewModelDeletionTests
         Assert.Equal(item, env.Vm.SelectedDuplicateFile);
     }
 
+    [Fact]
+    public async Task CopySelectedDuplicateFilePath_CopiesSelectedPath()
+    {
+        var env = CreateSut();
+        env.Vm.SelectedDuplicateFile = MakeFileItem(id: 777, fullPath: "/tmp/a.bin");
+
+        await env.Vm.CopySelectedDuplicateFilePathCommand.ExecuteAsync(null);
+
+        Assert.Equal(["/tmp/a.bin"], env.Clipboard.CopiedTexts);
+    }
+
     // ---------------------------------------------------------------------
     // Harness
     // ---------------------------------------------------------------------
@@ -112,14 +123,16 @@ public sealed class DuplicateGroupsViewModelDeletionTests
 
         var controller = new DuplicateGroupsController(host);
         var deleteSvc = new FakeDeletionWorkflowService();
+        var clipboard = new FakeClipboardService();
 
-        var vm = new DuplicateGroupsViewModel(host, controller, deleteSvc);
+        var vm = new DuplicateGroupsViewModel(host, controller, deleteSvc, clipboard);
 
-        return new Sut(vm, deleteSvc, fileDir);
+        return new Sut(vm, deleteSvc, fileDir, clipboard);
     }
 
     private sealed record Sut(
         DuplicateGroupsViewModel Vm,
         FakeDeletionWorkflowService DeleteWorkflowService,
-        FakeFileDirReadModel FileDir);
+        FakeFileDirReadModel FileDir,
+        FakeClipboardService Clipboard);
 }

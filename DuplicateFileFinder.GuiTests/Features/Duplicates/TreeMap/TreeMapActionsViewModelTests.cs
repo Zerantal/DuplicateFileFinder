@@ -32,9 +32,10 @@ public sealed class TreeMapActionsViewModelTests
         var scanner = new FakeScanCoordinator();
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer);
 
         Assert.False(vm.HasContextTarget);
         Assert.False(vm.IsContextDir);
@@ -78,9 +79,10 @@ public sealed class TreeMapActionsViewModelTests
         var scanner = new FakeScanCoordinator();
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 42)
         };
@@ -111,9 +113,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
         };
@@ -149,9 +152,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService();
         var deleter = new FakeFileSystemDeleteService();
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10) // scan root 1 not in map
         };
@@ -187,9 +191,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextActionConfirmationResult = false };
         var deleter = new FakeFileSystemDeleteService();
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
         };
@@ -223,9 +228,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (false, "nope") };
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer)
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
         {
             ContextTarget = NewDirElem(scanRootId: 1, dirIndex: 10)
         };
@@ -264,9 +270,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteDirectoryResult = (true, null) };
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer);
 
         var handle = new DirHandle(1, 10);
         vm.ContextTarget = NewDirElem(handle);
@@ -309,9 +316,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer);
 
         var handle = new FileHandle(1, 7);
         vm.ContextTarget = NewFileElem(handle);
@@ -357,9 +365,10 @@ public sealed class TreeMapActionsViewModelTests
         var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
         var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
         var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
         var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
 
-        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, _disposer);
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer);
 
         // Update scan root path, notify
         repo.SetScanRoots([NewScanRoot(1, "/new", null, isDeleted: false)]);
@@ -379,6 +388,39 @@ public sealed class TreeMapActionsViewModelTests
 
         var deletedPath = deleter.DeletedFiles.Single().Replace('\\', '/');
         Assert.Equal("/new/a.bin", deletedPath);
+    }
+
+    [Fact]
+    public async Task CopySelectedPath_File_CopiesResolvedFullPath()
+    {
+        var repo = new FakeRepo([NewScanRoot(1, "/root", null, isDeleted: false)]);
+
+        var host = new FakeRepoHost(repo)
+        {
+            FileDirIndex = new FakeFileDirReadModel
+            {
+                TryGetFilePathByHandleImpl = (_, out rel) =>
+                {
+                    rel = "a.bin";
+                    return true;
+                }
+            }
+        };
+
+        var dialogs = new FakeDialogService { NextActionConfirmationResult = true };
+        var deleter = new FakeFileSystemDeleteService { NextDeleteFileResult = (true, null) };
+        var scanner = new FakeScanCoordinator();
+        var clipboard = new FakeClipboardService();
+        var fileDeleteService = new DeletionWorkflowService(host, dialogs, deleter);
+
+        var vm = new TreeMapActionsViewModel(host, scanner, fileDeleteService, clipboard, _disposer)
+        {
+            ContextTarget = NewFileElem(scanRootId: 1, fileIndex: 5)
+        };
+
+        await vm.CopySelectedPathCommand.ExecuteAsync(null);
+
+        Assert.Equal(["/root/a.bin"], clipboard.CopiedTexts.Select(x => x.Replace('\\', '/')).ToArray());
     }
 
     // ---------------------------------------------------------------------

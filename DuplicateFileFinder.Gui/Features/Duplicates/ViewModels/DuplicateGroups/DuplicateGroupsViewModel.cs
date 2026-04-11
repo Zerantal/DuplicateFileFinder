@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using DuplicateFileFinder.Gui.Application.Deletion;
 using DuplicateFileFinder.Gui.Features.Duplicates.Models;
 using DuplicateFileFinder.Gui.Infrastructure.Converters;
+using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Status;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
@@ -24,6 +25,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
     private static readonly ReadOnlyObservableCollection<FileItem> s_emptyItems = new([]);
     private readonly DuplicateGroupsController _controller;
     private readonly IDeletionWorkflowService _deleteService;
+    private readonly IClipboardService _clipboard;
     private readonly IHashIndexReadModel _hashIndex;
     private readonly ITreeIndexReadModel _treeIndex;
     private readonly IFileDirReadModel _fileDirIndex;
@@ -32,6 +34,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DeleteSelectedDuplicateFileCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopySelectedDuplicateFilePathCommand))]
     private FileItem? _selectedDuplicateFile;
 
     [ObservableProperty] private DirHandle? _selectedSubtreeDir;
@@ -39,7 +42,8 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
     public DuplicateGroupsViewModel(
         IRepoHost repoHost,
         DuplicateGroupsController controller,
-        IDeletionWorkflowService deleteService)
+        IDeletionWorkflowService deleteService,
+        IClipboardService clipboard)
     {
         ArgumentNullException.ThrowIfNull(repoHost);
 
@@ -48,6 +52,7 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         _fileDirIndex = repoHost.FileDirIndex;
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _deleteService = deleteService ?? throw new ArgumentNullException(nameof(deleteService));
+        _clipboard = clipboard ?? throw new ArgumentNullException(nameof(clipboard));
 
         _controller.PropertyChanged += (_, e) =>
         {
@@ -220,6 +225,16 @@ public partial class DuplicateGroupsViewModel : ObservableObject, IStatusProvide
         => PagedSets.EnsureLoadedThroughIndex(lastRealizedIndex);
 
     private bool CanDeleteSelectedDuplicateFile() => SelectedDuplicateFile is not null;
+    private bool CanCopySelectedDuplicateFilePath() => SelectedDuplicateFile is not null;
+
+    [RelayCommand(CanExecute = nameof(CanCopySelectedDuplicateFilePath))]
+    private Task CopySelectedDuplicateFilePathAsync()
+    {
+        var path = SelectedDuplicateFile?.FullPath;
+        return string.IsNullOrWhiteSpace(path)
+            ? Task.CompletedTask
+            : _clipboard.SetTextAsync(path);
+    }
 
     [RelayCommand(CanExecute = nameof(CanDeleteSelectedDuplicateFile))]
     private Task DeleteSelectedDuplicateFileAsync()
