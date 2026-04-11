@@ -18,4 +18,7 @@ public interface IScanRootsTreeNodeActions
     /// <summary>Prompt for and set the scan root display name.</summary>
     /// <returns>true if a change was applied (user didn’t cancel).</returns>
     Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel);
+
+    /// <summary>Copy the supplied path to the clipboard.</summary>
+    Task CopyPathAsync(string fullPath);
 }

@@ -22,5 +22,5 @@ public class FakeScanRootsTreeNodeAction(IScanCoordinator scanner) : IScanRootsT
 
     public Task<bool> TrySetScanRootDisplayNameAsync(ScanRootId scanRootId, string currentLabel) => throw new System.NotImplementedException();
 
-    public Task DeleteFolderAsync(DirHandle dir, string fullPath) => throw new System.NotImplementedException();
+    public Task CopyPathAsync(string fullPath) => Task.CompletedTask;
 }

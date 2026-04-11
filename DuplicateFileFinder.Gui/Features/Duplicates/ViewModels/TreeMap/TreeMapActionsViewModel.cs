@@ -6,6 +6,7 @@ using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
 
+using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
@@ -19,6 +20,7 @@ public partial class TreeMapActionsViewModel : ObservableObject
     private readonly IFileDirReadModel _fileDir;
     private readonly IScanCoordinator _scanner;
     private readonly IDeletionWorkflowService _deletionService;
+    private readonly IClipboardService _clipboard;
 
     private static readonly Logger s_log = LogManager.GetCurrentClassLogger();
 
@@ -28,11 +30,14 @@ public partial class TreeMapActionsViewModel : ObservableObject
         IRepoHost host,
         IScanCoordinator scanner,
         IDeletionWorkflowService deletionService,
+        IClipboardService clipboard,
         DisposableManager disposer)
     {
         _repo = host.Repo;
         _fileDir = host.FileDirIndex;
         _scanner = scanner;
+        _clipboard = clipboard;
+
         RebuildScanRootPaths();
 
         EventHandler<RepoIndexesRebuiltEventArgs> handler = (_, _) => RebuildScanRootPaths();
@@ -59,6 +64,7 @@ public partial class TreeMapActionsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsContextFile))]
     [NotifyCanExecuteChangedFor(nameof(RescanSelectedFolderCommand))]
     [NotifyCanExecuteChangedFor(nameof(DeleteSelectedCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopySelectedPathCommand))]
     [ObservableProperty]
     private ITreeMapNodeElement? _contextTarget;
 
@@ -68,6 +74,16 @@ public partial class TreeMapActionsViewModel : ObservableObject
 
     private bool CanRescanSelectedFolder() => ContextTarget is DirTreeMapElement;
     private bool CanDeleteSelected() => ContextTarget is DirTreeMapElement or FileTreeMapElement;
+    private bool CanCopySelectedPath() => ContextTarget is DirTreeMapElement or FileTreeMapElement;
+
+    [RelayCommand(CanExecute = nameof(CanCopySelectedPath))]
+    private Task CopySelectedPathAsync()
+    {
+        var fullPath = ResolveContextTargetFullPath();
+        return string.IsNullOrWhiteSpace(fullPath)
+            ? Task.CompletedTask
+            : _clipboard.SetTextAsync(fullPath);
+    }
 
     [RelayCommand(CanExecute = nameof(CanRescanSelectedFolder))]
     private Task RescanSelectedFolderAsync()
@@ -83,6 +99,36 @@ public partial class TreeMapActionsViewModel : ObservableObject
             FileTreeMapElement f => DeleteFileAsync(f),
             _ => Task.CompletedTask
         };
+    }
+
+    private string? ResolveContextTargetFullPath()
+    {
+        return ContextTarget switch
+        {
+            DirTreeMapElement dirElement => TryResolveDirFullPath(dirElement.Dir),
+            FileTreeMapElement fileElement => TryResolveFileFullPath(fileElement.File),
+            _ => null
+        };
+    }
+
+    private string? TryResolveDirFullPath(DirHandle dir)
+    {
+        if (!_fileDir.TryGetDirPathByHandle(dir, out var rel) || string.IsNullOrWhiteSpace(rel))
+            return null;
+
+        return !_scanRootFullPathById.TryGetValue(dir.ScanRootId, out var root)
+            ? null
+            : Path.Combine(root, rel);
+    }
+
+    private string? TryResolveFileFullPath(FileHandle file)
+    {
+        if (!_fileDir.TryGetFilePathByHandle(file, out var rel) || string.IsNullOrWhiteSpace(rel))
+            return null;
+
+        return !_scanRootFullPathById.TryGetValue(file.ScanRootId, out var root)
+            ? null
+            : Path.Combine(root, rel);
     }
 
     private async Task DeleteDirAsync(DirTreeMapElement dirElement)

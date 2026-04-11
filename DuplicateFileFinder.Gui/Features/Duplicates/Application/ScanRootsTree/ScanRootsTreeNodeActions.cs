@@ -9,15 +9,18 @@ public sealed class ScanRootsTreeNodeActions : IScanRootsTreeNodeActions
 {
     private readonly IScanCoordinator _scanner;
     private readonly IDialogService _dialogs;
+    private readonly IClipboardService _clipboard;
 
     public ScanRootsTreeNodeActions(
         IRepoHost host,
         IScanCoordinator scanner,
-        IDialogService dialogs)
+        IDialogService dialogs,
+        IClipboardService clipboard)
     {
         ArgumentNullException.ThrowIfNull(host);
         _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
         _dialogs = dialogs ?? throw new ArgumentNullException(nameof(dialogs));
+        _clipboard = clipboard ?? throw new ArgumentNullException(nameof(clipboard));
     }
 
     public Task RescanScanRootAsync(ScanRootId scanRootId)
@@ -55,5 +58,10 @@ public sealed class ScanRootsTreeNodeActions : IScanRootsTreeNodeActions
         await _scanner.SetScanRootDisplayName(scanRootId, normalized);
         return true;
     }
+
+    public Task CopyPathAsync(string fullPath)
+        => string.IsNullOrWhiteSpace(fullPath)
+            ? Task.CompletedTask
+            : _clipboard.SetTextAsync(fullPath);
 }
 
