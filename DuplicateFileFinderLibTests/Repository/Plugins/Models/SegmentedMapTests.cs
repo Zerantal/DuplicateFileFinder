@@ -29,10 +29,7 @@ public sealed class SegmentedMapTests
     [Fact]
     public void Build_SingleItem_CreatesSingleSegment_AndLookupWorks()
     {
-        var items = new[]
-        {
-            new KeyValuePair<int, DirHandle>(42, new DirHandle(5, 7))
-        };
+        var items = new[] { new KeyValuePair<int, DirHandle>(42, new DirHandle(5, 7)) };
 
         var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
 
@@ -67,8 +64,8 @@ public sealed class SegmentedMapTests
         var items = new[]
         {
             new KeyValuePair<int, FileHandle>(100, new FileHandle(8, 1)),
-            new KeyValuePair<int, FileHandle>(1,   new FileHandle(8, 2)),
-            new KeyValuePair<int, FileHandle>(50,  new FileHandle(8, 3)),
+            new KeyValuePair<int, FileHandle>(1, new FileHandle(8, 2)),
+            new KeyValuePair<int, FileHandle>(50, new FileHandle(8, 3)),
         };
 
         var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 1000);
@@ -91,8 +88,8 @@ public sealed class SegmentedMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<int, DirHandle>(10,  new DirHandle(1, 10)),
-            new KeyValuePair<int, DirHandle>(20,  new DirHandle(1, 20)),
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(20, new DirHandle(1, 20)),
             new KeyValuePair<int, DirHandle>(200, new DirHandle(1, 200)),
         };
 
@@ -165,8 +162,8 @@ public sealed class SegmentedMapTests
         var items = new[]
         {
             new KeyValuePair<int, FileHandle>(100, new FileHandle(9, 1)),
-            new KeyValuePair<int, FileHandle>(10,  new FileHandle(9, 2)),
-            new KeyValuePair<int, FileHandle>(12,  new FileHandle(9, 3)),
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(9, 2)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(9, 3)),
             new KeyValuePair<int, FileHandle>(200, new FileHandle(9, 4)),
         };
 
@@ -212,8 +209,8 @@ public sealed class SegmentedMapTests
     {
         var items = new[]
         {
-            new KeyValuePair<int, DirHandle>(10,  new DirHandle(5, 10)),
-            new KeyValuePair<int, DirHandle>(12,  new DirHandle(5, 12)),
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(5, 10)),
+            new KeyValuePair<int, DirHandle>(12, new DirHandle(5, 12)),
             new KeyValuePair<int, DirHandle>(200, new DirHandle(5, 200)),
         };
 
@@ -435,7 +432,7 @@ public sealed class SegmentedMapTests
             // Some guaranteed absent probes
             Assert.False(map.TryGetValue(0, out _));
             Assert.False(map.TryGetValue(200_000 - 1, out _)); // likely in gap/hole region
-            Assert.False(map.TryGetValue(220_000, out _));     // gap between bands
+            Assert.False(map.TryGetValue(220_000, out _)); // gap between bands
 
             // Enumerate matches set
             var enumerated = map.Enumerate().ToArray();
@@ -479,5 +476,115 @@ public sealed class SegmentedMapTests
             }
         }
     }
-}
 
+    [Fact]
+    public void Remove_KeyNotPresent_ReturnsSameInstance_AndPreservesContents()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(20, new DirHandle(1, 20)),
+        };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
+        var removed = map.Remove(999);
+
+        Assert.Same(map, removed);
+
+        Assert.True(removed.TryGetValue(10, out var v10));
+        Assert.Equal(new DirHandle(1, 10), v10);
+
+        Assert.True(removed.TryGetValue(20, out var v20));
+        Assert.Equal(new DirHandle(1, 20), v20);
+
+        Assert.Equal(2, removed.Enumerate().Count());
+    }
+
+    [Fact]
+    public void Remove_PresentKey_RemovesEntry_AndKeepsOthers()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(1, 10)),
+            new KeyValuePair<int, FileHandle>(11, new FileHandle(1, 11)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(1, 12)),
+        };
+
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 2);
+        var removed = map.Remove(11);
+
+        Assert.NotSame(map, removed);
+
+        Assert.True(removed.TryGetValue(10, out var v10));
+        Assert.Equal(new FileHandle(1, 10), v10);
+
+        Assert.False(removed.TryGetValue(11, out _));
+
+        Assert.True(removed.TryGetValue(12, out var v12));
+        Assert.Equal(new FileHandle(1, 12), v12);
+
+        var keys = removed.Enumerate().Select(x => x.Key).ToArray();
+        Assert.Equal(new[] { 10, 12 }, keys);
+    }
+
+    [Fact]
+    public void Remove_LastPresentEntryInSegment_DropsThatSegment()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(1000, new DirHandle(1, 1000)),
+        };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
+        Assert.Equal(2, map.SegmentCount);
+
+        var removed = map.Remove(10);
+
+        Assert.Equal(1, removed.SegmentCount);
+        Assert.False(removed.TryGetValue(10, out _));
+        Assert.True(removed.TryGetValue(1000, out var v));
+        Assert.Equal(new DirHandle(1, 1000), v);
+    }
+
+    [Fact]
+    public void Remove_OnlyEntry_ReturnsEmpty()
+    {
+        var items = new[] { new KeyValuePair<int, DirHandle>(42, new DirHandle(5, 7)) };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
+        var removed = map.Remove(42);
+
+        Assert.Same(SegmentedMap<DirHandle>.Empty, removed);
+        Assert.Equal(0, removed.SegmentCount);
+        Assert.False(removed.TryGetValue(42, out _));
+        Assert.Empty(removed.Enumerate());
+    }
+
+    [Fact]
+    public void Remove_RoundTripWithMemoryPack_PreservesRemovedState()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(1, 10)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(1, 12)),
+            new KeyValuePair<int, FileHandle>(200, new FileHandle(1, 200)),
+        };
+
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 2).Remove(12);
+
+        var bytes = MemoryPackSerializer.Serialize(map);
+        var clone = MemoryPackSerializer.Deserialize<SegmentedMap<FileHandle>>(bytes);
+
+        Assert.NotNull(clone);
+        Assert.True(clone.TryGetValue(10, out var v10));
+        Assert.Equal(new FileHandle(1, 10), v10);
+
+        Assert.False(clone.TryGetValue(12, out _));
+
+        Assert.True(clone.TryGetValue(200, out var v200));
+        Assert.Equal(new FileHandle(1, 200), v200);
+
+        Assert.Equal(new[] { 10, 200 }, clone.Enumerate().Select(x => x.Key).ToArray());
+    }
+}
