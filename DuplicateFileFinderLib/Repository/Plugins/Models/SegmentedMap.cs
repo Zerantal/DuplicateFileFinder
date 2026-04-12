@@ -44,7 +44,6 @@ public sealed partial class SegmentedMap<T>
 
         int segStart = sorted[0].Key;
         int segEnd = segStart;
-
         int segFirstIndex = 0;
 
         for (int i = 1; i < sorted.Length; i++)
@@ -177,6 +176,85 @@ public sealed partial class SegmentedMap<T>
         return new SegmentedMap<T> { Segments = newSegments };
     }
 
+    public SegmentedMap<T> RemoveMany(IEnumerable<int> keys)
+    {
+        if (keys is null) throw new ArgumentNullException(nameof(keys));
+
+        var segs = Segments;
+        if (segs.Length == 0)
+            return this;
+
+        Dictionary<int, HashSet<int>>? offsetsBySegment = null;
+
+        foreach (var key in keys)
+        {
+            var segIndex = FindSegmentIndexForKey(key);
+            if (segIndex < 0)
+                continue;
+
+            var seg = segs[segIndex];
+            long offsetL = (long)key - seg.StartId;
+            if ((ulong)offsetL >= (ulong)seg.Values.Length)
+                continue;
+
+            int offset = (int)offsetL;
+            if (!seg.IsPresent(offset))
+                continue;
+
+            offsetsBySegment ??= new Dictionary<int, HashSet<int>>();
+            if (!offsetsBySegment.TryGetValue(segIndex, out var offsets))
+            {
+                offsets = new HashSet<int>();
+                offsetsBySegment[segIndex] = offsets;
+            }
+
+            offsets.Add(offset);
+        }
+
+        if (offsetsBySegment is null || offsetsBySegment.Count == 0)
+            return this;
+
+        var newSegments = new List<MapSegment<T>>(segs.Length);
+        var anyChanged = false;
+
+        for (int segIndex = 0; segIndex < segs.Length; segIndex++)
+        {
+            var seg = segs[segIndex];
+
+            if (!offsetsBySegment.TryGetValue(segIndex, out var offsets))
+            {
+                newSegments.Add(seg);
+                continue;
+            }
+
+            var newBits = (ulong[])seg.PresentBits.Clone();
+
+            foreach (var offset in offsets)
+                ClearBit(newBits, offset);
+
+            if (AreEqual(seg.PresentBits, newBits))
+            {
+                newSegments.Add(seg);
+                continue;
+            }
+
+            anyChanged = true;
+
+            if (!HasAnyBitSet(newBits))
+                continue;
+
+            newSegments.Add(new MapSegment<T> { StartId = seg.StartId, Values = seg.Values, PresentBits = newBits });
+        }
+
+        if (!anyChanged)
+            return this;
+
+        if (newSegments.Count == 0)
+            return Empty;
+
+        return new SegmentedMap<T> { Segments = newSegments.ToArray() };
+    }
+
     /// <summary>
     /// Enumerate all present entries in ascending key order.
     /// </summary>
@@ -259,5 +337,22 @@ public sealed partial class SegmentedMap<T>
         }
 
         return false;
+    }
+
+    private static bool AreEqual(ulong[] a, ulong[] b)
+    {
+        if (ReferenceEquals(a, b))
+            return true;
+
+        if (a.Length != b.Length)
+            return false;
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i])
+                return false;
+        }
+
+        return true;
     }
 }

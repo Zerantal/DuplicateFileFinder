@@ -188,9 +188,7 @@ public sealed class SegmentedMapTests
     {
         var dict = new Dictionary<int, DirHandle>
         {
-            [5] = new DirHandle(1, 5),
-            [1] = new DirHandle(1, 1),
-            [100] = new DirHandle(1, 100),
+            [5] = new DirHandle(1, 5), [1] = new DirHandle(1, 1), [100] = new DirHandle(1, 100),
         };
 
         var map = SegmentedMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);
@@ -584,6 +582,144 @@ public sealed class SegmentedMapTests
 
         Assert.True(clone.TryGetValue(200, out var v200));
         Assert.Equal(new FileHandle(1, 200), v200);
+
+        Assert.Equal(new[] { 10, 200 }, clone.Enumerate().Select(x => x.Key).ToArray());
+    }
+
+    [Fact]
+    public void RemoveMany_NoMatchingKeys_ReturnsSameInstance()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(20, new DirHandle(1, 20)),
+        };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 0);
+        var removed = map.RemoveMany([999, 1000]);
+
+        Assert.Same(map, removed);
+        Assert.True(removed.TryGetValue(10, out _));
+        Assert.True(removed.TryGetValue(20, out _));
+    }
+
+    [Fact]
+    public void RemoveMany_RemovesMultipleKeysInSameSegment()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(1, 10)),
+            new KeyValuePair<int, FileHandle>(11, new FileHandle(1, 11)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(1, 12)),
+            new KeyValuePair<int, FileHandle>(13, new FileHandle(1, 13)),
+        };
+
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 4);
+        var removed = map.RemoveMany([11, 13]);
+
+        Assert.NotSame(map, removed);
+
+        Assert.True(removed.TryGetValue(10, out var v10));
+        Assert.Equal(new FileHandle(1, 10), v10);
+
+        Assert.False(removed.TryGetValue(11, out _));
+
+        Assert.True(removed.TryGetValue(12, out var v12));
+        Assert.Equal(new FileHandle(1, 12), v12);
+
+        Assert.False(removed.TryGetValue(13, out _));
+
+        Assert.Equal(new[] { 10, 12 }, removed.Enumerate().Select(x => x.Key).ToArray());
+    }
+
+    [Fact]
+    public void RemoveMany_RemovesAcrossMultipleSegments_AndDropsEmptySegments()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(20, new DirHandle(1, 20)),
+            new KeyValuePair<int, DirHandle>(200, new DirHandle(1, 200)),
+            new KeyValuePair<int, DirHandle>(300, new DirHandle(1, 300)),
+        };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 5);
+        Assert.Equal(4, map.SegmentCount);
+
+        var removed = map.RemoveMany([10, 200]);
+
+        Assert.Equal(2, removed.SegmentCount);
+        Assert.False(removed.TryGetValue(10, out _));
+        Assert.True(removed.TryGetValue(20, out _));
+        Assert.False(removed.TryGetValue(200, out _));
+        Assert.True(removed.TryGetValue(300, out _));
+
+        Assert.Equal(new[] { 20, 300 }, removed.Enumerate().Select(x => x.Key).ToArray());
+    }
+
+    [Fact]
+    public void RemoveMany_DuplicateKeys_AreHandledIdempotently()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(1, 10)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(1, 12)),
+            new KeyValuePair<int, FileHandle>(14, new FileHandle(1, 14)),
+        };
+
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 4);
+        var removed = map.RemoveMany([12, 12, 12]);
+
+        Assert.True(removed.TryGetValue(10, out _));
+        Assert.False(removed.TryGetValue(12, out _));
+        Assert.True(removed.TryGetValue(14, out _));
+        Assert.Equal(new[] { 10, 14 }, removed.Enumerate().Select(x => x.Key).ToArray());
+    }
+
+    [Fact]
+    public void RemoveMany_RemovingAllEntries_ReturnsEmpty()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, DirHandle>(10, new DirHandle(1, 10)),
+            new KeyValuePair<int, DirHandle>(12, new DirHandle(1, 12)),
+            new KeyValuePair<int, DirHandle>(200, new DirHandle(1, 200)),
+        };
+
+        var map = SegmentedMap<DirHandle>.Build(items, gapThreshold: 2);
+        var removed = map.RemoveMany([10, 12, 200]);
+
+        Assert.Same(SegmentedMap<DirHandle>.Empty, removed);
+        Assert.Equal(0, removed.SegmentCount);
+        Assert.Empty(removed.Enumerate());
+    }
+
+    [Fact]
+    public void RemoveMany_RoundTripWithMemoryPack_PreservesRemovedState()
+    {
+        var items = new[]
+        {
+            new KeyValuePair<int, FileHandle>(10, new FileHandle(1, 10)),
+            new KeyValuePair<int, FileHandle>(12, new FileHandle(1, 12)),
+            new KeyValuePair<int, FileHandle>(200, new FileHandle(1, 200)),
+            new KeyValuePair<int, FileHandle>(205, new FileHandle(1, 205)),
+        };
+
+        var map = SegmentedMap<FileHandle>.Build(items, gapThreshold: 8).RemoveMany([12, 205]);
+
+        var bytes = MemoryPackSerializer.Serialize(map);
+        var clone = MemoryPackSerializer.Deserialize<SegmentedMap<FileHandle>>(bytes);
+
+        Assert.NotNull(clone);
+        Assert.True(clone.TryGetValue(10, out var v10));
+        Assert.Equal(new FileHandle(1, 10), v10);
+
+        Assert.False(clone.TryGetValue(12, out _));
+
+        Assert.True(clone.TryGetValue(200, out var v200));
+        Assert.Equal(new FileHandle(1, 200), v200);
+
+        Assert.False(clone.TryGetValue(205, out _));
 
         Assert.Equal(new[] { 10, 200 }, clone.Enumerate().Select(x => x.Key).ToArray());
     }

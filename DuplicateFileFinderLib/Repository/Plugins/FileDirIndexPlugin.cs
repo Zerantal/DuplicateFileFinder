@@ -166,25 +166,14 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         var removedDirs = 0;
         var removedFiles = 0;
 
-        foreach (var dirId in evt.DeletedDirIds)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var oldDirsById = _dirsById;
-            _dirsById = _dirsById.Remove(dirId);
-            if (!ReferenceEquals(_dirsById, oldDirsById))
-                removedDirs++;
-        }
-
-        foreach (var fileId in evt.DeletedFileIds)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var oldFilesById = _filesById;
-            _filesById = _filesById.Remove(fileId);
-            if (!ReferenceEquals(_filesById, oldFilesById))
-                removedFiles++;
-        }
+        var beforeDirsById = _dirsById;
+        var beforeFilesById = _filesById;
+        _dirsById = _dirsById.RemoveMany(evt.DeletedDirIds);
+        _filesById = _filesById.RemoveMany(evt.DeletedFileIds);
+        if (!ReferenceEquals(_dirsById, beforeDirsById))
+            removedDirs = evt.DeletedDirs;
+        if (!ReferenceEquals(_filesById, beforeFilesById))
+            removedFiles = evt.DeletedFiles;
 
         if (removedDirs != 0)
         {
