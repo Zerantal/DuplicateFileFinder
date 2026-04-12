@@ -500,8 +500,7 @@ public sealed partial class Repo
             Reason = RepoSnapshotCommitReason.Mutation
         });
 
-        // Optional secondary notification for any lightweight UI listeners.
-        PublishEvent(new RepoFileDeletedEvent { Generation = gen, File = file });
+        PublishEvent(new RepoFileDeletedEvent { Generation = gen, File = file, FileId = existing.FileId });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
     }
@@ -534,8 +533,8 @@ public sealed partial class Repo
         var newDirs = (DirRecordV2[])snap.Dirs.Clone();
         var newFiles = (FileRecordV2[])snap.Files.Clone();
 
-        int deletedDirs = 0;
-        int deletedFiles = 0;
+        var deletedDirIds = new List<DirId>(subtreeDirIds.Count);
+        var deletedFileIds = new List<FileId>();
 
         // Mark dirs
         for (int i = 0; i < newDirs.Length; i++)
@@ -550,7 +549,7 @@ public sealed partial class Repo
                 continue;
 
             newDirs[i] = d with { Status = ScanEntryStatus.Deleted };
-            deletedDirs++;
+            deletedDirIds.Add(d.DirId);
         }
 
         // Mark files whose DirId is in subtree
@@ -566,7 +565,7 @@ public sealed partial class Repo
                 continue;
 
             newFiles[i] = f with { Status = ScanEntryStatus.Deleted };
-            deletedFiles++;
+            deletedFileIds.Add(f.FileId);
         }
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
@@ -585,11 +584,11 @@ public sealed partial class Repo
         {
             Generation = gen,
             Dir = dir,
-            DeletedDirs = deletedDirs,
-            DeletedFiles = deletedFiles
+            DeletedDirIds = deletedDirIds.ToArray(),
+            DeletedFileIds = deletedFileIds.ToArray()
         });
 
-        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles, deletedDirs);
+        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFileIds.Count, deletedDirIds.Count);
     }
 
     private static HashSet<long> CollectDirSubtreeIds(DirRecordV2[] dirs, long rootDirId, CancellationToken ct)

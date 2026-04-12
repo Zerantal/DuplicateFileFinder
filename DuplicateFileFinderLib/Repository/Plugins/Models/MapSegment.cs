@@ -3,8 +3,8 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 [MemoryPackable(SerializeLayout.Sequential)]
-public sealed partial class IntMapSegment<T>
-    where T : struct
+public sealed partial class MapSegment<T>
+    where T : unmanaged
 {
     public int StartId { get; init; }
 
@@ -25,7 +25,7 @@ public sealed partial class IntMapSegment<T>
         return (PresentBits[word] & (1UL << bit)) != 0;
     }
 
-    public static IntMapSegment<T> BuildSegment(
+    public static MapSegment<T> BuildSegment(
         KeyValuePair<int, T>[] sorted,
         int fromInclusive,
         int toInclusive,
@@ -34,7 +34,7 @@ public sealed partial class IntMapSegment<T>
     {
         long lenL = segEnd - segStart + 1;
         if (lenL <= 0)
-            throw new InvalidOperationException($"LongMapSegment length out of range: {lenL}");
+            throw new InvalidOperationException($"MapSegment length out of range: {lenL}");
 
         int len = (int)lenL;
 
@@ -53,7 +53,7 @@ public sealed partial class IntMapSegment<T>
             SetBit(bits, offset);
         }
 
-        return new IntMapSegment<T>
+        return new MapSegment<T>
         {
             StartId = segStart,
             Values = values,

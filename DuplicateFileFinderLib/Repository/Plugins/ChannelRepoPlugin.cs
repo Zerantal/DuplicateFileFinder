@@ -66,46 +66,43 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
     {
         var advancesBarrier = false;
 
-        switch (evt)
+        using (TimingLog.Start($"Processing {evt.GetType().Name} ({GetType().Name})"))
         {
-            case BootstrapEvent bootstrap:
-                using (TimingLog.Start($"Processing BootstrapEvent ({GetType().Name})"))
-                {
+            switch (evt)
+            {
+                case BootstrapEvent bootstrap:
                     await OnBootstrapEventAsync(bootstrap, ct).ConfigureAwait(false);
-                }
 
-                SignalReady();
-                break;
+                    SignalReady();
+                    break;
 
-            case ScanRunFinalisedEvent finalised:
-                await OnScanRunFinalisedEventAsync(finalised, ct).ConfigureAwait(false);
-                break;
+                case ScanRunFinalisedEvent finalised:
+                    await OnScanRunFinalisedEventAsync(finalised, ct).ConfigureAwait(false);
+                    break;
 
-            case ScanRootSnapshotReplacedEvent replaced:
-                using (TimingLog.Start($"Processing ScanRootSnapshotReplacedEvent ({GetType().Name})"))
-                {
+                case ScanRootSnapshotReplacedEvent replaced:
                     await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
-                }
 
-                advancesBarrier = true;
-                break;
+                    advancesBarrier = true;
+                    break;
 
-            case RepoFileDeletedEvent fileDeleted:
-                await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
-                break;
+                case RepoFileDeletedEvent fileDeleted:
+                    await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
+                    break;
 
-            case RepoDirDeletedEvent dirDeleted:
-                await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
-                break;
+                case RepoDirDeletedEvent dirDeleted:
+                    await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
+                    break;
 
-            case RepoScanRootRemovedEvent rootRemoved:
-                await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
-                advancesBarrier = true;
-                break;
+                case RepoScanRootRemovedEvent rootRemoved:
+                    await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
+                    advancesBarrier = true;
+                    break;
 
-            case ScanRootMetaChangedEvent metaChanged:
-                await OnScanRootMetaChangedEventAsync(metaChanged, ct).ConfigureAwait(false);
-                break;
+                case ScanRootMetaChangedEvent metaChanged:
+                    await OnScanRootMetaChangedEventAsync(metaChanged, ct).ConfigureAwait(false);
+                    break;
+            }
         }
 
         if (advancesBarrier)
@@ -113,13 +110,26 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
     }
 
     // New async overridables (default no-op)
-    protected virtual ValueTask OnScanRootSnapshotReplacedEventAsync(ScanRootSnapshotReplacedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnRepoScanRootRemovedEventAsync(RepoScanRootRemovedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnScanRunFinalisedEventAsync(ScanRunFinalisedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
-    protected virtual ValueTask OnScanRootMetaChangedEventAsync(ScanRootMetaChangedEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+    protected virtual ValueTask OnScanRootSnapshotReplacedEventAsync(ScanRootSnapshotReplacedEvent evt,
+        CancellationToken ct) => ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnRepoScanRootRemovedEventAsync(RepoScanRootRemovedEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnScanRunFinalisedEventAsync(ScanRunFinalisedEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    protected virtual ValueTask OnScanRootMetaChangedEventAsync(ScanRootMetaChangedEvent evt, CancellationToken ct) =>
+        ValueTask.CompletedTask;
 
     protected virtual void OnEventProcessingError(Exception ex, RepoEvent evt) =>
         Console.Error.WriteLine($"[{GetType().Name}] Error handling {evt.GetType().Name}: {ex}");

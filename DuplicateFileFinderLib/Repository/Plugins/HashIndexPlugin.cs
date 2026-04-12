@@ -278,8 +278,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        using var _ = TimingLog.StartPhase("HashIndex.Rebuild");
-
         // Pass 1: count per hash + record per-file size (no per-group allocations)
         var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
         var totalHandles = 0;
@@ -637,8 +635,13 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (!File.Exists(path))
             return false;
 
-        if (!MemoryPackFile.TryLoadMapped<HashIndexState>(path, out var state, CancellationToken.None) || state == null)
-            return false;
+        HashIndexState? state;
+
+        using (TimingLog.StartPhase("Deserialising FileDirIndexState"))
+        {
+            if (!MemoryPackFile.TryLoadMapped(path, out state, CancellationToken.None) || state == null)
+                return false;
+        }
 
         if (state.LastIndexedGeneration != expectedGeneration)
             return false;

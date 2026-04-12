@@ -199,165 +199,162 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        using (TimingLog.StartPhase("Rebuilding TreeIndex"))
+        var liveRootIds = new HashSet<ScanRootId>(
+            repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
+
+        var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(capacity: liveRootIds.Count);
+        foreach (var (rootId, snap) in repoSnapshot.Snapshots)
+            if (liveRootIds.Contains(rootId))
+                liveSnapshots[rootId] = snap;
+
+        // -----------------------------------------------------------------
+        // 1) Global duplicate detection across ALL live scan roots
+        // -----------------------------------------------------------------
+        var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+
+        foreach (var snap in liveSnapshots.Values)
         {
-            var liveRootIds = new HashSet<ScanRootId>(
-                repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
-
-            var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(capacity: liveRootIds.Count);
-            foreach (var (rootId, snap) in repoSnapshot.Snapshots)
-                if (liveRootIds.Contains(rootId))
-                    liveSnapshots[rootId] = snap;
-
-            // -----------------------------------------------------------------
-            // 1) Global duplicate detection across ALL live scan roots
-            // -----------------------------------------------------------------
-            var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
-
-            foreach (var snap in liveSnapshots.Values)
+            var files = snap.Files;
+            for (int i = 0; i < files.Count; i++)
             {
-                var files = snap.Files;
-                for (int i = 0; i < files.Count; i++)
-                {
-                    var f = files[i];
+                var f = files[i];
 
-                    if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                        continue;
+                if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    continue;
 
-                    if (f.Size <= 0)
-                        continue;
+                if (f.Size <= 0)
+                    continue;
 
-                    if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
-                        continue;
+                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                    continue;
 
-                    if (globalHashCounts.TryGetValue(f.Hash, out var c))
-                        globalHashCounts[f.Hash] = c + 1;
-                    else
-                        globalHashCounts[f.Hash] = 1;
-                }
+                if (globalHashCounts.TryGetValue(f.Hash, out var c))
+                    globalHashCounts[f.Hash] = c + 1;
+                else
+                    globalHashCounts[f.Hash] = 1;
             }
-
-            // -----------------------------------------------------------------
-            // 2) Build per-root pools + slice maps + stats + preorder subtree data
-            // -----------------------------------------------------------------
-            var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(capacity: liveSnapshots.Count);
-
-            foreach (var snapshot in liveSnapshots.Values)
-            {
-                var rootId = snapshot.ScanRootId;
-
-                // Map: DirId -> DirIndex (ONLY for live dirs)
-                var dirIdToIndex = new Dictionary<long, int>(capacity: snapshot.Dirs.Count);
-                var rootDirIndices = new List<int>();
-
-                for (int i = 0; i < snapshot.Dirs.Count; i++)
-                {
-                    var dir = snapshot.Dirs[i];
-
-                    // Skip deleted/absent dirs entirely.
-                    if (dir.Status is ScanEntryStatus.Deleted)
-                        continue;
-
-                    dirIdToIndex[dir.DirId] = i;
-
-                    if (dir.ParentDirId < 0)
-                        rootDirIndices.Add(i);
-                }
-
-                // Temp accumulators: per parent dirIndex -> handles list
-                var childrenDirsTmp = new Dictionary<int, List<DirHandle>>();
-                var childrenFilesTmp = new Dictionary<int, List<FileHandle>>();
-
-                // Child dirs (only live parent+child)
-                for (int i = 0; i < snapshot.Dirs.Count; i++)
-                {
-                    var dir = snapshot.Dirs[i];
-
-                    if (dir.Status is ScanEntryStatus.Deleted)
-                        continue;
-
-                    if (dir.ParentDirId < 0)
-                        continue;
-
-                    // Parent must be live too (otherwise ignore this edge)
-                    if (!dirIdToIndex.TryGetValue(dir.ParentDirId, out var parentIndex))
-                        continue;
-
-                    var childHandle = new DirHandle(rootId, i);
-
-                    if (!childrenDirsTmp.TryGetValue(parentIndex, out var list))
-                    {
-                        list = new List<DirHandle>(capacity: 4);
-                        childrenDirsTmp[parentIndex] = list;
-                    }
-
-                    list.Add(childHandle);
-                }
-
-                // Child files (only live files, and only under live dirs)
-                for (int i = 0; i < snapshot.Files.Count; i++)
-                {
-                    var file = snapshot.Files[i];
-
-                    if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                        continue;
-
-                    if (!dirIdToIndex.TryGetValue(file.DirId, out var parentIndex))
-                        continue;
-
-                    var fileHandle = new FileHandle(rootId, i);
-
-                    if (!childrenFilesTmp.TryGetValue(parentIndex, out var list))
-                    {
-                        list = new List<FileHandle>(capacity: 8);
-                        childrenFilesTmp[parentIndex] = list;
-                    }
-
-                    list.Add(fileHandle);
-                }
-
-                // Flatten into pools + slices
-                var (childDirsPool, childDirSlices) = BuildPoolAndSlices(childrenDirsTmp);
-                var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
-
-                var childDirSliceMap = childDirSlices.Length == 0
-                    ? SegmentedMap<Slice>.Empty
-                    : SegmentedMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
-
-                var childFileSliceMap = childFileSlices.Length == 0
-                    ? SegmentedMap<Slice>.Empty
-                    : SegmentedMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
-
-                var statsMap = ComputeRootDirStats(
-                    scanRootId: rootId,
-                    snapshot: snapshot,
-                    childDirsPool: childDirsPool,
-                    childDirSliceByDirIndex: childDirSliceMap,
-                    childFilesPool: childFilesPool,
-                    childFileSliceByDirIndex: childFileSliceMap,
-                    rootDirIndices: rootDirIndices,
-                    globalHashCounts: globalHashCounts);
-
-                // compute preorder subtree intervals + file->dir preorder mapping (Option A)
-                var (subtreeRangeMap, dirPreorderByFileIndex) = BuildPreorderData(snapshot: snapshot,
-                    rootDirIndices: rootDirIndices,
-                    childrenDirsTmp: childrenDirsTmp,
-                    dirIdToIndex: dirIdToIndex);
-
-                newRoots[rootId] = new RootTreeIndexState
-                {
-                    ChildDirsPool = childDirsPool,
-                    ChildFilesPool = childFilesPool,
-                    ChildDirSliceByDirIndex = childDirSliceMap,
-                    ChildFileSliceByDirIndex = childFileSliceMap,
-                    StatsByDirIndex = statsMap,
-                    SubtreeRangeByDirIndex = subtreeRangeMap,
-                    DirPreorderByFileIndex = dirPreorderByFileIndex
-                };
-            }
-
-            _roots = newRoots;
         }
+
+        // -----------------------------------------------------------------
+        // 2) Build per-root pools + slice maps + stats + preorder subtree data
+        // -----------------------------------------------------------------
+        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(capacity: liveSnapshots.Count);
+
+        foreach (var snapshot in liveSnapshots.Values)
+        {
+            var rootId = snapshot.ScanRootId;
+
+            // Map: DirId -> DirIndex (ONLY for live dirs)
+            var dirIdToIndex = new Dictionary<long, int>(capacity: snapshot.Dirs.Count);
+            var rootDirIndices = new List<int>();
+
+            for (int i = 0; i < snapshot.Dirs.Count; i++)
+            {
+                var dir = snapshot.Dirs[i];
+
+                // Skip deleted/absent dirs entirely.
+                if (dir.Status is ScanEntryStatus.Deleted)
+                    continue;
+
+                dirIdToIndex[dir.DirId] = i;
+
+                if (dir.ParentDirId < 0)
+                    rootDirIndices.Add(i);
+            }
+
+            // Temp accumulators: per parent dirIndex -> handles list
+            var childrenDirsTmp = new Dictionary<int, List<DirHandle>>();
+            var childrenFilesTmp = new Dictionary<int, List<FileHandle>>();
+
+            // Child dirs (only live parent+child)
+            for (int i = 0; i < snapshot.Dirs.Count; i++)
+            {
+                var dir = snapshot.Dirs[i];
+
+                if (dir.Status is ScanEntryStatus.Deleted)
+                    continue;
+
+                if (dir.ParentDirId < 0)
+                    continue;
+
+                // Parent must be live too (otherwise ignore this edge)
+                if (!dirIdToIndex.TryGetValue(dir.ParentDirId, out var parentIndex))
+                    continue;
+
+                var childHandle = new DirHandle(rootId, i);
+
+                if (!childrenDirsTmp.TryGetValue(parentIndex, out var list))
+                {
+                    list = new List<DirHandle>(capacity: 4);
+                    childrenDirsTmp[parentIndex] = list;
+                }
+
+                list.Add(childHandle);
+            }
+
+            // Child files (only live files, and only under live dirs)
+            for (int i = 0; i < snapshot.Files.Count; i++)
+            {
+                var file = snapshot.Files[i];
+
+                if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    continue;
+
+                if (!dirIdToIndex.TryGetValue(file.DirId, out var parentIndex))
+                    continue;
+
+                var fileHandle = new FileHandle(rootId, i);
+
+                if (!childrenFilesTmp.TryGetValue(parentIndex, out var list))
+                {
+                    list = new List<FileHandle>(capacity: 8);
+                    childrenFilesTmp[parentIndex] = list;
+                }
+
+                list.Add(fileHandle);
+            }
+
+            // Flatten into pools + slices
+            var (childDirsPool, childDirSlices) = BuildPoolAndSlices(childrenDirsTmp);
+            var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
+
+            var childDirSliceMap = childDirSlices.Length == 0
+                ? SegmentedMap<Slice>.Empty
+                : SegmentedMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
+
+            var childFileSliceMap = childFileSlices.Length == 0
+                ? SegmentedMap<Slice>.Empty
+                : SegmentedMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
+
+            var statsMap = ComputeRootDirStats(
+                scanRootId: rootId,
+                snapshot: snapshot,
+                childDirsPool: childDirsPool,
+                childDirSliceByDirIndex: childDirSliceMap,
+                childFilesPool: childFilesPool,
+                childFileSliceByDirIndex: childFileSliceMap,
+                rootDirIndices: rootDirIndices,
+                globalHashCounts: globalHashCounts);
+
+            // compute preorder subtree intervals + file->dir preorder mapping (Option A)
+            var (subtreeRangeMap, dirPreorderByFileIndex) = BuildPreorderData(snapshot: snapshot,
+                rootDirIndices: rootDirIndices,
+                childrenDirsTmp: childrenDirsTmp,
+                dirIdToIndex: dirIdToIndex);
+
+            newRoots[rootId] = new RootTreeIndexState
+            {
+                ChildDirsPool = childDirsPool,
+                ChildFilesPool = childFilesPool,
+                ChildDirSliceByDirIndex = childDirSliceMap,
+                ChildFileSliceByDirIndex = childFileSliceMap,
+                StatsByDirIndex = statsMap,
+                SubtreeRangeByDirIndex = subtreeRangeMap,
+                DirPreorderByFileIndex = dirPreorderByFileIndex
+            };
+        }
+
+        _roots = newRoots;
     }
 
     private static (SegmentedMap<SubtreeRange> SubtreeRangeByDirIndex, int[] DirPreorderByFileIndex) BuildPreorderData(
@@ -625,11 +622,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     {
         var roots = _roots;
 
-        var state = new TreeIndexState
-        {
-            LastIndexedGeneration = _lastIndexedGeneration,
-            Roots = roots
-        };
+        var state = new TreeIndexState { LastIndexedGeneration = _lastIndexedGeneration, Roots = roots };
 
         var path = GetStateFilePath();
 

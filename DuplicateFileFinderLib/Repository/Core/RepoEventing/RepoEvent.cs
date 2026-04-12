@@ -54,6 +54,7 @@ public sealed record ScanRootSnapshotReplacedEvent : RepoEvent
 public sealed record RepoFileDeletedEvent : RepoEvent
 {
     public required FileHandle File { get; init; }
+    public required FileId FileId { get; init; }
 }
 
 /// <summary>
@@ -63,8 +64,12 @@ public sealed record RepoFileDeletedEvent : RepoEvent
 public sealed record RepoDirDeletedEvent : RepoEvent
 {
     public required DirHandle Dir { get; init; }
-    public required int DeletedDirs { get; init; }
-    public required int DeletedFiles { get; init; }
+
+    public required DirId[] DeletedDirIds { get; init; }
+    public required FileId[] DeletedFileIds { get; init; }
+
+    public int DeletedDirs => DeletedDirIds.Length;
+    public int DeletedFiles => DeletedFileIds.Length;
 }
 
 /// <summary>
