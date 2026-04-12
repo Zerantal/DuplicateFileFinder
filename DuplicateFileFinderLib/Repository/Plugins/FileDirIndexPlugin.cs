@@ -86,6 +86,15 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         _snapshotView = evt.RepoSnapshotView;
 
+        // For mutation events (currently delete-driven snapshot updates), skip the full rebuild.
+        // Incremental delete events (RepoFileDeletedEvent / RepoDirDeletedEvent) will update the
+        // live maps and counts much more cheaply.
+        //
+        // Important: we still refresh _snapshotView so path decoding continues to use the latest
+        // snapshot arrays/string pools.
+        if (evt.Reason == RepoSnapshotCommitReason.Mutation)
+            return ValueTask.CompletedTask;
+
         RebuildFromSnapshot(evt.RepoSnapshotView);
 
         _lastIndexedGeneration = evt.Generation;
@@ -370,9 +379,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 
         var state = new FileDirIndexState
         {
-            LastIndexedGeneration = _lastIndexedGeneration,
-            DirsById = dirs,
-            FilesById = files
+            LastIndexedGeneration = _lastIndexedGeneration, DirsById = dirs, FilesById = files
         };
 
         var path = GetStateFilePath();

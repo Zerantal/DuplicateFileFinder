@@ -32,7 +32,6 @@ public enum RepoSnapshotCommitReason
     ScanCompleted,
     Maintenance,
 
-    // Reserved for the future “don’t rebuild everything” path.
     Mutation
 }
 
