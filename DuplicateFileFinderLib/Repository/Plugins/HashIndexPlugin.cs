@@ -41,6 +41,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private long _lastIndexedGeneration;
 
+    private volatile bool _sortViewsDirty;
+    private volatile Dictionary<FileHandle, int> _groupIndexByFileHandle = new();
+
     // Needed for filtering duplicate files within a subtree
     private readonly ITreeIndexReadModel _treeIndex;
 
@@ -108,6 +111,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (groups.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
 
+        EnsureSortedViews();
         var order = query.Sort == DuplicateSort.TotalSizeDesc ? _bySizeDesc : _byCountDesc;
         if (order.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
@@ -242,10 +246,15 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         // Remove from transient file-id -> handle map first.
         _fileHandlesById = _fileHandlesById.Remove(evt.FileId);
 
-        RebuildExcludingRemovedHandles([evt.File]);
+        if (!_groupIndexByFileHandle.TryGetValue(evt.File, out var groupIndex))
+        {
+            _lastIndexedGeneration = evt.Generation;
+            return ValueTask.CompletedTask;
+        }
+
+        RebuildSingleGroupExcludingFile(groupIndex, evt.File);
 
         _lastIndexedGeneration = evt.Generation;
-
         return ValueTask.CompletedTask;
     }
 
@@ -348,7 +357,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-            _snapshotView = repoSnapshot;
+        _snapshotView = repoSnapshot;
 
         // Pass 1: count per hash + record per-file size (no per-group allocations)
         var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
@@ -594,7 +603,13 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         BuildGroupsFromPlan(oldGroups, plan, newGroups);
         FillAllFilesFromPlan(oldGroups, oldAll, plan, removedSet, newAll);
 
-        PublishComputed(newAll, newGroups);
+        var stats = ComputeStats(newGroups);
+
+        _allFiles = newAll;
+        _groups = newGroups;
+        _stats = stats;
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
+        _sortViewsDirty = true;
     }
 
     private static RemovalPlan BuildRemovalPlan(
@@ -718,13 +733,19 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // ---------------------------------------------------------------------
 
     private void PublishEmpty()
-        => Publish([], [], [], [], StatsSnapshot.Empty);
+    {
+        Publish([], [], [], [], StatsSnapshot.Empty);
+        _groupIndexByFileHandle = new Dictionary<FileHandle, int>();
+        _sortViewsDirty = false;
+    }
 
     private void PublishComputed(FileHandle[] allFiles, HashGroupDescriptor[] groups)
     {
         var (bySize, byCount) = BuildSortedViews(groups);
         var stats = ComputeStats(groups);
         Publish(allFiles, groups, bySize, byCount, stats);
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(groups, allFiles);
+        _sortViewsDirty = false;
     }
 
     private static StatsSnapshot ComputeStats(HashGroupDescriptor[] groups)
@@ -875,6 +896,9 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         Publish(allFiles, groups, bySize, byCount, stats);
 
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(groups, allFiles);
+        _sortViewsDirty = false;
+
         // Not part of read-model publication, but keep consistent here too.
         _lastIndexedGeneration = state.LastIndexedGeneration;
 
@@ -888,5 +912,129 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     private sealed record StatsSnapshot(int DuplicateFileCount, long SpaceTakenByDuplicates)
     {
         public static readonly StatsSnapshot Empty = new(0, 0);
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+    private void EnsureSortedViews()
+    {
+        if (!_sortViewsDirty)
+            return;
+
+        var groups = _groups;
+        var (bySize, byCount) = BuildSortedViews(groups);
+
+        _bySizeDesc = bySize;
+        _byCountDesc = byCount;
+        _sortViewsDirty = false;
+    }
+
+    private static Dictionary<FileHandle, int> BuildGroupIndexByFileHandle(
+        HashGroupDescriptor[] groups,
+        FileHandle[] allFiles)
+    {
+        var map = new Dictionary<FileHandle, int>(allFiles.Length);
+
+        for (var g = 0; g < groups.Length; g++)
+        {
+            var d = groups[g];
+            if (d.Count <= 0 || d.Offset < 0)
+                continue;
+
+            var end = d.Offset + d.Count;
+            if ((uint)end > (uint)allFiles.Length)
+                continue;
+
+            for (var i = d.Offset; i < end; i++)
+                map[allFiles[i]] = g;
+        }
+
+        return map;
+    }
+
+    private void RebuildSingleGroupExcludingFile(int groupIndex, FileHandle removedFile)
+    {
+        using var _ = TimingLog.StartPhase("HashIndex.RebuildSingleGroupExcludingFile");
+
+        var oldGroups = _groups;
+        var oldAll = _allFiles;
+
+        if ((uint)groupIndex >= (uint)oldGroups.Length)
+            return;
+
+        var target = oldGroups[groupIndex];
+        if (target.Count <= 0 || target.Offset < 0)
+            return;
+
+        var end = target.Offset + target.Count;
+        if ((uint)end > (uint)oldAll.Length)
+            return;
+
+        var survivors = new List<FileHandle>(target.Count - 1);
+        for (var i = target.Offset; i < end; i++)
+        {
+            var fh = oldAll[i];
+            if (fh.Equals(removedFile))
+                continue;
+
+            survivors.Add(fh);
+        }
+
+        if (survivors.Count == target.Count)
+            return; // nothing removed
+
+        if (survivors.Count < 2)
+        {
+            RebuildExcludingRemovedHandles([removedFile]);
+            return;
+        }
+
+        var newAll = new FileHandle[oldAll.Length - 1];
+        var newGroups = (HashGroupDescriptor[])oldGroups.Clone();
+
+        // Copy prefix
+        if (target.Offset > 0)
+            Array.Copy(oldAll, 0, newAll, 0, target.Offset);
+
+        // Copy rewritten target group
+        for (var i = 0; i < survivors.Count; i++)
+            newAll[target.Offset + i] = survivors[i];
+
+        // Copy suffix shifted left by one
+        var oldSuffixStart = target.Offset + target.Count;
+        var newSuffixStart = target.Offset + survivors.Count;
+        var suffixLen = oldAll.Length - oldSuffixStart;
+        if (suffixLen > 0)
+            Array.Copy(oldAll, oldSuffixStart, newAll, newSuffixStart, suffixLen);
+
+        // Update target descriptor
+        newGroups[groupIndex] = new HashGroupDescriptor(
+            Hash: target.Hash,
+            FileSizeBytes: target.FileSizeBytes,
+            Offset: target.Offset,
+            Count: survivors.Count,
+            FirstFile: survivors[0]);
+
+        // Shift offsets of later groups by one
+        for (var g = groupIndex + 1; g < newGroups.Length; g++)
+        {
+            var d = newGroups[g];
+            newGroups[g] = new HashGroupDescriptor(
+                Hash: d.Hash,
+                FileSizeBytes: d.FileSizeBytes,
+                Offset: d.Offset - 1,
+                Count: d.Count,
+                FirstFile: d.FirstFile);
+        }
+
+        var stats = ComputeStats(newGroups);
+
+        _allFiles = newAll;
+        _groups = newGroups;
+        _stats = stats;
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
+        _sortViewsDirty = true;
     }
 }
