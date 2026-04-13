@@ -31,6 +31,14 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Published stats snapshot
     private volatile StatsSnapshot _stats = StatsSnapshot.Empty;
 
+    // Latest snapshot view for rebuilds / metadata coherence.
+    private volatile RepoSnapshotView? _snapshotView;
+
+    // Transient helper map for delete events:
+    // only contains currently indexed (eligible hashed) files.
+    // Not persisted; rebuilt from snapshot on bootstrap/full rebuild.
+    private volatile SegmentedMap<FileHandle> _fileHandlesById = SegmentedMap<FileHandle>.Empty;
+
     private long _lastIndexedGeneration;
 
     // Needed for filtering duplicate files within a subtree
@@ -193,8 +201,11 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
+        _snapshotView = evt.RepoSnapshotView;
+
         if (TryLoadState(evt.Generation))
         {
+            RebuildTransientFileHandleMap(evt.RepoSnapshotView);
             _lastIndexedGeneration = evt.Generation;
             return ValueTask.CompletedTask;
         }
@@ -212,7 +223,66 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (evt.Generation <= _lastIndexedGeneration)
             return ValueTask.CompletedTask;
 
+        _snapshotView = evt.RepoSnapshotView;
+
+        // For mutation events (delete-driven snapshot updates), skip the full rebuild.
+        // Incremental delete events will apply the actual removals.
+        //
+        // Important: do NOT rebuild _fileHandlesById here, because the delete events still
+        // need the pre-delete file-id -> handle mapping to resolve removed handles.
+        if (evt.Reason == RepoSnapshotCommitReason.Mutation)
+            return ValueTask.CompletedTask;
+
         RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
+        return ValueTask.CompletedTask;
+    }
+
+    protected override ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct)
+    {
+        // Remove from transient file-id -> handle map first.
+        _fileHandlesById = _fileHandlesById.Remove(evt.FileId);
+
+        RebuildExcludingRemovedHandles([evt.File]);
+
+        _lastIndexedGeneration = evt.Generation;
+
+        return ValueTask.CompletedTask;
+    }
+
+    protected override ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct)
+    {
+        if (evt.Generation <= _lastIndexedGeneration)
+            return ValueTask.CompletedTask;
+
+        if (evt.DeletedFileIds.Length == 0)
+        {
+            _lastIndexedGeneration = evt.Generation;
+            return ValueTask.CompletedTask;
+        }
+
+        var removedHandles = new List<FileHandle>(evt.DeletedFileIds.Length);
+
+        foreach (var fileId in evt.DeletedFileIds)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (_fileHandlesById.TryGetValue(fileId, out var fh))
+                removedHandles.Add(fh);
+        }
+
+        // Remove from transient lookup after handles have been resolved.
+        _fileHandlesById = _fileHandlesById.RemoveMany(evt.DeletedFileIds);
+
+        if (removedHandles.Count == 0)
+        {
+            _lastIndexedGeneration = evt.Generation;
+            return ValueTask.CompletedTask;
+        }
+
+        RebuildExcludingRemovedHandles(CollectionsMarshal.AsSpan(removedHandles));
+
+        _lastIndexedGeneration = evt.Generation;
+
         return ValueTask.CompletedTask;
     }
 
@@ -278,13 +348,19 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
+            _snapshotView = repoSnapshot;
+
         // Pass 1: count per hash + record per-file size (no per-group allocations)
         var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
+        var fileHandlesById = new Dictionary<int, FileHandle>(capacity: 4096);
         var totalHandles = 0;
 
         foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
         {
             totalHandles++;
+
+            var fh = new FileHandle(snapshot.ScanRootId, index);
+            fileHandlesById[file.FileId] = fh;
 
             ref var meta = ref CollectionsMarshal.GetValueRefOrAddDefault(metaByHash, file.Hash, out var exists);
 
@@ -294,7 +370,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
                 {
                     Count = 1,
                     FileSizeBytes = file.Size,
-                    FirstFile = new FileHandle(snapshot.ScanRootId, index),
+                    FirstFile = fh,
                     Offset = 0,
                     Cursor = 0
                 };
@@ -306,6 +382,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         if (metaByHash.Count == 0 || totalHandles == 0)
         {
+            _fileHandlesById = SegmentedMap<FileHandle>.Empty;
             PublishEmpty();
             return;
         }
@@ -347,12 +424,27 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             allFiles[writeIndex] = new FileHandle(snapshot.ScanRootId, index);
         }
 
+        _fileHandlesById = SegmentedMap<FileHandle>.FromDictionary(fileHandlesById);
         PublishComputed(allFiles, groups);
     }
 
     // ---------------------------------------------------------------------
     // Rebuild: exclusion of a scan-root from current index (3-pass compaction)
     // ---------------------------------------------------------------------
+
+    private void RebuildTransientFileHandleMap(RepoSnapshotView repoSnapshot)
+    {
+        _snapshotView = repoSnapshot;
+
+        var fileHandlesById = new Dictionary<int, FileHandle>(capacity: 4096);
+
+        foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
+            fileHandlesById[file.FileId] = new FileHandle(snapshot.ScanRootId, index);
+
+        _fileHandlesById = fileHandlesById.Count == 0
+            ? SegmentedMap<FileHandle>.Empty
+            : SegmentedMap<FileHandle>.FromDictionary(fileHandlesById);
+    }
 
     private readonly record struct RemovalPlan(int[] Counts, FileHandle[] Reps, int NewGroupCount, int NewTotalHandles);
 
@@ -386,6 +478,121 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         // Pass 3: fill newAll by copying survivors into each group segment
         FillAllFilesFromPlan(oldGroups, oldAll, plan, removedScanRootId, newAll);
+
+        PublishComputed(newAll, newGroups);
+    }
+
+    private static RemovalPlan BuildRemovalPlan(
+        HashGroupDescriptor[] oldGroups,
+        FileHandle[] oldAll,
+        HashSet<FileHandle> removedHandles)
+    {
+        var newCounts = new int[oldGroups.Length];
+        var newReps = new FileHandle[oldGroups.Length];
+
+        var newTotalHandles = 0;
+        var newGroupCount = 0;
+
+        for (var g = 0; g < oldGroups.Length; g++)
+        {
+            var d = oldGroups[g];
+
+            if (d.Count <= 0 || d.Offset < 0)
+                continue;
+
+            var end = d.Offset + d.Count;
+            if ((uint)end > (uint)oldAll.Length)
+                continue;
+
+            var count = 0;
+            var rep = FileHandle.Invalid;
+
+            for (var i = d.Offset; i < end; i++)
+            {
+                var fh = oldAll[i];
+                if (removedHandles.Contains(fh))
+                    continue;
+
+                if (!rep.IsValid)
+                    rep = fh;
+
+                count++;
+            }
+
+            if (count <= 0)
+                continue;
+
+            newCounts[g] = count;
+            newReps[g] = rep;
+
+            newTotalHandles += count;
+            newGroupCount++;
+        }
+
+        return new RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
+    }
+
+    private static void FillAllFilesFromPlan(
+        HashGroupDescriptor[] oldGroups,
+        FileHandle[] oldAll,
+        RemovalPlan plan,
+        HashSet<FileHandle> removedHandles,
+        FileHandle[] newAll)
+    {
+        var dstOffset = 0;
+
+        for (var g = 0; g < oldGroups.Length; g++)
+        {
+            var newCount = plan.Counts[g];
+            if (newCount <= 0)
+                continue;
+
+            var d = oldGroups[g];
+            var end = d.Offset + d.Count;
+
+            var wrote = 0;
+            for (var i = d.Offset; i < end; i++)
+            {
+                var fh = oldAll[i];
+                if (removedHandles.Contains(fh))
+                    continue;
+
+                newAll[dstOffset + wrote] = fh;
+                wrote++;
+
+                if (wrote == newCount)
+                    break;
+            }
+
+            dstOffset += newCount;
+        }
+    }
+
+    private void RebuildExcludingRemovedHandles(ReadOnlySpan<FileHandle> removedHandles)
+    {
+        using var _ = TimingLog.StartPhase("HashIndex.RebuildExcludingRemovedHandles");
+
+        var oldGroups = _groups;
+        var oldAll = _allFiles;
+
+        if (oldGroups.Length == 0 || oldAll.Length == 0 || removedHandles.Length == 0)
+            return;
+
+        var removedSet = new HashSet<FileHandle>(removedHandles.ToArray());
+
+        var plan = BuildRemovalPlan(oldGroups, oldAll, removedSet);
+
+        if (plan.NewGroupCount == 0 || plan.NewTotalHandles == 0)
+        {
+            PublishEmpty();
+            return;
+        }
+
+        var newAll = new FileHandle[plan.NewTotalHandles];
+        var newGroups = new HashGroupDescriptor[plan.NewGroupCount];
+
+        BuildGroupsFromPlan(oldGroups, plan, newGroups);
+        FillAllFilesFromPlan(oldGroups, oldAll, plan, removedSet, newAll);
 
         PublishComputed(newAll, newGroups);
     }
