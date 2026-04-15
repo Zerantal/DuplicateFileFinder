@@ -703,9 +703,14 @@ public sealed class HashIndexPluginTests
             plugin,
             new RepoDirDeletedEvent
             {
-                Generation = 2, Dir = new DirHandle(1, 0), DeletedDirIds = [10], DeletedFileIds = [1001, 1002]
+                Generation = 2,
+                Dir = new DirHandle(1, 0),
+                DeletedDirIds = [10],
+                DeletedFiles = [
+                    (1001, new FileHandle(1, 1)),
+                    (1002, new FileHandle(1, 2))]
             },
-            predicate: () => plugin.TotalDuplicateFileCount == 1 && plugin.TotalSpaceTakenByDuplicates == 50);
+            predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 50 });
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(50, plugin.TotalSpaceTakenByDuplicates);
@@ -755,9 +760,11 @@ public sealed class HashIndexPluginTests
                 Generation = 2,
                 Dir = new DirHandle(1, 0),
                 DeletedDirIds = Array.Empty<DirId>(),
-                DeletedFileIds = [1002, 1004]
+                DeletedFiles = [
+                    (1002, new FileHandle(1, 1)),
+                    (1004, new FileHandle(1, 3))]
             },
-            predicate: () => plugin.TotalDuplicateFileCount == 1 && plugin.TotalSpaceTakenByDuplicates == 100);
+            predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 100 });
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);

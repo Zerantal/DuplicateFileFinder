@@ -370,7 +370,7 @@ public sealed class FileDirIndexPluginTests
                 Generation = 2,
                 Dir = new DirHandle(1, 1),
                 DeletedDirIds = [102, 103],
-                DeletedFileIds = [1001, 1002]
+                DeletedFiles = [(1001, new FileHandle(1, 1)), (1002, new FileHandle(1, 2 ))]
             });
 
             await AsyncUtil.WaitForConditionAsync(

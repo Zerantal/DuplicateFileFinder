@@ -65,10 +65,10 @@ public sealed record RepoDirDeletedEvent : RepoEvent
     public required DirHandle Dir { get; init; }
 
     public required DirId[] DeletedDirIds { get; init; }
-    public required FileId[] DeletedFileIds { get; init; }
+    public required (FileId FileId, FileHandle FileHandle)[] DeletedFiles { get; init; }
 
-    public int DeletedDirs => DeletedDirIds.Length;
-    public int DeletedFiles => DeletedFileIds.Length;
+    public int DeletedDirsCount => DeletedDirIds.Length;
+    public int DeletedFilesCount => DeletedFiles.Length;
 }
 
 /// <summary>

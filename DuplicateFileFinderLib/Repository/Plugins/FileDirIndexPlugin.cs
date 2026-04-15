@@ -149,6 +149,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         }
 
         _lastIndexedGeneration = evt.Generation;
+        SaveState();
 
         s_log.Debug(
             "FileDirIndexPlugin applied RepoFileDeletedEvent gen={gen}, scanRootId={scanRootId}, fileId={fileId}",
@@ -169,11 +170,11 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         var beforeDirsById = _dirsById;
         var beforeFilesById = _filesById;
         _dirsById = _dirsById.RemoveMany(evt.DeletedDirIds);
-        _filesById = _filesById.RemoveMany(evt.DeletedFileIds);
+        _filesById = _filesById.RemoveMany(evt.DeletedFiles.Select(f => f.FileId));
         if (!ReferenceEquals(_dirsById, beforeDirsById))
-            removedDirs = evt.DeletedDirs;
+            removedDirs = evt.DeletedDirsCount;
         if (!ReferenceEquals(_filesById, beforeFilesById))
-            removedFiles = evt.DeletedFiles;
+            removedFiles = evt.DeletedFilesCount;
 
         if (removedDirs != 0)
         {
@@ -204,6 +205,7 @@ public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
         }
 
         _lastIndexedGeneration = evt.Generation;
+        SaveState();
 
         s_log.Debug(
             "FileDirIndexPlugin applied RepoDirDeletedEvent gen={gen}, scanRootId={scanRootId}, removedDirs={removedDirs}, removedFiles={removedFiles}",

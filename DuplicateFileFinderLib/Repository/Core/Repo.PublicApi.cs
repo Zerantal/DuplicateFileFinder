@@ -500,7 +500,12 @@ public sealed partial class Repo
             Reason = RepoSnapshotCommitReason.Mutation
         });
 
-        PublishEvent(new RepoFileDeletedEvent { Generation = gen, File = file, FileId = existing.FileId });
+        PublishEvent(new RepoFileDeletedEvent
+        {
+            Generation = gen,
+            File = file,
+            FileId = existing.FileId
+        });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
     }
@@ -534,7 +539,7 @@ public sealed partial class Repo
         var newFiles = (FileRecordV2[])snap.Files.Clone();
 
         var deletedDirIds = new List<DirId>(subtreeDirIds.Count);
-        var deletedFileIds = new List<FileId>();
+        var deletedFiles = new List<(FileId, FileHandle)>();
 
         // Mark dirs
         for (int i = 0; i < newDirs.Length; i++)
@@ -565,7 +570,8 @@ public sealed partial class Repo
                 continue;
 
             newFiles[i] = f with { Status = ScanEntryStatus.Deleted };
-            deletedFileIds.Add(f.FileId);
+            var fileHandle = new FileHandle(dir.ScanRootId, i);
+            deletedFiles.Add((f.FileId,  fileHandle));
         }
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
@@ -585,10 +591,10 @@ public sealed partial class Repo
             Generation = gen,
             Dir = dir,
             DeletedDirIds = deletedDirIds.ToArray(),
-            DeletedFileIds = deletedFileIds.ToArray()
+            DeletedFiles = deletedFiles.ToArray()
         });
 
-        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFileIds.Count, deletedDirIds.Count);
+        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles.Count, deletedDirIds.Count);
     }
 
     private static HashSet<long> CollectDirSubtreeIds(DirRecordV2[] dirs, long rootDirId, CancellationToken ct)
