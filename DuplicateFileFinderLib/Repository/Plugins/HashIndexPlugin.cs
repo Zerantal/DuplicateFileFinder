@@ -109,7 +109,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (groups.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
 
-        EnsureSortedViews();
         var order = query.Sort == DuplicateSort.TotalSizeDesc ? _bySizeDesc : _byCountDesc;
         if (order.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
@@ -581,6 +580,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         _groups = newGroups;
         _stats = stats;
         _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
+        _bySizeDesc = [];
+        _byCountDesc = [];
         _sortViewsDirty = true;
     }
 
@@ -813,6 +814,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void SaveState()
     {
+        EnsureSortedViews();
+
         var state = new HashIndexState
         {
             LastIndexedGeneration = _lastIndexedGeneration,
@@ -860,17 +863,13 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var bySize = state.BySizeDesc;
         var byCount = state.ByCountDesc;
 
-        var sortViewsValid = bySize.Length == groups.Length && byCount.Length == groups.Length;
-        if (!sortViewsValid)
-        {
-            bySize = [];
-            byCount = [];
-        }
+        if (bySize.Length != groups.Length || byCount.Length != groups.Length)
+            (bySize, byCount) = BuildSortedViews(groups);
 
         var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
 
         Publish(allFiles, groups, bySize, byCount, stats);
-        _sortViewsDirty = !sortViewsValid;
+        _sortViewsDirty = false;
 
         // Transient delete-helper structure is built lazily on first single-file delete event.
         _groupIndexByFileHandle = new Dictionary<FileHandle, int>();
@@ -887,7 +886,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     {
         public static readonly StatsSnapshot Empty = new(0, 0);
     }
-
 
     // ---------------------------------------------------------------------
     // Helpers
@@ -1010,6 +1008,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         _groups = newGroups;
         _stats = stats;
         _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
+        _bySizeDesc = [];
+        _byCountDesc = [];
         _sortViewsDirty = true;
     }
 
