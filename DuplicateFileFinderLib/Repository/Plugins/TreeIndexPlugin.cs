@@ -174,7 +174,7 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         if (evt.Generation <= _lastIndexedGeneration)
             return ValueTask.CompletedTask;
 
-        var removedRootId = evt.ScanRootId;
+        var removedRootId = evt.ScanRootIdValue;
 
         var oldRoots = _roots;
 
@@ -1023,12 +1023,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
             : SegmentedMap<DirAggregateStats>.Build(statsDict.ToArray(), gapThreshold: SegmentGapThreshold);
     }
 
-        private static SegmentedMap<DirAggregateStats> PatchStatsForDirDelete(
-        SegmentedMap<DirAggregateStats> oldStats,
-        ScanRootSnapshotView snapshot,
-        int deletedRootIndex,
-        HashSet<int> removedDirIndices,
-        DirAggregateStats deletedRootStats)
+    private static SegmentedMap<DirAggregateStats> PatchStatsForDirDelete(
+    SegmentedMap<DirAggregateStats> oldStats,
+    ScanRootSnapshotView snapshot,
+    int deletedRootIndex,
+    HashSet<int> removedDirIndices,
+    DirAggregateStats deletedRootStats)
     {
         var statsDict = new Dictionary<int, DirAggregateStats>();
 

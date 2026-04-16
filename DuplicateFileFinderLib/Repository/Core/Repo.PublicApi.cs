@@ -137,7 +137,7 @@ public sealed partial class Repo
         // NOTE: We intentionally do NOT delete the on-disk scanroot snapshot file here.
         // A later prune/compaction operation can reclaim these files.
 
-        PublishEvent(new RepoScanRootRemovedEvent { Generation = generation, ScanRootId = scanRootId });
+        PublishEvent(new RepoScanRootRemovedEvent(Generation, scanRootId));
 
         return generation;
     }
@@ -496,7 +496,8 @@ public sealed partial class Repo
         {
             Generation = gen,
             File = file,
-            FileId = existing.FileId
+            FileId = existing.FileId,
+            ScanRootId = file.ScanRootId
         });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
@@ -563,7 +564,7 @@ public sealed partial class Repo
 
             newFiles[i] = f with { Status = ScanEntryStatus.Deleted };
             var fileHandle = new FileHandle(dir.ScanRootId, i);
-            deletedFiles.Add((f.FileId,  fileHandle));
+            deletedFiles.Add((f.FileId, fileHandle));
         }
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
@@ -572,6 +573,7 @@ public sealed partial class Repo
 
         PublishEvent(new RepoDirDeletedEvent
         {
+            ScanRootId = dir.ScanRootId,
             Generation = gen,
             Dir = dir,
             DeletedDirIds = deletedDirIds.ToArray(),

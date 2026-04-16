@@ -321,7 +321,13 @@ public sealed class FileDirIndexPluginTests
             Assert.True(plugin.TryGetFile(1001, out _));
             Assert.True(plugin.TryGetFilePathById(1001, out _));
 
-            plugin.Post(new RepoFileDeletedEvent { Generation = 2, File = new FileHandle(1, 0), FileId = 1001 });
+            plugin.Post(new RepoFileDeletedEvent
+            {
+                Generation = 2,
+                ScanRootId = 1,
+                File = new FileHandle(1, 0),
+                FileId = 1001
+            });
 
             await AsyncUtil.WaitForConditionAsync(
                 () => !plugin.TryGetFile(1001, out _) && plugin.FileCount == 1,
@@ -368,9 +374,10 @@ public sealed class FileDirIndexPluginTests
             plugin.Post(new RepoDirDeletedEvent
             {
                 Generation = 2,
+                ScanRootId = 1,
                 Dir = new DirHandle(1, 1),
                 DeletedDirIds = [102, 103],
-                DeletedFiles = [(1001, new FileHandle(1, 1)), (1002, new FileHandle(1, 2 ))]
+                DeletedFiles = [(1001, new FileHandle(1, 1)), (1002, new FileHandle(1, 2))]
             });
 
             await AsyncUtil.WaitForConditionAsync(
@@ -415,14 +422,14 @@ public sealed class FileDirIndexPluginTests
 
             await plugin.WhenReadyAsync(CancellationToken.None);
 
-            plugin.Post(new RepoFileDeletedEvent { Generation = 2, File = new FileHandle(1, 0), FileId = 1001 });
+            plugin.Post(new RepoFileDeletedEvent { Generation = 2, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 });
 
             await AsyncUtil.WaitForConditionAsync(
                 () => !plugin.TryGetFile(1001, out _) && plugin.FileCount == 1,
                 TimeSpan.FromSeconds(2));
 
             // Same delete again should not decrement counts further
-            plugin.Post(new RepoFileDeletedEvent { Generation = 3, File = new FileHandle(1, 0), FileId = 1001 });
+            plugin.Post(new RepoFileDeletedEvent { Generation = 3, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 });
 
             await AsyncUtil.WaitForConditionAsync(
                 () => plugin.FileCount == 1,

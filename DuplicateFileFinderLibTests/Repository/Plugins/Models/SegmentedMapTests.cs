@@ -188,7 +188,9 @@ public sealed class SegmentedMapTests
     {
         var dict = new Dictionary<int, DirHandle>
         {
-            [5] = new DirHandle(1, 5), [1] = new DirHandle(1, 1), [100] = new DirHandle(1, 100),
+            [5] = new DirHandle(1, 5),
+            [1] = new DirHandle(1, 1),
+            [100] = new DirHandle(1, 100),
         };
 
         var map = SegmentedMap<DirHandle>.FromDictionary(dict, gapThreshold: 1000);

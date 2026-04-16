@@ -31,9 +31,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Published stats snapshot
     private volatile StatsSnapshot _stats = StatsSnapshot.Empty;
 
-    // Latest snapshot view for rebuilds / metadata coherence.
-    private volatile RepoSnapshotView? _snapshotView;
-
     // Transient helper state for incremental delete handling.
     // Not persisted; rebuilt lazily on the first delete event after bootstrap/load.
     private volatile Dictionary<FileHandle, int> _groupIndexByFileHandle = new();
@@ -202,8 +199,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
-        _snapshotView = evt.RepoSnapshotView;
-
         if (TryLoadState(evt.Generation))
         {
             _lastIndexedGeneration = evt.Generation;
@@ -221,17 +216,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     {
         // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
-            return ValueTask.CompletedTask;
-
-        _snapshotView = evt.RepoSnapshotView;
-
-        // For mutation events (delete-driven snapshot updates), skip the full rebuild.
-        // Incremental delete events will apply the actual removals.
-        //
-        // Important: do NOT rebuild delete helpers here. For mutation, delete events still
-        // need the pre-delete mapping state; for non-mutation rebuilds, RebuildFromSnapshot(...)
-        // will rebuild helpers as part of the full rebuild path.
-        if (evt.Reason == RepoSnapshotCommitReason.Mutation)
             return ValueTask.CompletedTask;
 
         RebuildAndCommit(evt.Generation, () => RebuildFromSnapshot(evt.RepoSnapshotView));
@@ -291,7 +275,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (evt.Generation <= _lastIndexedGeneration)
             return ValueTask.CompletedTask;
 
-        RebuildAndCommit(evt.Generation, () => RebuildExcludingScanRoot(evt.ScanRootId));
+        RebuildAndCommit(evt.Generation, () => RebuildExcludingScanRoot(evt.ScanRootIdValue));
         return ValueTask.CompletedTask;
     }
 
@@ -346,8 +330,6 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
-        _snapshotView = repoSnapshot;
-
         // Pass 1: count per hash + record per-file size (no per-group allocations)
         var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
         var totalHandles = 0;

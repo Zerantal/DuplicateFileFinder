@@ -67,9 +67,6 @@ public sealed class HashIndexPluginTests
             Reason = RepoSnapshotCommitReason.ScanCompleted
         };
 
-    private static RepoEvent MakeScanRootRemovedEvent(long gen, ScanRootId scanRootId)
-        => new RepoScanRootRemovedEvent { Generation = gen, ScanRootId = scanRootId };
-
     private static IReadOnlyDictionary<ScanRootId, ScanRoot> BuildScanRoots(
         IReadOnlyDictionary<ScanRootId, ScanRootSnapshotView> snapshots,
         HashSet<ScanRootId>? deletedScanRoots = null)
@@ -547,7 +544,7 @@ public sealed class HashIndexPluginTests
         // Remove root 2: remaining group has count 2 => duplicates: 1, space: 100
         await PostAndWaitAsync(
             plugin,
-            MakeScanRootRemovedEvent(gen: 2, scanRootId: 2),
+            new RepoScanRootRemovedEvent(2, 2),
             predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 100 });
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
@@ -622,8 +619,8 @@ public sealed class HashIndexPluginTests
 
         await PostAndWaitAsync(
             plugin,
-            new RepoFileDeletedEvent { Generation = 2, File = new FileHandle(1, 0), FileId = 1001 },
-            predicate: () => plugin.TotalDuplicateFileCount == 1 && plugin.TotalSpaceTakenByDuplicates == 100);
+            new RepoFileDeletedEvent { Generation = 2, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 },
+            predicate: () => plugin is { TotalDuplicateFileCount: 1, TotalSpaceTakenByDuplicates: 100 });
 
         Assert.Equal(1, plugin.TotalDuplicateFileCount);
         Assert.Equal(100, plugin.TotalSpaceTakenByDuplicates);
@@ -661,8 +658,8 @@ public sealed class HashIndexPluginTests
 
         await PostAndWaitAsync(
             plugin,
-            new RepoFileDeletedEvent { Generation = 2, File = new FileHandle(1, 0), FileId = 1001 },
-            predicate: () => plugin.TotalDuplicateFileCount == 0 && plugin.TotalSpaceTakenByDuplicates == 0);
+            new RepoFileDeletedEvent { Generation = 2, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 },
+            predicate: () => plugin is { TotalDuplicateFileCount: 0, TotalSpaceTakenByDuplicates: 0 });
 
         Assert.Equal(0, plugin.TotalDuplicateFileCount);
         Assert.Equal(0, plugin.TotalSpaceTakenByDuplicates);
@@ -704,6 +701,7 @@ public sealed class HashIndexPluginTests
             new RepoDirDeletedEvent
             {
                 Generation = 2,
+                ScanRootId = 1,
                 Dir = new DirHandle(1, 0),
                 DeletedDirIds = [10],
                 DeletedFiles = [
@@ -758,6 +756,7 @@ public sealed class HashIndexPluginTests
             new RepoDirDeletedEvent
             {
                 Generation = 2,
+                ScanRootId = 1,
                 Dir = new DirHandle(1, 0),
                 DeletedDirIds = Array.Empty<DirId>(),
                 DeletedFiles = [
@@ -779,44 +778,6 @@ public sealed class HashIndexPluginTests
         var files = rm.GetGroupFiles(g).ToArray();
         Assert.Equal(2, files.Length);
         Assert.Equal([new FileHandle(1, 0), new FileHandle(1, 2)], files);
-    }
-
-    [Fact]
-    public async Task MutationSnapshotReplacedEvent_IsIgnored_ForDeleteDrivenMutation()
-    {
-        var h = NewHash(1);
-
-        var original = BuildRepoSnapshot(
-            MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(h, 100, 3)]));
-
-        // Different snapshot that would have changed everything if rebuilt
-        var different = BuildRepoSnapshot(
-            MakeRootFromGroups(scanRootId: 1, dirId: 10, groups: [(NewHash(99), 777, 2)]));
-
-        await using var plugin = new HashIndexPlugin(_fs.Root, new StubTreeIndex());
-
-        await PostAndWaitAsync(plugin, MakeBootstrapEvent(1, original));
-
-        Assert.Equal(2, plugin.TotalDuplicateFileCount);
-        Assert.Equal(200, plugin.TotalSpaceTakenByDuplicates);
-
-        plugin.Post(new ScanRootSnapshotReplacedEvent
-        {
-            Generation = 2, ScanRootId = 1, RepoSnapshotView = different, Reason = RepoSnapshotCommitReason.Mutation
-        });
-
-        await Task.Delay(100, TestContext.Current.CancellationToken);
-
-        // Should still reflect the pre-existing index state because mutation snapshot events are ignored
-        Assert.Equal(2, plugin.TotalDuplicateFileCount);
-        Assert.Equal(200, plugin.TotalSpaceTakenByDuplicates);
-
-        var rm = (IHashIndexReadModel)plugin;
-        var page = rm.GetGroupsPage(new DuplicateQuery(), 0, 10);
-        var g = Assert.Single(page.Groups.ToArray());
-        Assert.Equal(h, g.Hash);
-        Assert.Equal(3, g.Count);
-        Assert.Equal(100, g.FileSizeBytes);
     }
 
     // ---------------------------------------------------------------------
@@ -881,7 +842,10 @@ public sealed class HashIndexPluginTests
 
         return new ScanRootSnapshotView
         {
-            ScanRootId = scanRootId, StringPool = pool, Dirs = dirs, Files = fileRecords
+            ScanRootId = scanRootId,
+            StringPool = pool,
+            Dirs = dirs,
+            Files = fileRecords
         };
     }
 }
