@@ -2,7 +2,10 @@
 
 using DuplicateFileFinderLib.Repository.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.FileDir;
+using DuplicateFileFinderLib.Repository.Plugins.Hash;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Tree;
 
 using NLog;
 

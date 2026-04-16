@@ -10,7 +10,7 @@ using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using NLog;
 
-namespace DuplicateFileFinderLib.Repository.Plugins;
+namespace DuplicateFileFinderLib.Repository.Plugins.Tree;
 
 public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 {

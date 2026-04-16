@@ -7,7 +7,7 @@ using DuplicateFileFinderLib.Repository.Storage;
 
 using NLog;
 
-namespace DuplicateFileFinderLib.Repository.Plugins;
+namespace DuplicateFileFinderLib.Repository.Plugins.FileDir;
 
 public sealed class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirReadModel
 {
