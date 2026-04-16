@@ -42,6 +42,12 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
     // Needed for filtering duplicate files within a subtree
     private readonly ITreeIndexReadModel _treeIndex;
 
+    private const int ImmediateSortMaterializationThreshold = 64;
+
+    private bool _deferredSortSaveQueued;
+
+    private sealed record MaterializeAndSaveEvent : RepoEvent;
+
     public HashIndexPlugin(string dataDirectory, ITreeIndexReadModel treeIndex)
         : base(4096)
     {
@@ -56,6 +62,31 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     public int TotalDuplicateFileCount => _stats.DuplicateFileCount;
     public long TotalSpaceTakenByDuplicates => _stats.SpaceTakenByDuplicates;
+
+    protected override async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
+    {
+        if (evt is MaterializeAndSaveEvent materialize)
+        {
+            using (TimingLog.Start($"Processing {evt.GetType().Name} ({nameof(HashIndexPlugin)})"))
+            {
+                _deferredSortSaveQueued = false;
+
+                // Ignore stale queued work.
+                if (materialize.Generation != _lastIndexedGeneration)
+                    return;
+
+                if (!_sortViewsDirty)
+                    return;
+
+                EnsureSortedViews();
+                SaveState(materializeSortViews: false);
+            }
+
+            return;
+        }
+
+        await base.HandleEventAsync(evt, ct).ConfigureAwait(false);
+    }
 
     // ---------------------------------------------------------------------
     // IHashIndexReadModel
@@ -106,6 +137,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (groups.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
 
+        EnsureSortedViews();
         var order = query.Sort == DuplicateSort.TotalSizeDesc ? _bySizeDesc : _byCountDesc;
         if (order.Length == 0)
             return new DuplicateGroupPage(offset, 0, ReadOnlyMemory<HashGroupDescriptor>.Empty);
@@ -229,14 +261,14 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (!_groupIndexByFileHandle.TryGetValue(evt.File, out var groupIndex))
         {
             _lastIndexedGeneration = evt.Generation;
-            SaveState();
+            SaveState(materializeSortViews: false);
             return ValueTask.CompletedTask;
         }
 
-        RebuildSingleGroupExcludingFile(groupIndex, evt.File);
+        var affectedGroupCount = RebuildSingleGroupExcludingFile(groupIndex, evt.File);
 
         _lastIndexedGeneration = evt.Generation;
-        SaveState();
+        PersistAfterMutation(affectedGroupCount);
 
         return ValueTask.CompletedTask;
     }
@@ -249,7 +281,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         if (evt.DeletedFiles.Length == 0)
         {
             _lastIndexedGeneration = evt.Generation;
-            SaveState();
+            SaveState(materializeSortViews: false);
             return ValueTask.CompletedTask;
         }
 
@@ -260,10 +292,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             removedHandles[i] = evt.DeletedFiles[i].FileHandle;
         }
 
-        RebuildExcludingRemovedHandles(removedHandles);
+        var affectedGroupCount = RebuildExcludingRemovedHandles(removedHandles);
 
         _lastIndexedGeneration = evt.Generation;
-        SaveState();
+        PersistAfterMutation(affectedGroupCount);
 
         return ValueTask.CompletedTask;
     }
@@ -530,7 +562,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         }
     }
 
-    private void RebuildExcludingRemovedHandles(ReadOnlySpan<FileHandle> removedHandles)
+    private int RebuildExcludingRemovedHandles(ReadOnlySpan<FileHandle> removedHandles)
     {
         using var _ = TimingLog.StartPhase("HashIndex.RebuildExcludingRemovedHandles");
 
@@ -538,16 +570,37 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var oldAll = _allFiles;
 
         if (oldGroups.Length == 0 || oldAll.Length == 0 || removedHandles.Length == 0)
-            return;
+            return 0;
 
         var removedSet = new HashSet<FileHandle>(removedHandles.ToArray());
+        var affectedHashes = new HashSet<HashKey>();
+
+        for (var g = 0; g < oldGroups.Length; g++)
+        {
+            var d = oldGroups[g];
+            if (d.Count <= 0 || d.Offset < 0)
+                continue;
+
+            var end = d.Offset + d.Count;
+            if ((uint)end > (uint)oldAll.Length)
+                continue;
+
+            for (var i = d.Offset; i < end; i++)
+            {
+                if (!removedSet.Contains(oldAll[i]))
+                    continue;
+
+                affectedHashes.Add(d.Hash);
+                break;
+            }
+        }
 
         var plan = BuildRemovalPlan(oldGroups, oldAll, removedSet);
 
         if (plan.NewGroupCount == 0 || plan.NewTotalHandles == 0)
         {
             PublishEmpty();
-            return;
+            return affectedHashes.Count;
         }
 
         var newAll = new FileHandle[plan.NewTotalHandles];
@@ -565,6 +618,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         _bySizeDesc = [];
         _byCountDesc = [];
         _sortViewsDirty = true;
+
+        return affectedHashes.Count;
     }
 
     private static RemovalPlan BuildRemovalPlan(
@@ -794,9 +849,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
     private string GetStateFilePath() => Path.Combine(_dataDirectory, StateFileName);
 
-    private void SaveState()
+    private void SaveState(bool materializeSortViews)
     {
-        EnsureSortedViews();
+        if (materializeSortViews)
+            EnsureSortedViews();
 
         var state = new HashIndexState
         {
@@ -813,6 +869,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
 
         MemoryPackFile.SaveToFile(path, state);
     }
+
+    private void SaveState() => SaveState(materializeSortViews: true);
 
     private bool TryLoadState(long expectedGeneration)
     {
@@ -845,13 +903,17 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var bySize = state.BySizeDesc;
         var byCount = state.ByCountDesc;
 
-        if (bySize.Length != groups.Length || byCount.Length != groups.Length)
-            (bySize, byCount) = BuildSortedViews(groups);
+        var sortViewsValid = bySize.Length == groups.Length && byCount.Length == groups.Length;
+        if (!sortViewsValid)
+        {
+            bySize = [];
+            byCount = [];
+        }
 
         var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
 
         Publish(allFiles, groups, bySize, byCount, stats);
-        _sortViewsDirty = false;
+        _sortViewsDirty = !sortViewsValid;
 
         // Transient delete-helper structure is built lazily on first single-file delete event.
         _groupIndexByFileHandle = new Dictionary<FileHandle, int>();
@@ -909,7 +971,7 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         return map;
     }
 
-    private void RebuildSingleGroupExcludingFile(int groupIndex, FileHandle removedFile)
+    private int RebuildSingleGroupExcludingFile(int groupIndex, FileHandle removedFile)
     {
         using var _ = TimingLog.StartPhase("HashIndex.RebuildSingleGroupExcludingFile");
 
@@ -917,15 +979,15 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         var oldAll = _allFiles;
 
         if ((uint)groupIndex >= (uint)oldGroups.Length)
-            return;
+            return 0;
 
         var target = oldGroups[groupIndex];
         if (target.Count <= 0 || target.Offset < 0)
-            return;
+            return 0;
 
         var end = target.Offset + target.Count;
         if ((uint)end > (uint)oldAll.Length)
-            return;
+            return 0;
 
         var survivors = new List<FileHandle>(target.Count - 1);
         for (var i = target.Offset; i < end; i++)
@@ -938,13 +1000,10 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         }
 
         if (survivors.Count == target.Count)
-            return; // nothing removed
+            return 0;
 
         if (survivors.Count < 2)
-        {
-            RebuildExcludingRemovedHandles([removedFile]);
-            return;
-        }
+            return RebuildExcludingRemovedHandles([removedFile]);
 
         var newAll = new FileHandle[oldAll.Length - 1];
         var newGroups = (HashGroupDescriptor[])oldGroups.Clone();
@@ -993,6 +1052,8 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
         _bySizeDesc = [];
         _byCountDesc = [];
         _sortViewsDirty = true;
+
+        return 1;
     }
 
     private void EnsureGroupIndexBuilt()
@@ -1001,5 +1062,27 @@ public sealed class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadModel
             return;
 
         _groupIndexByFileHandle = BuildGroupIndexByFileHandle(_groups, _allFiles);
+    }
+
+    private void PersistAfterMutation(int affectedGroupCount)
+    {
+        if (affectedGroupCount <= ImmediateSortMaterializationThreshold)
+        {
+            SaveState(materializeSortViews: true);
+            return;
+        }
+
+        SaveState(materializeSortViews: false);
+        QueueDeferredSortMaterialization();
+    }
+
+    private void QueueDeferredSortMaterialization()
+    {
+        if (_deferredSortSaveQueued)
+            return;
+
+        _deferredSortSaveQueued = true;
+
+        Post(new MaterializeAndSaveEvent { Generation = _lastIndexedGeneration });
     }
 }

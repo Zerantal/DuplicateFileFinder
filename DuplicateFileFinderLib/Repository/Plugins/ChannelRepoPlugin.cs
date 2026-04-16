@@ -15,6 +15,9 @@ public abstract class ChannelRepoPlugin(int capacity = 1024)
 
     public void Post(RepoEvent evt) => TryPost(evt);
 
+    protected virtual ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
+        => ProcessItemAsync(evt, ct);
+
     protected sealed override ValueTask ProcessItemAsync(RepoEvent evt, CancellationToken ct)
         => HandleEventWithTimingAsync(evt, ct);
 
