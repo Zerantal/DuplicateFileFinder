@@ -25,7 +25,7 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
     {
         var options = new BoundedChannelOptions(capacity)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleWriter = false,
             SingleReader = true
         };
@@ -82,16 +82,17 @@ public abstract class ChannelRepoPlugin : IRepoPlugin, IReadyState, IIndexGenera
 
                 case ScanRootSnapshotReplacedEvent replaced:
                     await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
-
                     advancesBarrier = true;
                     break;
 
                 case RepoFileDeletedEvent fileDeleted:
                     await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
+                    advancesBarrier = true;
                     break;
 
                 case RepoDirDeletedEvent dirDeleted:
                     await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
+                    advancesBarrier = true;
                     break;
 
                 case RepoScanRootRemovedEvent rootRemoved:

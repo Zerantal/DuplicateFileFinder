@@ -186,7 +186,7 @@ public sealed class RepoHost : IRepoHost
 
             _channel = Channel.CreateBounded<RepoEvent>(new BoundedChannelOptions(capacity)
             {
-                FullMode = BoundedChannelFullMode.DropOldest,
+                FullMode = BoundedChannelFullMode.Wait,
                 SingleReader = true,
                 SingleWriter = false
             });
@@ -238,6 +238,16 @@ public sealed class RepoHost : IRepoHost
                         case ScanRootSnapshotReplacedEvent replaced:
                             gen = replaced.Generation;
                             scanRootId = replaced.ScanRootId;
+                            break;
+
+                        case RepoFileDeletedEvent fileDeleted:
+                            gen = fileDeleted.Generation;
+                            scanRootId = fileDeleted.File.ScanRootId;
+                            break;
+
+                        case RepoDirDeletedEvent dirDeleted:
+                            gen = dirDeleted.Generation;
+                            scanRootId = dirDeleted.Dir.ScanRootId;
                             break;
 
                         case RepoScanRootRemovedEvent removed:

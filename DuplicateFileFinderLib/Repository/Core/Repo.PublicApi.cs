@@ -490,15 +490,7 @@ public sealed partial class Repo
 
         // Commit updated snapshot and publish a full snapshot-replaced event so
         // index plugins rebuild and RepoHost raises IndexesRebuilt.
-        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
-
-        PublishEvent(new ScanRootSnapshotReplacedEvent
-        {
-            Generation = gen,
-            ScanRootId = updated.ScanRootId,
-            RepoSnapshotView = snapshotView,
-            Reason = RepoSnapshotCommitReason.Mutation
-        });
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
         PublishEvent(new RepoFileDeletedEvent
         {
@@ -576,15 +568,7 @@ public sealed partial class Repo
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
 
-        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
-
-        PublishEvent(new ScanRootSnapshotReplacedEvent
-        {
-            Generation = gen,
-            ScanRootId = updated.ScanRootId,
-            RepoSnapshotView = snapshotView,
-            Reason = RepoSnapshotCommitReason.Mutation
-        });
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
         PublishEvent(new RepoDirDeletedEvent
         {

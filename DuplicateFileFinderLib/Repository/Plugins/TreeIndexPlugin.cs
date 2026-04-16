@@ -26,8 +26,12 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
     // Rebuilt on plugin worker thread; swapped atomically for readers.
     private volatile Dictionary<ScanRootId, RootTreeIndexState> _roots = new();
 
+    // public required int[] ParentDirIndexByDirIndex { get; init; }
+
     private readonly string _dataDirectory;
     private long _lastIndexedGeneration;
+
+    private volatile RepoSnapshotView? _snapshotView;
 
     public TreeIndexPlugin(string dataDirectory)
         : base(4096)
@@ -126,6 +130,8 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
 
     protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
     {
+        _snapshotView = evt.RepoSnapshotView;
+
         if (!TryLoadState(evt.Generation))
         {
             // Fallback: rebuild from snapshot and persist.
@@ -145,13 +151,13 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         ScanRootSnapshotReplacedEvent evt,
         CancellationToken ct)
     {
-        s_log.Info("Rebuilding TreeIndex (generation = {0}).", evt.Generation);
-
-        // Ignore stale/out-of-order events (channel may drop old items).
         if (evt.Generation <= _lastIndexedGeneration)
             return ValueTask.CompletedTask;
 
-        // Rebuild from the new snapshot view and persist.
+        _snapshotView = evt.RepoSnapshotView;
+
+        s_log.Info("Rebuilding TreeIndex (generation = {0}).", evt.Generation);
+
         RebuildFromSnapshot(evt.RepoSnapshotView);
 
         _lastIndexedGeneration = evt.Generation;
@@ -193,165 +199,73 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         return ValueTask.CompletedTask;
     }
 
+    protected override ValueTask OnRepoFileDeletedEventAsync(RepoFileDeletedEvent evt, CancellationToken ct)
+    {
+        if (evt.Generation <= _lastIndexedGeneration)
+            return ValueTask.CompletedTask;
+
+        var snapshot = _snapshotView;
+        if (snapshot is null || !snapshot.Snapshots.TryGetValue(evt.File.ScanRootId, out var rootSnapshot))
+        {
+            _lastIndexedGeneration = evt.Generation;
+            SaveState();
+            return ValueTask.CompletedTask;
+        }
+
+        ApplyFileDeleteToRoot(rootSnapshot, evt.File);
+
+        _lastIndexedGeneration = evt.Generation;
+        SaveState();
+
+        return ValueTask.CompletedTask;
+    }
+
+    protected override ValueTask OnRepoDirDeletedEventAsync(RepoDirDeletedEvent evt, CancellationToken ct)
+    {
+        if (evt.Generation <= _lastIndexedGeneration)
+            return ValueTask.CompletedTask;
+
+        var snapshot = _snapshotView;
+        if (snapshot is null || !snapshot.Snapshots.TryGetValue(evt.Dir.ScanRootId, out var rootSnapshot))
+        {
+            _lastIndexedGeneration = evt.Generation;
+            SaveState();
+            return ValueTask.CompletedTask;
+        }
+
+        var deletedFiles = new FileHandle[evt.DeletedFiles.Length];
+        for (var i = 0; i < evt.DeletedFiles.Length; i++)
+            deletedFiles[i] = evt.DeletedFiles[i].FileHandle;
+
+        ApplyDirDeleteToRoot(rootSnapshot, evt.Dir, deletedFiles, evt.DeletedDirIds);
+
+        _lastIndexedGeneration = evt.Generation;
+        SaveState();
+
+        return ValueTask.CompletedTask;
+    }
+
     // ---------------------------------------------------------------------
     // Core index maintenance (build -> publish)
     // ---------------------------------------------------------------------
 
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
+        _snapshotView = repoSnapshot;
+
         var liveRootIds = new HashSet<ScanRootId>(
             repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
 
-        var liveSnapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>(capacity: liveRootIds.Count);
-        foreach (var (rootId, snap) in repoSnapshot.Snapshots)
-            if (liveRootIds.Contains(rootId))
-                liveSnapshots[rootId] = snap;
+        var globalHashCounts = ComputeGlobalHashCounts(repoSnapshot);
 
-        // -----------------------------------------------------------------
-        // 1) Global duplicate detection across ALL live scan roots
-        // -----------------------------------------------------------------
-        var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(capacity: liveRootIds.Count);
 
-        foreach (var snap in liveSnapshots.Values)
+        foreach (var (rootId, snapshot) in repoSnapshot.Snapshots)
         {
-            var files = snap.Files;
-            for (int i = 0; i < files.Count; i++)
-            {
-                var f = files[i];
+            if (!liveRootIds.Contains(rootId))
+                continue;
 
-                if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                    continue;
-
-                if (f.Size <= 0)
-                    continue;
-
-                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
-                    continue;
-
-                if (globalHashCounts.TryGetValue(f.Hash, out var c))
-                    globalHashCounts[f.Hash] = c + 1;
-                else
-                    globalHashCounts[f.Hash] = 1;
-            }
-        }
-
-        // -----------------------------------------------------------------
-        // 2) Build per-root pools + slice maps + stats + preorder subtree data
-        // -----------------------------------------------------------------
-        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(capacity: liveSnapshots.Count);
-
-        foreach (var snapshot in liveSnapshots.Values)
-        {
-            var rootId = snapshot.ScanRootId;
-
-            // Map: DirId -> DirIndex (ONLY for live dirs)
-            var dirIdToIndex = new Dictionary<long, int>(capacity: snapshot.Dirs.Count);
-            var rootDirIndices = new List<int>();
-
-            for (int i = 0; i < snapshot.Dirs.Count; i++)
-            {
-                var dir = snapshot.Dirs[i];
-
-                // Skip deleted/absent dirs entirely.
-                if (dir.Status is ScanEntryStatus.Deleted)
-                    continue;
-
-                dirIdToIndex[dir.DirId] = i;
-
-                if (dir.ParentDirId < 0)
-                    rootDirIndices.Add(i);
-            }
-
-            // Temp accumulators: per parent dirIndex -> handles list
-            var childrenDirsTmp = new Dictionary<int, List<DirHandle>>();
-            var childrenFilesTmp = new Dictionary<int, List<FileHandle>>();
-
-            // Child dirs (only live parent+child)
-            for (int i = 0; i < snapshot.Dirs.Count; i++)
-            {
-                var dir = snapshot.Dirs[i];
-
-                if (dir.Status is ScanEntryStatus.Deleted)
-                    continue;
-
-                if (dir.ParentDirId < 0)
-                    continue;
-
-                // Parent must be live too (otherwise ignore this edge)
-                if (!dirIdToIndex.TryGetValue(dir.ParentDirId, out var parentIndex))
-                    continue;
-
-                var childHandle = new DirHandle(rootId, i);
-
-                if (!childrenDirsTmp.TryGetValue(parentIndex, out var list))
-                {
-                    list = new List<DirHandle>(capacity: 4);
-                    childrenDirsTmp[parentIndex] = list;
-                }
-
-                list.Add(childHandle);
-            }
-
-            // Child files (only live files, and only under live dirs)
-            for (int i = 0; i < snapshot.Files.Count; i++)
-            {
-                var file = snapshot.Files[i];
-
-                if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
-                    continue;
-
-                if (!dirIdToIndex.TryGetValue(file.DirId, out var parentIndex))
-                    continue;
-
-                var fileHandle = new FileHandle(rootId, i);
-
-                if (!childrenFilesTmp.TryGetValue(parentIndex, out var list))
-                {
-                    list = new List<FileHandle>(capacity: 8);
-                    childrenFilesTmp[parentIndex] = list;
-                }
-
-                list.Add(fileHandle);
-            }
-
-            // Flatten into pools + slices
-            var (childDirsPool, childDirSlices) = BuildPoolAndSlices(childrenDirsTmp);
-            var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
-
-            var childDirSliceMap = childDirSlices.Length == 0
-                ? SegmentedMap<Slice>.Empty
-                : SegmentedMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
-
-            var childFileSliceMap = childFileSlices.Length == 0
-                ? SegmentedMap<Slice>.Empty
-                : SegmentedMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
-
-            var statsMap = ComputeRootDirStats(
-                scanRootId: rootId,
-                snapshot: snapshot,
-                childDirsPool: childDirsPool,
-                childDirSliceByDirIndex: childDirSliceMap,
-                childFilesPool: childFilesPool,
-                childFileSliceByDirIndex: childFileSliceMap,
-                rootDirIndices: rootDirIndices,
-                globalHashCounts: globalHashCounts);
-
-            // compute preorder subtree intervals + file->dir preorder mapping (Option A)
-            var (subtreeRangeMap, dirPreorderByFileIndex) = BuildPreorderData(snapshot: snapshot,
-                rootDirIndices: rootDirIndices,
-                childrenDirsTmp: childrenDirsTmp,
-                dirIdToIndex: dirIdToIndex);
-
-            newRoots[rootId] = new RootTreeIndexState
-            {
-                ChildDirsPool = childDirsPool,
-                ChildFilesPool = childFilesPool,
-                ChildDirSliceByDirIndex = childDirSliceMap,
-                ChildFileSliceByDirIndex = childFileSliceMap,
-                StatsByDirIndex = statsMap,
-                SubtreeRangeByDirIndex = subtreeRangeMap,
-                DirPreorderByFileIndex = dirPreorderByFileIndex
-            };
+            newRoots[rootId] = BuildRootState(snapshot, globalHashCounts);
         }
 
         _roots = newRoots;
@@ -649,5 +563,544 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
         _roots = state.Roots;
 
         return true;
+    }
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    private void RebuildSingleRootFromSnapshot(RepoSnapshotView repoSnapshot, ScanRootId scanRootId)
+    {
+        _snapshotView = repoSnapshot;
+
+        if (!repoSnapshot.ScanRoots.TryGetValue(scanRootId, out var scanRoot) || scanRoot.IsDeleted)
+        {
+            var oldRoots = _roots;
+            if (!oldRoots.ContainsKey(scanRootId))
+                return;
+
+            var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(oldRoots.Count - 1);
+            foreach (var (k, v) in oldRoots)
+                if (k != scanRootId)
+                    newRoots[k] = v;
+
+            _roots = newRoots;
+            return;
+        }
+
+        if (!repoSnapshot.Snapshots.TryGetValue(scanRootId, out var snapshot))
+            return;
+
+        var globalHashCounts = ComputeGlobalHashCounts(repoSnapshot);
+        var rebuiltRoot = BuildRootState(snapshot, globalHashCounts);
+
+        var roots = _roots;
+        var newRootsMap =
+            new Dictionary<ScanRootId, RootTreeIndexState>(roots.Count + (roots.ContainsKey(scanRootId) ? 0 : 1));
+
+        foreach (var (k, v) in roots)
+            newRootsMap[k] = v;
+
+        newRootsMap[scanRootId] = rebuiltRoot;
+        _roots = newRootsMap;
+    }
+
+    private static Dictionary<HashKey, int> ComputeGlobalHashCounts(RepoSnapshotView repoSnapshot)
+    {
+        var liveRootIds = new HashSet<ScanRootId>(
+            repoSnapshot.ScanRoots.Values.Where(r => !r.IsDeleted).Select(r => r.RootId));
+
+        var globalHashCounts = new Dictionary<HashKey, int>(capacity: 1024);
+
+        foreach (var (rootId, snap) in repoSnapshot.Snapshots)
+        {
+            if (!liveRootIds.Contains(rootId))
+                continue;
+
+            var files = snap.Files;
+            for (int i = 0; i < files.Count; i++)
+            {
+                var f = files[i];
+
+                if (f.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                    continue;
+
+                if (f.Size <= 0)
+                    continue;
+
+                if (f.Hash == HashKey.NotComputed || f.Hash == HashKey.CannotCompute)
+                    continue;
+
+                if (globalHashCounts.TryGetValue(f.Hash, out var c))
+                    globalHashCounts[f.Hash] = c + 1;
+                else
+                    globalHashCounts[f.Hash] = 1;
+            }
+        }
+
+        return globalHashCounts;
+    }
+
+    private static RootTreeIndexState BuildRootState(
+        ScanRootSnapshotView snapshot,
+        Dictionary<HashKey, int> globalHashCounts)
+    {
+        var rootId = snapshot.ScanRootId;
+
+        var dirIdToIndex = new Dictionary<long, int>(capacity: snapshot.Dirs.Count);
+        var rootDirIndices = new List<int>();
+
+        for (int i = 0; i < snapshot.Dirs.Count; i++)
+        {
+            var dir = snapshot.Dirs[i];
+
+            if (dir.Status is ScanEntryStatus.Deleted)
+                continue;
+
+            dirIdToIndex[dir.DirId] = i;
+
+            if (dir.ParentDirId < 0)
+                rootDirIndices.Add(i);
+        }
+
+        var childrenDirsTmp = new Dictionary<int, List<DirHandle>>();
+        var childrenFilesTmp = new Dictionary<int, List<FileHandle>>();
+
+        for (int i = 0; i < snapshot.Dirs.Count; i++)
+        {
+            var dir = snapshot.Dirs[i];
+
+            if (dir.Status is ScanEntryStatus.Deleted)
+                continue;
+
+            if (dir.ParentDirId < 0)
+                continue;
+
+            if (!dirIdToIndex.TryGetValue(dir.ParentDirId, out var parentIndex))
+                continue;
+
+            var childHandle = new DirHandle(rootId, i);
+
+            if (!childrenDirsTmp.TryGetValue(parentIndex, out var list))
+            {
+                list = new List<DirHandle>(capacity: 4);
+                childrenDirsTmp[parentIndex] = list;
+            }
+
+            list.Add(childHandle);
+        }
+
+        for (int i = 0; i < snapshot.Files.Count; i++)
+        {
+            var file = snapshot.Files[i];
+
+            if (file.Status is ScanEntryStatus.Deleted or ScanEntryStatus.None)
+                continue;
+
+            if (!dirIdToIndex.TryGetValue(file.DirId, out var parentIndex))
+                continue;
+
+            var fileHandle = new FileHandle(rootId, i);
+
+            if (!childrenFilesTmp.TryGetValue(parentIndex, out var list))
+            {
+                list = new List<FileHandle>(capacity: 8);
+                childrenFilesTmp[parentIndex] = list;
+            }
+
+            list.Add(fileHandle);
+        }
+
+        var (childDirsPool, childDirSlices) = BuildPoolAndSlices(childrenDirsTmp);
+        var (childFilesPool, childFileSlices) = BuildPoolAndSlices(childrenFilesTmp);
+
+        var childDirSliceMap = childDirSlices.Length == 0
+            ? SegmentedMap<Slice>.Empty
+            : SegmentedMap<Slice>.Build(childDirSlices, gapThreshold: SegmentGapThreshold);
+
+        var childFileSliceMap = childFileSlices.Length == 0
+            ? SegmentedMap<Slice>.Empty
+            : SegmentedMap<Slice>.Build(childFileSlices, gapThreshold: SegmentGapThreshold);
+
+        var statsMap = ComputeRootDirStats(
+            scanRootId: rootId,
+            snapshot: snapshot,
+            childDirsPool: childDirsPool,
+            childDirSliceByDirIndex: childDirSliceMap,
+            childFilesPool: childFilesPool,
+            childFileSliceByDirIndex: childFileSliceMap,
+            rootDirIndices: rootDirIndices,
+            globalHashCounts: globalHashCounts);
+
+        var (subtreeRangeMap, dirPreorderByFileIndex) = BuildPreorderData(
+            snapshot: snapshot,
+            rootDirIndices: rootDirIndices,
+            childrenDirsTmp: childrenDirsTmp,
+            dirIdToIndex: dirIdToIndex);
+
+        return new RootTreeIndexState
+        {
+            ChildDirsPool = childDirsPool,
+            ChildFilesPool = childFilesPool,
+            ChildDirSliceByDirIndex = childDirSliceMap,
+            ChildFileSliceByDirIndex = childFileSliceMap,
+            StatsByDirIndex = statsMap,
+            SubtreeRangeByDirIndex = subtreeRangeMap,
+            DirPreorderByFileIndex = dirPreorderByFileIndex
+        };
+    }
+
+    private void ApplyFileDeleteToRoot(ScanRootSnapshotView snapshot, FileHandle fileHandle)
+    {
+        var oldRoots = _roots;
+        if (!oldRoots.TryGetValue(fileHandle.ScanRootId, out var oldRoot))
+            return;
+
+        if ((uint)fileHandle.Index >= (uint)snapshot.Files.Count)
+            return;
+
+        var file = snapshot.Files[fileHandle.Index];
+        var dirIdToIndex = BuildDirIdToIndex(snapshot);
+
+        if (!dirIdToIndex.TryGetValue(file.DirId, out var parentDirIndex))
+            return;
+
+        var removedFilesByParent = new Dictionary<int, HashSet<FileHandle>>
+        {
+            [parentDirIndex] = [fileHandle]
+        };
+
+        var (newChildFilesPool, newChildFileSlices) = PatchPoolAndSlices(
+            oldRoot.ChildFilesPool,
+            oldRoot.ChildFileSliceByDirIndex,
+            removedParentDirIndices: [],
+            removedItemsByParent: removedFilesByParent);
+
+        var newDirPreorderByFileIndex = PatchDirPreorderByFileIndex(
+            oldRoot.DirPreorderByFileIndex,
+            [fileHandle]);
+
+        // Duplicate stats intentionally not updated exactly here yet.
+        var newStats = PatchStatsForFileDelete(
+            oldRoot.StatsByDirIndex,
+            snapshot,
+            parentDirIndex,
+            file.Size);
+
+        var newRoot = new RootTreeIndexState
+        {
+            ChildDirsPool = oldRoot.ChildDirsPool,
+            ChildFilesPool = newChildFilesPool,
+            ChildDirSliceByDirIndex = oldRoot.ChildDirSliceByDirIndex,
+            ChildFileSliceByDirIndex = newChildFileSlices,
+            StatsByDirIndex = newStats,
+            SubtreeRangeByDirIndex = oldRoot.SubtreeRangeByDirIndex,
+            DirPreorderByFileIndex = newDirPreorderByFileIndex
+        };
+
+        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(oldRoots);
+        newRoots[fileHandle.ScanRootId] = newRoot;
+        _roots = newRoots;
+    }
+
+
+    private void ApplyDirDeleteToRoot(
+        ScanRootSnapshotView snapshot,
+        DirHandle deletedRoot,
+        ReadOnlySpan<FileHandle> deletedFiles,
+        ReadOnlySpan<DirId> deletedDirIds)
+    {
+        var oldRoots = _roots;
+        if (!oldRoots.TryGetValue(deletedRoot.ScanRootId, out var oldRoot))
+            return;
+
+        var dirIdToIndex = BuildDirIdToIndex(snapshot);
+
+        var removedDirIndices = new HashSet<int>();
+        for (var i = 0; i < deletedDirIds.Length; i++)
+        {
+            if (dirIdToIndex.TryGetValue(deletedDirIds[i], out var dirIndex))
+                removedDirIndices.Add(dirIndex);
+        }
+
+        if (removedDirIndices.Count == 0)
+            return;
+
+        // Remove the deleted subtree root from its surviving parent child-dir slice, if any.
+        var removedDirsByParent = new Dictionary<int, HashSet<DirHandle>>();
+        if ((uint)deletedRoot.Index < (uint)snapshot.Dirs.Count)
+        {
+            var deletedRootRecord = snapshot.Dirs[deletedRoot.Index];
+            if (deletedRootRecord.ParentDirId >= 0 &&
+                dirIdToIndex.TryGetValue(deletedRootRecord.ParentDirId, out var parentDirIndex))
+            {
+                removedDirsByParent[parentDirIndex] = [deletedRoot];
+            }
+        }
+
+        var (newChildDirsPool, newChildDirSlices) = PatchPoolAndSlices(
+            oldRoot.ChildDirsPool,
+            oldRoot.ChildDirSliceByDirIndex,
+            removedParentDirIndices: removedDirIndices,
+            removedItemsByParent: removedDirsByParent);
+
+        // For files, whole deleted-dir slices disappear entirely.
+        var (newChildFilesPool, newChildFileSlices) = PatchPoolAndSlices(
+            oldRoot.ChildFilesPool,
+            oldRoot.ChildFileSliceByDirIndex,
+            removedParentDirIndices: removedDirIndices,
+            removedItemsByParent: null);
+
+        var newSubtreeRanges = RemoveRanges(oldRoot.SubtreeRangeByDirIndex, removedDirIndices);
+
+        var newDirPreorderByFileIndex = PatchDirPreorderByFileIndex(
+            oldRoot.DirPreorderByFileIndex,
+            deletedFiles);
+
+        var deletedRootStats = oldRoot.StatsByDirIndex.TryGetValue(deletedRoot.Index, out var subtreeStats)
+            ? subtreeStats
+            : default;
+
+        var newStats = PatchStatsForDirDelete(
+            oldRoot.StatsByDirIndex,
+            snapshot,
+            deletedRoot.Index,
+            removedDirIndices,
+            deletedRootStats);
+
+        var newRoot = new RootTreeIndexState
+        {
+            ChildDirsPool = newChildDirsPool,
+            ChildFilesPool = newChildFilesPool,
+            ChildDirSliceByDirIndex = newChildDirSlices,
+            ChildFileSliceByDirIndex = newChildFileSlices,
+            StatsByDirIndex = newStats,
+            SubtreeRangeByDirIndex = newSubtreeRanges,
+            DirPreorderByFileIndex = newDirPreorderByFileIndex
+        };
+
+        var newRoots = new Dictionary<ScanRootId, RootTreeIndexState>(oldRoots);
+        newRoots[deletedRoot.ScanRootId] = newRoot;
+        _roots = newRoots;
+    }
+
+    private static Dictionary<long, int> BuildDirIdToIndex(ScanRootSnapshotView snapshot)
+    {
+        var map = new Dictionary<long, int>(snapshot.Dirs.Count);
+
+        for (var i = 0; i < snapshot.Dirs.Count; i++)
+        {
+            var dir = snapshot.Dirs[i];
+            if (dir.Status is ScanEntryStatus.None)
+                continue;
+
+            map[dir.DirId] = i;
+        }
+
+        return map;
+    }
+
+    private static (THandle[] Pool, SegmentedMap<Slice> SliceMap) PatchPoolAndSlices<THandle>(
+        THandle[] oldPool,
+        SegmentedMap<Slice> oldSlices,
+        HashSet<int> removedParentDirIndices,
+        Dictionary<int, HashSet<THandle>>? removedItemsByParent)
+        where THandle : unmanaged
+    {
+        if (oldSlices.SegmentCount == 0)
+            return ([], SegmentedMap<Slice>.Empty);
+
+        var newPool = new List<THandle>(oldPool.Length);
+        var sliceItems = new List<KeyValuePair<int, Slice>>();
+
+        foreach (var (dirIndex, slice) in oldSlices.Enumerate())
+        {
+            if (removedParentDirIndices.Contains(dirIndex))
+                continue;
+
+            var start = newPool.Count;
+
+            if (!slice.IsEmpty)
+            {
+                var span = oldPool.AsSpan(slice.Offset, slice.Length);
+
+                if (removedItemsByParent is not null &&
+                    removedItemsByParent.TryGetValue(dirIndex, out var removedSet) &&
+                    removedSet.Count > 0)
+                {
+                    for (var i = 0; i < span.Length; i++)
+                    {
+                        if (!removedSet.Contains(span[i]))
+                            newPool.Add(span[i]);
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        newPool.Add(span[i]);
+                }
+            }
+
+            var len = newPool.Count - start;
+            if (len > 0)
+                sliceItems.Add(new KeyValuePair<int, Slice>(dirIndex, new Slice(start, len)));
+        }
+
+        return
+        (
+            newPool.ToArray(),
+            sliceItems.Count == 0
+                ? SegmentedMap<Slice>.Empty
+                : SegmentedMap<Slice>.Build(sliceItems.ToArray(), gapThreshold: SegmentGapThreshold)
+        );
+    }
+
+    private static SegmentedMap<SubtreeRange> RemoveRanges(
+        SegmentedMap<SubtreeRange> oldRanges,
+        HashSet<int> removedDirIndices)
+    {
+        if (oldRanges.SegmentCount == 0)
+            return SegmentedMap<SubtreeRange>.Empty;
+
+        var items = new List<KeyValuePair<int, SubtreeRange>>();
+
+        foreach (var (dirIndex, range) in oldRanges.Enumerate())
+        {
+            if (!removedDirIndices.Contains(dirIndex))
+                items.Add(new KeyValuePair<int, SubtreeRange>(dirIndex, range));
+        }
+
+        return items.Count == 0
+            ? SegmentedMap<SubtreeRange>.Empty
+            : SegmentedMap<SubtreeRange>.Build(items.ToArray(), gapThreshold: SegmentGapThreshold);
+    }
+
+    private static int[] PatchDirPreorderByFileIndex(int[] oldMap, ReadOnlySpan<FileHandle> deletedFiles)
+    {
+        var clone = (int[])oldMap.Clone();
+
+        for (var i = 0; i < deletedFiles.Length; i++)
+        {
+            var fileIndex = deletedFiles[i].Index;
+            if ((uint)fileIndex < (uint)clone.Length)
+                clone[fileIndex] = -1;
+        }
+
+        return clone;
+    }
+
+    private static SegmentedMap<DirAggregateStats> PatchStatsForFileDelete(
+        SegmentedMap<DirAggregateStats> oldStats,
+        ScanRootSnapshotView snapshot,
+        int parentDirIndex,
+        long deletedFileSize)
+    {
+        var statsDict = oldStats.Enumerate().ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        var current = parentDirIndex;
+        while ((uint)current < (uint)snapshot.Dirs.Count && current >= 0)
+        {
+            if (statsDict.TryGetValue(current, out var stats))
+            {
+                statsDict[current] = stats with
+                {
+                    FileCount = Math.Max(0, stats.FileCount - 1),
+                    TotalBytes = Math.Max(0, stats.TotalBytes - deletedFileSize)
+
+                    // DuplicateFiles / DuplicateBytes intentionally left unchanged for file delete
+                    // until exact global duplicate mutation is implemented.
+                };
+            }
+
+            var parentDirId = snapshot.Dirs[current].ParentDirId;
+            current = parentDirId >= 0
+                ? TryGetDirIndexByDirId(snapshot, parentDirId)
+                : -1;
+        }
+
+        return statsDict.Count == 0
+            ? SegmentedMap<DirAggregateStats>.Empty
+            : SegmentedMap<DirAggregateStats>.Build(statsDict.ToArray(), gapThreshold: SegmentGapThreshold);
+    }
+
+        private static SegmentedMap<DirAggregateStats> PatchStatsForDirDelete(
+        SegmentedMap<DirAggregateStats> oldStats,
+        ScanRootSnapshotView snapshot,
+        int deletedRootIndex,
+        HashSet<int> removedDirIndices,
+        DirAggregateStats deletedRootStats)
+    {
+        var statsDict = new Dictionary<int, DirAggregateStats>();
+
+        foreach (var (dirIndex, stats) in oldStats.Enumerate())
+        {
+            if (!removedDirIndices.Contains(dirIndex))
+                statsDict[dirIndex] = stats;
+        }
+
+        if ((uint)deletedRootIndex >= (uint)snapshot.Dirs.Count)
+        {
+            return statsDict.Count == 0
+                ? SegmentedMap<DirAggregateStats>.Empty
+                : SegmentedMap<DirAggregateStats>.Build(statsDict.ToArray(), gapThreshold: SegmentGapThreshold);
+        }
+
+        var deletedRoot = snapshot.Dirs[deletedRootIndex];
+        if (deletedRoot.ParentDirId < 0)
+        {
+            return statsDict.Count == 0
+                ? SegmentedMap<DirAggregateStats>.Empty
+                : SegmentedMap<DirAggregateStats>.Build(statsDict.ToArray(), gapThreshold: SegmentGapThreshold);
+        }
+
+        var current = TryGetDirIndexByDirId(snapshot, deletedRoot.ParentDirId);
+
+        var removedDirCount = deletedRootStats.DirCount + 1;
+        var removedFileCount = deletedRootStats.FileCount;
+        var removedBytes = deletedRootStats.TotalBytes;
+        var removedDuplicateFiles = deletedRootStats.DuplicateFiles;
+        var removedDuplicateBytes = deletedRootStats.DuplicateBytes;
+
+        while ((uint)current < (uint)snapshot.Dirs.Count && current >= 0)
+        {
+            if (statsDict.TryGetValue(current, out var stats))
+            {
+                statsDict[current] = stats with
+                {
+                    DirCount = Math.Max(0, stats.DirCount - removedDirCount),
+                    FileCount = Math.Max(0, stats.FileCount - removedFileCount),
+                    TotalBytes = Math.Max(0, stats.TotalBytes - removedBytes),
+
+                    // Partial duplicate handling: subtract the deleted subtree contribution.
+                    // This is not globally exact yet when hash counts cross 2->1 elsewhere.
+                    DuplicateFiles = Math.Max(0, stats.DuplicateFiles - removedDuplicateFiles),
+                    DuplicateBytes = Math.Max(0, stats.DuplicateBytes - removedDuplicateBytes),
+                };
+
+
+
+                statsDict[current] = stats;
+            }
+
+            var parentDirId = snapshot.Dirs[current].ParentDirId;
+            current = parentDirId >= 0
+                ? TryGetDirIndexByDirId(snapshot, parentDirId)
+                : -1;
+        }
+
+        return statsDict.Count == 0
+            ? SegmentedMap<DirAggregateStats>.Empty
+            : SegmentedMap<DirAggregateStats>.Build(statsDict.ToArray(), gapThreshold: SegmentGapThreshold);
+    }
+
+    private static int TryGetDirIndexByDirId(ScanRootSnapshotView snapshot, long dirId)
+    {
+        for (var i = 0; i < snapshot.Dirs.Count; i++)
+        {
+            if (snapshot.Dirs[i].DirId == dirId)
+                return i;
+        }
+
+        return -1;
     }
 }
