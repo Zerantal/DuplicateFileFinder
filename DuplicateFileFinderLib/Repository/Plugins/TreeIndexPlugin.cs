@@ -1076,10 +1076,6 @@ public sealed class TreeIndexPlugin : ChannelRepoPlugin, ITreeIndexReadModel
                     DuplicateFiles = Math.Max(0, stats.DuplicateFiles - removedDuplicateFiles),
                     DuplicateBytes = Math.Max(0, stats.DuplicateBytes - removedDuplicateBytes),
                 };
-
-
-
-                statsDict[current] = stats;
             }
 
             var parentDirId = snapshot.Dirs[current].ParentDirId;
