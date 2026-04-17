@@ -63,7 +63,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     private void ScanRootRemovedEventHandler(object? sender, RepoScanRootRemovedEvent e)
     {
-        RemoveScanRootFromRows(e.ScanRootId);
+        RemoveScanRootFromRows(e.ScanRootIdValue);
     }
 
     // Visible, virtualized rows

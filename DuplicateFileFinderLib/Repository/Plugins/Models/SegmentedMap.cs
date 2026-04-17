@@ -5,7 +5,7 @@ using MemoryPack;
 namespace DuplicateFileFinderLib.Repository.Plugins.Models;
 
 /// <summary>
-/// A long->T map optimized for fast (de)serialization:
+/// A int->T map optimized for fast (de)serialization:
 /// persisted as a sorted set of dense-ish segments (arrays + presence bitmap),
 /// avoiding Dictionary construction/insertion costs.
 /// </summary>
@@ -16,10 +16,9 @@ public sealed partial class SegmentedMap<T>
     /// <summary>
     /// Sorted by StartId ascending.
     /// </summary>
-    public required IntMapSegment<T>[] Segments { get; init; } = [];
+    public required MapSegment<T>[] Segments { get; init; } = [];
 
-    [MemoryPackIgnore]
-    public int SegmentCount => Segments.Length;
+    [MemoryPackIgnore] public int SegmentCount => Segments.Length;
 
     public static SegmentedMap<T> Empty { get; } = new() { Segments = [] };
 
@@ -41,11 +40,10 @@ public sealed partial class SegmentedMap<T>
 
         Array.Sort(sorted, static (a, b) => a.Key.CompareTo(b.Key));
 
-        var segments = new List<IntMapSegment<T>>(capacity: Math.Min(1024, sorted.Length));
+        var segments = new List<MapSegment<T>>(capacity: Math.Min(1024, sorted.Length));
 
         int segStart = sorted[0].Key;
         int segEnd = segStart;
-
         int segFirstIndex = 0;
 
         for (int i = 1; i < sorted.Length; i++)
@@ -63,7 +61,7 @@ public sealed partial class SegmentedMap<T>
             // Split if gap is too large.
             if (gap > gapThreshold)
             {
-                segments.Add(IntMapSegment<T>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
+                segments.Add(MapSegment<T>.BuildSegment(sorted, segFirstIndex, i - 1, segStart, segEnd));
                 segFirstIndex = i;
                 segStart = k;
                 segEnd = k;
@@ -75,7 +73,7 @@ public sealed partial class SegmentedMap<T>
             }
         }
 
-        segments.Add(IntMapSegment<T>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
+        segments.Add(MapSegment<T>.BuildSegment(sorted, segFirstIndex, sorted.Length - 1, segStart, segEnd));
 
         return new SegmentedMap<T> { Segments = segments.ToArray() };
     }
@@ -117,6 +115,144 @@ public sealed partial class SegmentedMap<T>
 
         value = seg.Values[offset];
         return true;
+    }
+
+    /// <summary>
+    /// Returns a new map with <paramref name="key"/> removed.
+    /// If the key is not present, returns the current instance.
+    /// </summary>
+    public SegmentedMap<T> Remove(int key) => Remove((long)key);
+
+    /// <summary>
+    /// Returns a new map with <paramref name="key"/> removed.
+    /// If the key is not present, returns the current instance.
+    /// </summary>
+    public SegmentedMap<T> Remove(long key)
+    {
+        var segIndex = FindSegmentIndexForKey(key);
+        if (segIndex < 0)
+            return this;
+
+        var seg = Segments[segIndex];
+        long offsetL = key - seg.StartId;
+        if ((ulong)offsetL >= (ulong)seg.Values.Length)
+            return this;
+
+        int offset = (int)offsetL;
+        if (!seg.IsPresent(offset))
+            return this;
+
+        var newBits = (ulong[])seg.PresentBits.Clone();
+        ClearBit(newBits, offset);
+
+        // If that was the last live entry in the segment, drop the whole segment.
+        if (!HasAnyBitSet(newBits))
+        {
+            if (Segments.Length == 1)
+                return Empty;
+
+            var newSegmentsWithoutTarget = new MapSegment<T>[Segments.Length - 1];
+            if (segIndex > 0)
+                Array.Copy(Segments, 0, newSegmentsWithoutTarget, 0, segIndex);
+
+            if (segIndex < Segments.Length - 1)
+            {
+                Array.Copy(
+                    Segments,
+                    segIndex + 1,
+                    newSegmentsWithoutTarget,
+                    segIndex,
+                    Segments.Length - segIndex - 1);
+            }
+
+            return new SegmentedMap<T> { Segments = newSegmentsWithoutTarget };
+        }
+
+        var newSeg = new MapSegment<T> { StartId = seg.StartId, Values = seg.Values, PresentBits = newBits };
+
+        var newSegments = (MapSegment<T>[])Segments.Clone();
+        newSegments[segIndex] = newSeg;
+
+        return new SegmentedMap<T> { Segments = newSegments };
+    }
+
+    public SegmentedMap<T> RemoveMany(IEnumerable<int> keys)
+    {
+        if (keys is null) throw new ArgumentNullException(nameof(keys));
+
+        var segs = Segments;
+        if (segs.Length == 0)
+            return this;
+
+        Dictionary<int, HashSet<int>>? offsetsBySegment = null;
+
+        foreach (var key in keys)
+        {
+            var segIndex = FindSegmentIndexForKey(key);
+            if (segIndex < 0)
+                continue;
+
+            var seg = segs[segIndex];
+            long offsetL = (long)key - seg.StartId;
+            if ((ulong)offsetL >= (ulong)seg.Values.Length)
+                continue;
+
+            int offset = (int)offsetL;
+            if (!seg.IsPresent(offset))
+                continue;
+
+            offsetsBySegment ??= new Dictionary<int, HashSet<int>>();
+            if (!offsetsBySegment.TryGetValue(segIndex, out var offsets))
+            {
+                offsets = new HashSet<int>();
+                offsetsBySegment[segIndex] = offsets;
+            }
+
+            offsets.Add(offset);
+        }
+
+        if (offsetsBySegment is null || offsetsBySegment.Count == 0)
+            return this;
+
+        var newSegments = new List<MapSegment<T>>(segs.Length);
+        var anyChanged = false;
+
+        for (int segIndex = 0; segIndex < segs.Length; segIndex++)
+        {
+            var seg = segs[segIndex];
+
+            if (!offsetsBySegment.TryGetValue(segIndex, out var offsets))
+            {
+                newSegments.Add(seg);
+                continue;
+            }
+
+            var newBits = (ulong[])seg.PresentBits.Clone();
+
+            foreach (var offset in offsets)
+                ClearBit(newBits, offset);
+
+            if (AreEqual(seg.PresentBits, newBits))
+            {
+                newSegments.Add(seg);
+                continue;
+            }
+
+            anyChanged = true;
+
+            if (!HasAnyBitSet(newBits))
+                continue;
+
+            newSegments.Add(new MapSegment<T> { StartId = seg.StartId, Values = seg.Values, PresentBits = newBits });
+        }
+
+        if (!anyChanged)
+            return this;
+
+        if (newSegments.Count == 0)
+            return Empty;
+
+        return new SegmentedMap<T> { Segments = newSegments.ToArray() };
     }
 
     /// <summary>
@@ -183,5 +319,40 @@ public sealed partial class SegmentedMap<T>
             return -1;
 
         return best;
+    }
+
+    private static void ClearBit(ulong[] bits, int index)
+    {
+        int word = index >> 6;
+        int bit = index & 63;
+        bits[word] &= ~(1UL << bit);
+    }
+
+    private static bool HasAnyBitSet(ulong[] bits)
+    {
+        for (int i = 0; i < bits.Length; i++)
+        {
+            if (bits[i] != 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool AreEqual(ulong[] a, ulong[] b)
+    {
+        if (ReferenceEquals(a, b))
+            return true;
+
+        if (a.Length != b.Length)
+            return false;
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i])
+                return false;
+        }
+
+        return true;
     }
 }

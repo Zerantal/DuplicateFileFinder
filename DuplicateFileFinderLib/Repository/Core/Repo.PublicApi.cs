@@ -137,7 +137,7 @@ public sealed partial class Repo
         // NOTE: We intentionally do NOT delete the on-disk scanroot snapshot file here.
         // A later prune/compaction operation can reclaim these files.
 
-        PublishEvent(new RepoScanRootRemovedEvent { Generation = generation, ScanRootId = scanRootId });
+        PublishEvent(new RepoScanRootRemovedEvent(Generation, scanRootId));
 
         return generation;
     }
@@ -490,18 +490,15 @@ public sealed partial class Repo
 
         // Commit updated snapshot and publish a full snapshot-replaced event so
         // index plugins rebuild and RepoHost raises IndexesRebuilt.
-        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
-        PublishEvent(new ScanRootSnapshotReplacedEvent
+        PublishEvent(new RepoFileDeletedEvent
         {
             Generation = gen,
-            ScanRootId = updated.ScanRootId,
-            RepoSnapshotView = snapshotView,
-            Reason = RepoSnapshotCommitReason.Mutation
+            File = file,
+            FileId = existing.FileId,
+            ScanRootId = file.ScanRootId
         });
-
-        // Optional secondary notification for any lightweight UI listeners.
-        PublishEvent(new RepoFileDeletedEvent { Generation = gen, File = file });
 
         return DeleteResult.Ok(gen, file.ScanRootId, deletedFiles: 1, deletedDirs: 0);
     }
@@ -534,8 +531,8 @@ public sealed partial class Repo
         var newDirs = (DirRecordV2[])snap.Dirs.Clone();
         var newFiles = (FileRecordV2[])snap.Files.Clone();
 
-        int deletedDirs = 0;
-        int deletedFiles = 0;
+        var deletedDirIds = new List<DirId>(subtreeDirIds.Count);
+        var deletedFiles = new List<(FileId, FileHandle)>();
 
         // Mark dirs
         for (int i = 0; i < newDirs.Length; i++)
@@ -550,7 +547,7 @@ public sealed partial class Repo
                 continue;
 
             newDirs[i] = d with { Status = ScanEntryStatus.Deleted };
-            deletedDirs++;
+            deletedDirIds.Add(d.DirId);
         }
 
         // Mark files whose DirId is in subtree
@@ -566,30 +563,24 @@ public sealed partial class Repo
                 continue;
 
             newFiles[i] = f with { Status = ScanEntryStatus.Deleted };
-            deletedFiles++;
+            var fileHandle = new FileHandle(dir.ScanRootId, i);
+            deletedFiles.Add((f.FileId, fileHandle));
         }
 
         var updated = snap with { Dirs = newDirs, Files = newFiles };
 
-        var (gen, snapshotView) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
-
-        PublishEvent(new ScanRootSnapshotReplacedEvent
-        {
-            Generation = gen,
-            ScanRootId = updated.ScanRootId,
-            RepoSnapshotView = snapshotView,
-            Reason = RepoSnapshotCommitReason.Mutation
-        });
+        var (gen, _) = await CommitSnapshot_NoEventAsync(updated, ct).ConfigureAwait(false);
 
         PublishEvent(new RepoDirDeletedEvent
         {
+            ScanRootId = dir.ScanRootId,
             Generation = gen,
             Dir = dir,
-            DeletedDirs = deletedDirs,
-            DeletedFiles = deletedFiles
+            DeletedDirIds = deletedDirIds.ToArray(),
+            DeletedFiles = deletedFiles.ToArray()
         });
 
-        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles, deletedDirs);
+        return DeleteResult.Ok(gen, dir.ScanRootId, deletedFiles.Count, deletedDirIds.Count);
     }
 
     private static HashSet<long> CollectDirSubtreeIds(DirRecordV2[] dirs, long rootDirId, CancellationToken ct)

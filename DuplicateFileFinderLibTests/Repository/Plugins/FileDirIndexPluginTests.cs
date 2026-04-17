@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
-using DuplicateFileFinderLib.Repository.Plugins;
+using DuplicateFileFinderLib.Repository.Plugins.FileDir;
 using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using DuplicateFileFinderLibTests.TestUtils;
@@ -27,11 +27,7 @@ public sealed class FileDirIndexPluginTests
 
             var snapshot = MakeTwoRootSnapshot();
 
-            plugin.Post(new BootstrapEvent
-            {
-                Generation = 1,
-                RepoSnapshotView = snapshot
-            });
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
 
             await plugin.WhenReadyAsync(CancellationToken.None);
 
@@ -76,11 +72,7 @@ public sealed class FileDirIndexPluginTests
             {
                 var snapshot1 = MakeTwoRootSnapshot();
 
-                plugin1.Post(new BootstrapEvent
-                {
-                    Generation = 1,
-                    RepoSnapshotView = snapshot1
-                });
+                plugin1.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot1 });
 
                 await plugin1.WhenReadyAsync(TestContext.Current.CancellationToken);
 
@@ -94,11 +86,7 @@ public sealed class FileDirIndexPluginTests
             {
                 var differentSnapshot = MakeDifferentSnapshotSameRoots();
 
-                plugin2.Post(new BootstrapEvent
-                {
-                    Generation = 1,
-                    RepoSnapshotView = differentSnapshot
-                });
+                plugin2.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = differentSnapshot });
 
                 await plugin2.WhenReadyAsync(TestContext.Current.CancellationToken);
 
@@ -127,11 +115,7 @@ public sealed class FileDirIndexPluginTests
             // Build persisted state at (gen=1, lastLogSeq=9)
             await using (var plugin1 = new FileDirIndexPlugin(dir))
             {
-                plugin1.Post(new BootstrapEvent
-                {
-                    Generation = 1,
-                    RepoSnapshotView = MakeTwoRootSnapshot()
-                });
+                plugin1.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = MakeTwoRootSnapshot() });
                 await plugin1.WhenReadyAsync(CancellationToken.None);
             }
 
@@ -143,7 +127,7 @@ public sealed class FileDirIndexPluginTests
 
                 plugin2.Post(new BootstrapEvent
                 {
-                    Generation = 2,        // changed
+                    Generation = 2, // changed
                     RepoSnapshotView = newSnapshot
                 });
 
@@ -177,11 +161,7 @@ public sealed class FileDirIndexPluginTests
 
             var snapshot = MakeHierarchicalSnapshot();
 
-            plugin.Post(new BootstrapEvent
-            {
-                Generation = 1,
-                RepoSnapshotView = snapshot
-            });
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
 
             await plugin.WhenReadyAsync(CancellationToken.None);
 
@@ -236,11 +216,7 @@ public sealed class FileDirIndexPluginTests
         {
             await using var plugin = new FileDirIndexPlugin(dir);
 
-            plugin.Post(new BootstrapEvent
-            {
-                Generation = 1,
-                RepoSnapshotView = MakeHierarchicalSnapshot()
-            });
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = MakeHierarchicalSnapshot() });
 
             await plugin.WhenReadyAsync(CancellationToken.None);
 
@@ -261,11 +237,7 @@ public sealed class FileDirIndexPluginTests
         {
             await using var plugin = new FileDirIndexPlugin(dir);
 
-            plugin.Post(new BootstrapEvent
-            {
-                Generation = 1,
-                RepoSnapshotView = MakeTwoRootSnapshot()
-            });
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = MakeTwoRootSnapshot() });
 
             await plugin.WhenReadyAsync(CancellationToken.None);
 
@@ -296,6 +268,183 @@ public sealed class FileDirIndexPluginTests
         }
     }
 
+    [Fact]
+    public async Task BootstrapEvent_IndexesOnlyLiveEntries_AndCountsOnlyLiveEntries()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndexPlugin(dir);
+
+            var snapshot = MakeSnapshotWithDeletedEntries();
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            // Live entries present
+            Assert.True(plugin.TryGetDir(101, out var d101));
+            Assert.Equal(new DirHandle(1, 0), d101);
+
+            Assert.True(plugin.TryGetFile(1001, out var f1001));
+            Assert.Equal(new FileHandle(1, 0), f1001);
+
+            // Deleted entries absent
+            Assert.False(plugin.TryGetDir(102, out _));
+            Assert.False(plugin.TryGetFile(1002, out _));
+
+            Assert.Equal(1, plugin.DirCount);
+            Assert.Equal(1, plugin.FileCount);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RepoFileDeletedEvent_RemovesFileMapping_AndDecrementsCounts()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndexPlugin(dir);
+
+            var snapshot = MakeTwoFilesOneDirSnapshot();
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.Equal(1, plugin.DirCount);
+            Assert.Equal(2, plugin.FileCount);
+            Assert.True(plugin.TryGetFile(1001, out _));
+            Assert.True(plugin.TryGetFilePathById(1001, out _));
+
+            plugin.Post(new RepoFileDeletedEvent
+            {
+                Generation = 2,
+                ScanRootId = 1,
+                File = new FileHandle(1, 0),
+                FileId = 1001
+            });
+
+            await AsyncUtil.WaitForConditionAsync(
+                () => !plugin.TryGetFile(1001, out _) && plugin.FileCount == 1,
+                TimeSpan.FromSeconds(2));
+
+            Assert.False(plugin.TryGetFile(1001, out _));
+            Assert.False(plugin.TryGetFilePathById(1001, out _));
+
+            Assert.True(plugin.TryGetFile(1002, out var remaining));
+            Assert.Equal(new FileHandle(1, 1), remaining);
+
+            Assert.Equal(1, plugin.DirCount);
+            Assert.Equal(1, plugin.FileCount);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RepoDirDeletedEvent_RemovesDirAndFiles_AndDecrementsCounts()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndexPlugin(dir);
+
+            var snapshot = MakeDirDeleteSnapshot();
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            Assert.Equal(3, plugin.DirCount);
+            Assert.Equal(2, plugin.FileCount);
+
+            Assert.True(plugin.TryGetDir(101, out _));
+            Assert.True(plugin.TryGetDir(102, out _));
+            Assert.True(plugin.TryGetDir(103, out _));
+            Assert.True(plugin.TryGetFile(1001, out _));
+            Assert.True(plugin.TryGetFile(1002, out _));
+
+            plugin.Post(new RepoDirDeletedEvent
+            {
+                Generation = 2,
+                ScanRootId = 1,
+                Dir = new DirHandle(1, 1),
+                DeletedDirIds = [102, 103],
+                DeletedFiles = [(1001, new FileHandle(1, 1)), (1002, new FileHandle(1, 2))]
+            });
+
+            await AsyncUtil.WaitForConditionAsync(
+                () =>
+                    plugin is { DirCount: 1, FileCount: 0 } &&
+                    !plugin.TryGetDir(102, out _) &&
+                    !plugin.TryGetDir(103, out _) &&
+                    !plugin.TryGetFile(1001, out _) &&
+                    !plugin.TryGetFile(1002, out _),
+                TimeSpan.FromSeconds(2));
+
+            // Root remains
+            Assert.True(plugin.TryGetDir(101, out var rootHandle));
+            Assert.Equal(new DirHandle(1, 0), rootHandle);
+
+            // Deleted subtree removed
+            Assert.False(plugin.TryGetDir(102, out _));
+            Assert.False(plugin.TryGetDir(103, out _));
+            Assert.False(plugin.TryGetFile(1001, out _));
+            Assert.False(plugin.TryGetFile(1002, out _));
+
+            Assert.Equal(1, plugin.DirCount);
+            Assert.Equal(0, plugin.FileCount);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteEvents_AreIdempotent_WhenIdsAlreadyAbsent()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            await using var plugin = new FileDirIndexPlugin(dir);
+
+            var snapshot = MakeTwoFilesOneDirSnapshot();
+
+            plugin.Post(new BootstrapEvent { Generation = 1, RepoSnapshotView = snapshot });
+
+            await plugin.WhenReadyAsync(CancellationToken.None);
+
+            plugin.Post(new RepoFileDeletedEvent { Generation = 2, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 });
+
+            await AsyncUtil.WaitForConditionAsync(
+                () => !plugin.TryGetFile(1001, out _) && plugin.FileCount == 1,
+                TimeSpan.FromSeconds(2));
+
+            // Same delete again should not decrement counts further
+            plugin.Post(new RepoFileDeletedEvent { Generation = 3, ScanRootId = 1, File = new FileHandle(1, 0), FileId = 1001 });
+
+            await AsyncUtil.WaitForConditionAsync(
+                () => plugin.FileCount == 1,
+                TimeSpan.FromSeconds(2));
+
+            Assert.Equal(1, plugin.FileCount);
+            Assert.Equal(1, plugin.DirCount);
+            Assert.True(plugin.TryGetFile(1002, out _));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ---------------- Helpers ----------------
 
     private static string CreateTempDir()
@@ -311,13 +460,13 @@ public sealed class FileDirIndexPluginTests
         var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [1] = MakeRoot(
-                    scanRootId: 1,
-                    dirIds: [101, 102],
-                    fileIds: [1001]),
+                scanRootId: 1,
+                dirIds: [101, 102],
+                fileIds: [1001]),
             [2] = MakeRoot(
-                    scanRootId: 2,
-                    dirIds: [201],
-                    fileIds: [2001])
+                scanRootId: 2,
+                dirIds: [201],
+                fileIds: [2001])
         };
 
         return new RepoSnapshotView
@@ -332,13 +481,13 @@ public sealed class FileDirIndexPluginTests
         var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
             [1] = MakeRoot(
-                    scanRootId: 1,
-                    dirIds: [99901], // completely different IDs
-                    fileIds: [999001]),
+                scanRootId: 1,
+                dirIds: [99901], // completely different IDs
+                fileIds: [999001]),
             [2] = MakeRoot(
-                    scanRootId: 2,
-                    dirIds: [99902],
-                    fileIds: [999002])
+                scanRootId: 2,
+                dirIds: [99902],
+                fileIds: [999002])
         };
 
         return new RepoSnapshotView
@@ -350,10 +499,7 @@ public sealed class FileDirIndexPluginTests
 
     private static RepoSnapshotView MakeHierarchicalSnapshot()
     {
-        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
-        {
-            [1] = MakeHierarchicalRoot(scanRootId: 1)
-        };
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView> { [1] = MakeHierarchicalRoot(scanRootId: 1) };
 
         return new RepoSnapshotView
         {
@@ -404,13 +550,7 @@ public sealed class FileDirIndexPluginTests
             };
         }
 
-        return new ScanRootSnapshotView
-        {
-            ScanRootId = scanRootId,
-            StringPool = pool,
-            Dirs = dirs,
-            Files = files
-        };
+        return new ScanRootSnapshotView { ScanRootId = scanRootId, StringPool = pool, Dirs = dirs, Files = files };
     }
 
     private static ScanRootSnapshotView MakeHierarchicalRoot(ScanRootId scanRootId)
@@ -424,7 +564,7 @@ public sealed class FileDirIndexPluginTests
             {
                 DirId = 101,
                 ParentDirId = -1,
-                NameStrIdx = 0,              // "a"
+                NameStrIdx = 0, // "a"
                 ErrorMessageStrIdx = 3,
                 Status = ScanEntryStatus.Enumerated,
                 LastSeenScanSequence = 1,
@@ -435,7 +575,7 @@ public sealed class FileDirIndexPluginTests
             {
                 DirId = 102,
                 ParentDirId = 101,
-                NameStrIdx = 1,              // "b"
+                NameStrIdx = 1, // "b"
                 ErrorMessageStrIdx = 3,
                 Status = ScanEntryStatus.Enumerated,
                 LastSeenScanSequence = 1,
@@ -450,7 +590,7 @@ public sealed class FileDirIndexPluginTests
             {
                 FileId = 1001,
                 DirId = 102,
-                NameStrIdx = 2,              // "f.txt"
+                NameStrIdx = 2, // "f.txt"
                 ErrorMessageStrIdx = 3,
                 Size = 1,
                 Hash = HashKey.NotComputed,
@@ -461,12 +601,204 @@ public sealed class FileDirIndexPluginTests
             }
         };
 
-        return new ScanRootSnapshotView
+        return new ScanRootSnapshotView { ScanRootId = scanRootId, StringPool = pool, Dirs = dirs, Files = files };
+    }
+
+    private static RepoSnapshotView MakeSnapshotWithDeletedEntries()
+    {
+        var pool = PackedStringPool.FromStrings(["live-dir", "deleted-dir", "live-file", "deleted-file", ""]);
+
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
         {
-            ScanRootId = scanRootId,
-            StringPool = pool,
-            Dirs = dirs,
-            Files = files
+            [1] = new ScanRootSnapshotView
+            {
+                ScanRootId = 1,
+                StringPool = pool,
+                Dirs =
+                [
+                    new DirRecordV2
+                    {
+                        DirId = 101,
+                        ParentDirId = -1,
+                        NameStrIdx = 0,
+                        ErrorMessageStrIdx = 4,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new DirRecordV2
+                    {
+                        DirId = 102,
+                        ParentDirId = -1,
+                        NameStrIdx = 1,
+                        ErrorMessageStrIdx = 4,
+                        Status = ScanEntryStatus.Deleted,
+                        LastSeenScanSequence = 1
+                    }
+                ],
+                Files =
+                [
+                    new FileRecordV2
+                    {
+                        FileId = 1001,
+                        DirId = 101,
+                        NameStrIdx = 2,
+                        ErrorMessageStrIdx = 4,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new FileRecordV2
+                    {
+                        FileId = 1002,
+                        DirId = 101,
+                        NameStrIdx = 3,
+                        ErrorMessageStrIdx = 4,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Deleted,
+                        LastSeenScanSequence = 1
+                    }
+                ]
+            }
+        };
+
+        return new RepoSnapshotView
+        {
+            Snapshots = snapshots,
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
+        };
+    }
+
+    private static RepoSnapshotView MakeTwoFilesOneDirSnapshot()
+    {
+        var pool = PackedStringPool.FromStrings(["root", "f1.txt", "f2.txt", ""]);
+
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
+        {
+            [1] = new ScanRootSnapshotView
+            {
+                ScanRootId = 1,
+                StringPool = pool,
+                Dirs =
+                [
+                    new DirRecordV2
+                    {
+                        DirId = 101,
+                        ParentDirId = -1,
+                        NameStrIdx = 0,
+                        ErrorMessageStrIdx = 3,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    }
+                ],
+                Files =
+                [
+                    new FileRecordV2
+                    {
+                        FileId = 1001,
+                        DirId = 101,
+                        NameStrIdx = 1,
+                        ErrorMessageStrIdx = 3,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new FileRecordV2
+                    {
+                        FileId = 1002,
+                        DirId = 101,
+                        NameStrIdx = 2,
+                        ErrorMessageStrIdx = 3,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    }
+                ]
+            }
+        };
+
+        return new RepoSnapshotView
+        {
+            Snapshots = snapshots,
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
+        };
+    }
+
+    private static RepoSnapshotView MakeDirDeleteSnapshot()
+    {
+        var pool = PackedStringPool.FromStrings(["root", "child", "grandchild", "a.txt", "b.txt", ""]);
+
+        var snapshots = new Dictionary<ScanRootId, ScanRootSnapshotView>
+        {
+            [1] = new ScanRootSnapshotView
+            {
+                ScanRootId = 1,
+                StringPool = pool,
+                Dirs =
+                [
+                    new DirRecordV2
+                    {
+                        DirId = 101,
+                        ParentDirId = -1,
+                        NameStrIdx = 0,
+                        ErrorMessageStrIdx = 5,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new DirRecordV2
+                    {
+                        DirId = 102,
+                        ParentDirId = 101,
+                        NameStrIdx = 1,
+                        ErrorMessageStrIdx = 5,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new DirRecordV2
+                    {
+                        DirId = 103,
+                        ParentDirId = 102,
+                        NameStrIdx = 2,
+                        ErrorMessageStrIdx = 5,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    }
+                ],
+                Files =
+                [
+                    new FileRecordV2
+                    {
+                        FileId = 1001,
+                        DirId = 102,
+                        NameStrIdx = 3,
+                        ErrorMessageStrIdx = 5,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    },
+                    new FileRecordV2
+                    {
+                        FileId = 1002,
+                        DirId = 103,
+                        NameStrIdx = 4,
+                        ErrorMessageStrIdx = 5,
+                        Size = 1,
+                        Hash = HashKey.NotComputed,
+                        Status = ScanEntryStatus.Enumerated,
+                        LastSeenScanSequence = 1
+                    }
+                ]
+            }
+        };
+
+        return new RepoSnapshotView
+        {
+            Snapshots = snapshots,
+            ScanRoots = RepoUtil.MakeScanRootsFromSnapshots(snapshots)
         };
     }
 }
