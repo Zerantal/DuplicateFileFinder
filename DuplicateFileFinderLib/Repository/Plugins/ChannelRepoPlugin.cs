@@ -15,8 +15,8 @@ public abstract class ChannelRepoPlugin(int capacity = 1024)
 
     public void Post(RepoEvent evt) => TryPost(evt);
 
-    protected virtual ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
-        => ProcessItemAsync(evt, ct);
+    protected virtual ValueTask<bool> TryHandleCustomEventAsync(RepoEvent evt, CancellationToken ct)
+        => ValueTask.FromResult(false);
 
     protected sealed override ValueTask ProcessItemAsync(RepoEvent evt, CancellationToken ct)
         => HandleEventWithTimingAsync(evt, ct);
@@ -25,36 +25,43 @@ public abstract class ChannelRepoPlugin(int capacity = 1024)
     {
         using (TimingLog.Start($"Processing {evt.GetType().Name} ({GetType().Name})"))
         {
-            switch (evt)
+            if (await TryHandleCustomEventAsync(evt, ct).ConfigureAwait(false))
             {
-                case BootstrapEvent bootstrap:
-                    await OnBootstrapEventAsync(bootstrap, ct).ConfigureAwait(false);
-                    SignalReady();
-                    break;
+                // handled by derived class
+            }
+            else
+            {
+                switch (evt)
+                {
+                    case BootstrapEvent bootstrap:
+                        await OnBootstrapEventAsync(bootstrap, ct).ConfigureAwait(false);
+                        SignalReady();
+                        break;
 
-                case ScanRunFinalisedEvent finalised:
-                    await OnScanRunFinalisedEventAsync(finalised, ct).ConfigureAwait(false);
-                    break;
+                    case ScanRunFinalisedEvent finalised:
+                        await OnScanRunFinalisedEventAsync(finalised, ct).ConfigureAwait(false);
+                        break;
 
-                case ScanRootSnapshotReplacedEvent replaced:
-                    await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
-                    break;
+                    case ScanRootSnapshotReplacedEvent replaced:
+                        await OnScanRootSnapshotReplacedEventAsync(replaced, ct).ConfigureAwait(false);
+                        break;
 
-                case RepoFileDeletedEvent fileDeleted:
-                    await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
-                    break;
+                    case RepoFileDeletedEvent fileDeleted:
+                        await OnRepoFileDeletedEventAsync(fileDeleted, ct).ConfigureAwait(false);
+                        break;
 
-                case RepoDirDeletedEvent dirDeleted:
-                    await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
-                    break;
+                    case RepoDirDeletedEvent dirDeleted:
+                        await OnRepoDirDeletedEventAsync(dirDeleted, ct).ConfigureAwait(false);
+                        break;
 
-                case RepoScanRootRemovedEvent rootRemoved:
-                    await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
-                    break;
+                    case RepoScanRootRemovedEvent rootRemoved:
+                        await OnRepoScanRootRemovedEventAsync(rootRemoved, ct).ConfigureAwait(false);
+                        break;
 
-                case ScanRootMetaChangedEvent metaChanged:
-                    await OnScanRootMetaChangedEventAsync(metaChanged, ct).ConfigureAwait(false);
-                    break;
+                    case ScanRootMetaChangedEvent metaChanged:
+                        await OnScanRootMetaChangedEventAsync(metaChanged, ct).ConfigureAwait(false);
+                        break;
+                }
             }
         }
 

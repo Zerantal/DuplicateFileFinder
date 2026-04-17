@@ -19,6 +19,7 @@ public sealed partial class FileDirIndexPlugin : ChannelRepoPlugin, IFileDirRead
     // Cached snapshot view used for path decoding
     private volatile RepoSnapshotView? _snapshotView;
 
+
     // Persisted position (only mutated on bootstrap/worker thread)
     private long _lastIndexedGeneration;
 

@@ -60,29 +60,24 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
     // Event handlers
     // ---------------------------------------------------------------------
 
-    protected override async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
+    protected override ValueTask<bool> TryHandleCustomEventAsync(RepoEvent evt, CancellationToken ct)
     {
-        if (evt is MaterializeAndSaveEvent materialize)
-        {
-            using (TimingLog.Start($"Processing {evt.GetType().Name} ({nameof(HashIndexPlugin)})"))
-            {
-                _deferredSortSaveQueued = false;
+        if (evt is not MaterializeAndSaveEvent materialize)
+            return ValueTask.FromResult(false);
 
-                // Ignore stale queued work.
-                if (materialize.Generation != _lastIndexedGeneration)
-                    return;
+        _deferredSortSaveQueued = false;
 
-                if (!_sortViewsDirty)
-                    return;
+        // Ignore stale queued work.
+        if (materialize.Generation != _lastIndexedGeneration)
+            return ValueTask.FromResult(true);
 
-                EnsureSortedViews();
-                SaveState(materializeSortViews: false);
-            }
+        if (!_sortViewsDirty)
+            return ValueTask.FromResult(true);
 
-            return;
-        }
+        EnsureSortedViews();
+        SaveState(materializeSortViews: false);
 
-        await base.HandleEventAsync(evt, ct).ConfigureAwait(false);
+        return ValueTask.FromResult(true);
     }
 
     protected override ValueTask OnBootstrapEventAsync(BootstrapEvent evt, CancellationToken ct)
