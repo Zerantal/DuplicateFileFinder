@@ -28,8 +28,7 @@ public static class GuiBootstrapper
 
         // ---- Infrastructure services ----
         services.AddSingleton<IDialogService, DialogService>();
-        // services.AddSingleton<IFileSystemDeleteService, FileSystemDeleteService>();
-        services.AddSingleton<IFileSystemDeleteService, SimulatedFileSystemDeleteService>();
+        services.AddSingleton<IFileSystemDeleteService, FileSystemDeleteService>();
         services.AddSingleton<IClipboardService, AvaloniaClipboardService>();
         services.AddSingleton<DisposableManager>();
 
