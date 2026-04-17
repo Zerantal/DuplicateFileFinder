@@ -40,7 +40,7 @@ public sealed partial class HashIndexPlugin
     private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
         // Pass 1: count per hash + record per-file size (no per-group allocations)
-        var metaByHash = new Dictionary<HashKey, HashIndexPlugin.GroupMeta>(capacity: 1024);
+        var metaByHash = new Dictionary<HashKey, GroupMeta>(capacity: 1024);
         var totalHandles = 0;
 
         foreach (var (snapshot, index, file) in EnumerateEligibleFiles(repoSnapshot))
@@ -53,7 +53,7 @@ public sealed partial class HashIndexPlugin
 
             if (!exists)
             {
-                meta = new HashIndexPlugin.GroupMeta
+                meta = new GroupMeta
                 {
                     Count = 1,
                     FileSizeBytes = file.Size,
@@ -147,7 +147,7 @@ public sealed partial class HashIndexPlugin
         PublishFullyMaterializedState(newAll, newGroups);
     }
 
-    private static HashIndexPlugin.RemovalPlan BuildRemovalPlanExcludingHandles(
+    private static RemovalPlan BuildRemovalPlanExcludingHandles(
         HashGroupDescriptor[] oldGroups,
         FileHandle[] oldAll,
         HashSet<FileHandle> removedHandles)
@@ -194,10 +194,10 @@ public sealed partial class HashIndexPlugin
             newGroupCount++;
         }
 
-        return new HashIndexPlugin.RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
+        return new RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
     }
 
-    private static HashIndexPlugin.RemovalPlan BuildRemovalPlanExcludingScanRoot(
+    private static RemovalPlan BuildRemovalPlanExcludingScanRoot(
         HashGroupDescriptor[] oldGroups,
         FileHandle[] oldAll,
         ScanRootId removedScanRootId)
@@ -244,12 +244,12 @@ public sealed partial class HashIndexPlugin
             newGroupCount++;
         }
 
-        return new HashIndexPlugin.RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
+        return new RemovalPlan(newCounts, newReps, newGroupCount, newTotalHandles);
     }
 
     private static void BuildGroupsFromPlan(
         HashGroupDescriptor[] oldGroups,
-        HashIndexPlugin.RemovalPlan plan,
+        RemovalPlan plan,
         HashGroupDescriptor[] newGroups)
     {
         var wGroup = 0;
@@ -279,7 +279,7 @@ public sealed partial class HashIndexPlugin
     private static void FillAllFilesFromPlanExcludingHandles(
         HashGroupDescriptor[] oldGroups,
         FileHandle[] oldAll,
-        HashIndexPlugin.RemovalPlan plan,
+        RemovalPlan plan,
         HashSet<FileHandle> removedHandles,
         FileHandle[] newAll)
     {
@@ -350,7 +350,7 @@ public sealed partial class HashIndexPlugin
         }
     }
 
-    private int RebuildExcludingRemovedHandles(ReadOnlySpan<FileHandle> removedHandles)
+    private void RebuildExcludingRemovedHandles(ReadOnlySpan<FileHandle> removedHandles)
     {
         using var _ = TimingLog.StartPhase("HashIndex.RebuildExcludingRemovedHandles");
 
@@ -358,37 +358,15 @@ public sealed partial class HashIndexPlugin
         var oldAll = _allFiles;
 
         if (oldGroups.Length == 0 || oldAll.Length == 0 || removedHandles.Length == 0)
-            return 0;
+            return;
 
         var removedSet = new HashSet<FileHandle>(removedHandles.ToArray());
-        var affectedHashes = new HashSet<HashKey>();
-
-        for (var g = 0; g < oldGroups.Length; g++)
-        {
-            var d = oldGroups[g];
-            if (d.Count <= 0 || d.Offset < 0)
-                continue;
-
-            var end = d.Offset + d.Count;
-            if ((uint)end > (uint)oldAll.Length)
-                continue;
-
-            for (var i = d.Offset; i < end; i++)
-            {
-                if (!removedSet.Contains(oldAll[i]))
-                    continue;
-
-                affectedHashes.Add(d.Hash);
-                break;
-            }
-        }
-
         var plan = BuildRemovalPlanExcludingHandles(oldGroups, oldAll, removedSet);
 
         if (plan.NewGroupCount == 0 || plan.NewTotalHandles == 0)
         {
             PublishEmpty();
-            return affectedHashes.Count;
+            return;
         }
 
         var newAll = new FileHandle[plan.NewTotalHandles];
@@ -397,21 +375,19 @@ public sealed partial class HashIndexPlugin
         BuildGroupsFromPlan(oldGroups, plan, newGroups);
         FillAllFilesFromPlanExcludingHandles(oldGroups, oldAll, plan, removedSet, newAll);
 
-        var stats = HashIndexPlugin.ComputeStats(newGroups);
+        var stats = ComputeStats(newGroups);
 
         _allFiles = newAll;
         _groups = newGroups;
         _stats = stats;
-        _groupIndexByFileHandle = HashIndexPlugin.BuildGroupIndexByFileHandle(newGroups, newAll);
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
         _bySizeDesc = [];
         _byCountDesc = [];
         _sortViewsDirty = true;
-
-        return affectedHashes.Count;
     }
 
 
-    private int RebuildSingleGroupExcludingFile(int groupIndex, FileHandle removedFile)
+    private void RebuildSingleGroupExcludingFile(int groupIndex, FileHandle removedFile)
     {
         using var _ = TimingLog.StartPhase("HashIndex.RebuildSingleGroupExcludingFile");
 
@@ -419,15 +395,15 @@ public sealed partial class HashIndexPlugin
         var oldAll = _allFiles;
 
         if ((uint)groupIndex >= (uint)oldGroups.Length)
-            return 0;
+            return;
 
         var target = oldGroups[groupIndex];
         if (target.Count <= 0 || target.Offset < 0)
-            return 0;
+            return;
 
         var end = target.Offset + target.Count;
         if ((uint)end > (uint)oldAll.Length)
-            return 0;
+            return;
 
         var survivors = new List<FileHandle>(target.Count - 1);
         for (var i = target.Offset; i < end; i++)
@@ -440,10 +416,13 @@ public sealed partial class HashIndexPlugin
         }
 
         if (survivors.Count == target.Count)
-            return 0;
+            return;
 
         if (survivors.Count < 2)
-            return RebuildExcludingRemovedHandles([removedFile]);
+        {
+            RebuildExcludingRemovedHandles([removedFile]);
+            return;
+        }
 
         var newAll = new FileHandle[oldAll.Length - 1];
         var newGroups = (HashGroupDescriptor[])oldGroups.Clone();
@@ -483,16 +462,14 @@ public sealed partial class HashIndexPlugin
                 FirstFile: d.FirstFile);
         }
 
-        var stats = HashIndexPlugin.ComputeStats(newGroups);
+        var stats = ComputeStats(newGroups);
 
         _allFiles = newAll;
         _groups = newGroups;
         _stats = stats;
-        _groupIndexByFileHandle = HashIndexPlugin.BuildGroupIndexByFileHandle(newGroups, newAll);
+        _groupIndexByFileHandle = BuildGroupIndexByFileHandle(newGroups, newAll);
         _bySizeDesc = [];
         _byCountDesc = [];
         _sortViewsDirty = true;
-
-        return 1;
     }
 }

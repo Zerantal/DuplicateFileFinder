@@ -24,7 +24,7 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
     private volatile int[] _byCountDesc = [];
 
     // Published stats snapshot
-    private volatile HashIndexPlugin.StatsSnapshot _stats = HashIndexPlugin.StatsSnapshot.Empty;
+    private volatile StatsSnapshot _stats = StatsSnapshot.Empty;
 
     // Transient helper state for incremental delete handling.
     // Not persisted; rebuilt lazily on the first delete event after bootstrap/load.
@@ -37,7 +37,7 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
     // Needed for filtering duplicate files within a subtree
     private readonly ITreeIndexReadModel _treeIndex;
 
-    private const int ImmediateSortMaterializationThreshold = 64;
+    private const int ImmediateSortMaterializationMaxGroupCount = 5000;
 
     private bool _deferredSortSaveQueued;
 
@@ -62,7 +62,7 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
 
     protected override async ValueTask HandleEventAsync(RepoEvent evt, CancellationToken ct)
     {
-        if (evt is HashIndexPlugin.MaterializeAndSaveEvent materialize)
+        if (evt is MaterializeAndSaveEvent materialize)
         {
             using (TimingLog.Start($"Processing {evt.GetType().Name} ({nameof(HashIndexPlugin)})"))
             {
@@ -121,10 +121,10 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
             return ValueTask.CompletedTask;
         }
 
-        var affectedGroupCount = RebuildSingleGroupExcludingFile(groupIndex, evt.File);
+        RebuildSingleGroupExcludingFile(groupIndex, evt.File);
 
         _lastIndexedGeneration = evt.Generation;
-        PersistAfterMutation(affectedGroupCount);
+        PersistAfterMutation();
 
         return ValueTask.CompletedTask;
     }
@@ -148,10 +148,10 @@ public sealed partial class HashIndexPlugin : ChannelRepoPlugin, IHashIndexReadM
             removedHandles[i] = evt.DeletedFiles[i].FileHandle;
         }
 
-        var affectedGroupCount = RebuildExcludingRemovedHandles(removedHandles);
+        RebuildExcludingRemovedHandles(removedHandles);
 
         _lastIndexedGeneration = evt.Generation;
-        PersistAfterMutation(affectedGroupCount);
+        PersistAfterMutation();
 
         return ValueTask.CompletedTask;
     }

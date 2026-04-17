@@ -1,12 +1,9 @@
 // DuplicateFileFinderLib/Repository/Plugins/TreeIndexPlugin.cs
 
-using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
 using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 using DuplicateFileFinderLib.Repository.Plugins.Models;
-using DuplicateFileFinderLib.Repository.Storage;
-using DuplicateFileFinderLib.Repository.Storage.Models;
 
 using NLog;
 

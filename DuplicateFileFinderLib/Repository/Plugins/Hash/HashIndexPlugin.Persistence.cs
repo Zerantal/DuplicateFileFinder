@@ -70,7 +70,7 @@ public sealed partial class HashIndexPlugin
             byCount = [];
         }
 
-        var stats = new HashIndexPlugin.StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
+        var stats = new StatsSnapshot(state.TotalDuplicateFileCount, state.TotalSpaceTakenByDuplicates);
 
         Publish(allFiles, groups, bySize, byCount, stats);
         _sortViewsDirty = !sortViewsValid;
@@ -84,7 +84,7 @@ public sealed partial class HashIndexPlugin
 
     private void PublishEmpty()
     {
-        Publish([], [], [], [], HashIndexPlugin.StatsSnapshot.Empty);
+        Publish([], [], [], [], StatsSnapshot.Empty);
         _groupIndexByFileHandle = new Dictionary<FileHandle, int>();
         _sortViewsDirty = false;
     }
@@ -103,7 +103,7 @@ public sealed partial class HashIndexPlugin
         HashGroupDescriptor[] groups,
         int[] bySize,
         int[] byCount,
-        HashIndexPlugin.StatsSnapshot stats)
+        StatsSnapshot stats)
     {
         _allFiles = allFiles;
         _groups = groups;
@@ -112,7 +112,7 @@ public sealed partial class HashIndexPlugin
         _stats = stats;
     }
 
-    private static HashIndexPlugin.StatsSnapshot ComputeStats(HashGroupDescriptor[] groups)
+    private static StatsSnapshot ComputeStats(HashGroupDescriptor[] groups)
     {
         var dupCount = 0;
         long space = 0;
@@ -127,6 +127,6 @@ public sealed partial class HashIndexPlugin
             space += (g.Count - 1) * g.FileSizeBytes;
         }
 
-        return dupCount == 0 ? HashIndexPlugin.StatsSnapshot.Empty : new HashIndexPlugin.StatsSnapshot(dupCount, space);
+        return dupCount == 0 ? StatsSnapshot.Empty : new StatsSnapshot(dupCount, space);
     }
 }

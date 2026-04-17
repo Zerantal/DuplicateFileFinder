@@ -57,4 +57,9 @@ public sealed partial class HashIndexPlugin
 
         _groupIndexByFileHandle = BuildGroupIndexByFileHandle(_groups, _allFiles);
     }
+
+    private bool ShouldMaterializeSortViewsImmediately()
+    {
+        return _groups.Length <= ImmediateSortMaterializationMaxGroupCount;
+    }
 }

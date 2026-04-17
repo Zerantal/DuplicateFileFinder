@@ -77,12 +77,12 @@ public sealed partial class HashIndexPlugin
 
         _deferredSortSaveQueued = true;
 
-        Post(new HashIndexPlugin.MaterializeAndSaveEvent { Generation = _lastIndexedGeneration });
+        Post(new MaterializeAndSaveEvent { Generation = _lastIndexedGeneration });
     }
 
-    private void PersistAfterMutation(int affectedGroupCount)
+    private void PersistAfterMutation()
     {
-        if (affectedGroupCount <= ImmediateSortMaterializationThreshold)
+        if (ShouldMaterializeSortViewsImmediately())
         {
             SaveState(materializeSortViews: true);
             return;
@@ -91,4 +91,6 @@ public sealed partial class HashIndexPlugin
         SaveState(materializeSortViews: false);
         QueueDeferredSortMaterialization();
     }
+
+
 }
