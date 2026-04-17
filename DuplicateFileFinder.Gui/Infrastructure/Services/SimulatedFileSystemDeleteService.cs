@@ -6,22 +6,20 @@ public class SimulatedFileSystemDeleteService : IFileSystemDeleteService
     {
         await Task.Delay(5000);
 
-        return (true, (string?)"Delete succeeded!");
+        return (false, (string?)"Oops!");
     }
 
-
+    // public async Task<(bool ok, string? error)> DeleteDirectoryAsync(string fullPath, bool recursive = true)
+    // {
+    //     await Task.Delay(5000);
+    //
+    //     return (false, (string?)"Oops!");
+    // }
 
     public Task<(bool ok, string? error)> DeleteDirectoryAsync(string fullPath, bool recursive = true)
     {
-        try
-        {
-            // Thread.Sleep(5000);
+        Thread.Sleep(5000);
 
-            return Task.FromResult<(bool ok, string? error)>((true, null));
-        }
-        catch (Exception exception)
-        {
-            return Task.FromException<(bool ok, string? error)>(exception);
-        }
+        return Task.FromResult((false, (string?)"Oops!"));
     }
 }

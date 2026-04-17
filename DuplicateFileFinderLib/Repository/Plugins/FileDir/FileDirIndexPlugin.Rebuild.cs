@@ -5,7 +5,7 @@ namespace DuplicateFileFinderLib.Repository.Plugins.FileDir;
 
 public sealed partial class FileDirIndexPlugin
 {
-private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
+    private void RebuildFromSnapshot(RepoSnapshotView repoSnapshot)
     {
         var activeRootIds = repoSnapshot.ScanRoots.Values
             .Where(r => !r.IsDeleted)

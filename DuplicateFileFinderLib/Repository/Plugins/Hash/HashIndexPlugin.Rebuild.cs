@@ -113,7 +113,7 @@ public sealed partial class HashIndexPlugin
         PublishFullyMaterializedState(allFiles, groups);
     }
 
-     private void RebuildExcludingScanRoot(long removedScanRootId)
+    private void RebuildExcludingScanRoot(ScanRootId removedScanRootId)
     {
         using var _ = TimingLog.StartPhase("HashIndex.RebuildExcludingScanRoot");
 
@@ -200,7 +200,7 @@ public sealed partial class HashIndexPlugin
     private static HashIndexPlugin.RemovalPlan BuildRemovalPlanExcludingScanRoot(
         HashGroupDescriptor[] oldGroups,
         FileHandle[] oldAll,
-        long removedScanRootId)
+        ScanRootId removedScanRootId)
     {
         var newCounts = new int[oldGroups.Length];
         var newReps = new FileHandle[oldGroups.Length];
@@ -315,8 +315,8 @@ public sealed partial class HashIndexPlugin
     private static void FillAllFilesFromPlanExcludingScanRoot(
         HashGroupDescriptor[] oldGroups,
         FileHandle[] oldAll,
-        HashIndexPlugin.RemovalPlan plan,
-        long removedScanRootId,
+        RemovalPlan plan,
+        ScanRootId removedScanRootId,
         FileHandle[] newAll)
     {
         var dstOffset = 0;

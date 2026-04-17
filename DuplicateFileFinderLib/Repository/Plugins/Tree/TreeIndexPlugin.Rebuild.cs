@@ -64,9 +64,9 @@ public sealed partial class TreeIndexPlugin
         return globalHashCounts;
     }
 
-     private static RootTreeIndexState BuildRootState(
-        ScanRootSnapshotView snapshot,
-        Dictionary<HashKey, int> globalHashCounts)
+    private static RootTreeIndexState BuildRootState(
+       ScanRootSnapshotView snapshot,
+       Dictionary<HashKey, int> globalHashCounts)
     {
         var rootId = snapshot.ScanRootId;
 
@@ -320,15 +320,15 @@ public sealed partial class TreeIndexPlugin
         return (subtreeRangeMap, dirPreorderByFileIndex);
     }
 
-     private static SegmentedMap<DirAggregateStats> ComputeRootDirStats(
-        long scanRootId,
-        ScanRootSnapshotView snapshot,
-        DirHandle[] childDirsPool,
-        SegmentedMap<Slice> childDirSliceByDirIndex,
-        FileHandle[] childFilesPool,
-        SegmentedMap<Slice> childFileSliceByDirIndex,
-        IReadOnlyList<int> rootDirIndices,
-        Dictionary<HashKey, int> globalHashCounts)
+    private static SegmentedMap<DirAggregateStats> ComputeRootDirStats(
+       ScanRootId scanRootId,
+       ScanRootSnapshotView snapshot,
+       DirHandle[] childDirsPool,
+       SegmentedMap<Slice> childDirSliceByDirIndex,
+       FileHandle[] childFilesPool,
+       SegmentedMap<Slice> childFileSliceByDirIndex,
+       IReadOnlyList<int> rootDirIndices,
+       Dictionary<HashKey, int> globalHashCounts)
     {
         var memo = new Dictionary<int, DirAggregateStats>(capacity: Math.Max(1024, rootDirIndices.Count));
 
