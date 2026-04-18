@@ -1,6 +1,8 @@
+using System;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
+using Avalonia.Headless.XUnit;
 
 using DuplicateFileFinder.Gui.Features.Scanning.ViewModels;
 using DuplicateFileFinder.Gui.Features.Scanning.Views;
@@ -12,13 +14,12 @@ using Xunit;
 
 namespace DuplicateFileFinder.GuiTests.Ui.Smoke;
 
-[Collection("AvaloniaUI")]
-public sealed class ScanProgressWindowSmokeTests(AvaloniaHeadlessFixture ui)
+public sealed class ScanProgressWindowSmokeTests
 {
-    [Fact]
-    public async Task ScanProgressWindow_BindsProgressAndText()
+    [AvaloniaFact]
+    public Task ScanProgressWindow_BindsProgressAndText()
     {
-        await ui.RunOnUiThreadAsync(() =>
+        try
         {
             var scan = new FakeScanCoordinator();
             var vm = new ScanProgressViewModel(scan);
@@ -31,10 +32,7 @@ public sealed class ScanProgressWindowSmokeTests(AvaloniaHeadlessFixture ui)
                 PercentComplete = 0.42
             });
 
-            var win = new ScanProgressWindow
-            {
-                DataContext = vm
-            };
+            var win = new ScanProgressWindow { DataContext = vm };
 
             LayoutTestHelpers.DoLayout(win);
 
@@ -47,6 +45,11 @@ public sealed class ScanProgressWindowSmokeTests(AvaloniaHeadlessFixture ui)
             Assert.Equal("Hashing 123 files", status!.Text);
             Assert.Equal(42, (int)bar!.Value);
             Assert.NotNull(cancel);
-        });
+            return Task.CompletedTask;
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException(exception);
+        }
     }
 }

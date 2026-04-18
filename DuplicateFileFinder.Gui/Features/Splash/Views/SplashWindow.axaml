@@ -5,7 +5,7 @@
         Width="420" Height="260"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        SystemDecorations="BorderOnly"
+        WindowDecorations="BorderOnly"
         x:DataType="viewModels:SplashViewModel"
         Title="Duplicate File Finder">
     <Border Padding="24">

@@ -6,9 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
+using Avalonia.Headless.XUnit;
 
 using DuplicateFileFinder.Gui.Infrastructure.Services;
-using DuplicateFileFinder.GuiTests.Ui;
 
 using DuplicateFileFinderLib.Repository.Core.Scan;
 using DuplicateFileFinderLib.Repository.Interfaces;
@@ -21,61 +21,58 @@ using Dff = DuplicateFileFinderLib.Core;
 
 namespace DuplicateFileFinder.GuiTests.Infrastructure.Services;
 
-[Collection("AvaloniaUI")]
-[SuppressMessage("Usage", "xUnit1051:Calls to methods which accept CancellationToken should use TestContext.Current.CancellationToken")]
-public sealed class ScanCoordinatorTests(AvaloniaHeadlessFixture ui)
+[SuppressMessage("Usage",
+    "xUnit1051:Calls to methods which accept CancellationToken should use TestContext.Current.CancellationToken")]
+public sealed class ScanCoordinatorTests
 {
-    [Fact]
+    [AvaloniaFact]
     public async Task RunScanWithDialogCoreAsync_Success_RaisesIndexedAndCompleted()
     {
-        await ui.RunOnUiThreadAsync(async () =>
-        {
-            var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
-            var host = new Mock<IRepoHost>(MockBehavior.Strict);
-            host.SetupGet(x => x.Repo).Returns(repo.Object);
-            host.Setup(x => x.WhenIndexesRebuiltAsync(5, It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
+        var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
+        var host = new Mock<IRepoHost>(MockBehavior.Strict);
+        host.SetupGet(x => x.Repo).Returns(repo.Object);
+        host.Setup(x => x.WhenIndexesRebuiltAsync(5, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
-            using var dialogService = new TestDialogService();
-            var finder = new Dff.DuplicateFileFinder(host.Object);
-            var sut = new ScanCoordinator(host.Object, finder, dialogService);
+        using var dialogService = new TestDialogService();
+        var finder = new Dff.DuplicateFileFinder(host.Object);
+        var sut = new ScanCoordinator(host.Object, finder, dialogService);
 
-            ScanIndexedEventArgs? indexed = null;
-            ScanCompletedEventArgs? completed = null;
+        ScanIndexedEventArgs? indexed = null;
+        ScanCompletedEventArgs? completed = null;
 
-            sut.ScanIndexed += (_, e) => indexed = e;
-            sut.ScanCompleted += (_, e) => completed = e;
+        sut.ScanIndexed += (_, e) => indexed = e;
+        sut.ScanCompleted += (_, e) => completed = e;
 
-            var completion = new ScanCompletionInfo(
-                ScanRootId: 123,
-                Generation: 5,
-                ScanSequence: 77);
+        var completion = new ScanCompletionInfo(
+            ScanRootId: 123,
+            Generation: 5,
+            ScanSequence: 77);
 
-            await InvokeCoreAsync(
-                sut,
-                arg: "root-path",
-                runAsync: (_, _) => Task.FromResult(completion));
+        await InvokeCoreAsync(
+            sut,
+            arg: "root-path",
+            runAsync: (_, _) => Task.FromResult(completion));
 
-            Assert.False(sut.IsScanning);
+        Assert.False(sut.IsScanning);
 
-            Assert.NotNull(indexed);
-            Assert.Equal("root-path", indexed.Arg);
-            Assert.Equal(123, indexed.ScanRootId);
-            Assert.Equal(5, indexed.Generation);
+        Assert.NotNull(indexed);
+        Assert.Equal("root-path", indexed.Arg);
+        Assert.Equal(123, indexed.ScanRootId);
+        Assert.Equal(5, indexed.Generation);
 
-            Assert.NotNull(completed);
-            Assert.Equal("root-path", completed.Arg);
-            Assert.False(completed.Cancelled);
-            Assert.Null(completed.Error);
+        Assert.NotNull(completed);
+        Assert.Equal("root-path", completed.Arg);
+        Assert.False(completed.Cancelled);
+        Assert.Null(completed.Error);
 
-            host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
-            host.Verify(x => x.WhenIndexesRebuiltAsync(5, It.IsAny<CancellationToken>()), Times.Once);
+        host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
+        host.Verify(x => x.WhenIndexesRebuiltAsync(5, It.IsAny<CancellationToken>()), Times.Once);
 
-            repo.VerifyNoOtherCalls();
-        });
+        repo.VerifyNoOtherCalls();
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task RunScanWithDialogCoreAsync_WaitsForIndexesRebuiltBeforeCompleting()
     {
         var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
@@ -86,31 +83,22 @@ public sealed class ScanCoordinatorTests(AvaloniaHeadlessFixture ui)
         host.Setup(x => x.WhenIndexesRebuiltAsync(9, It.IsAny<CancellationToken>()))
             .Returns(rebuildTcs.Task);
 
-        using var dialogService = await ui.RunOnUiThreadAsync(() => new TestDialogService());
-
+        using var dialogService = new TestDialogService();
         var finder = new Dff.DuplicateFileFinder(host.Object);
-        ScanCoordinator? sut = null;
-
-        await ui.RunOnUiThreadAsync(() =>
-        {
-            sut = new ScanCoordinator(host.Object, finder, dialogService);
-        });
-
-        Assert.NotNull(sut);
+        var sut = new ScanCoordinator(host.Object, finder, dialogService);
 
         ScanIndexedEventArgs? indexed = null;
-        sut!.ScanIndexed += (_, e) => indexed = e;
+        sut.ScanIndexed += (_, e) => indexed = e;
 
         var completion = new ScanCompletionInfo(
             ScanRootId: 42,
             Generation: 9,
             ScanSequence: 1);
 
-        var runTask = ui.RunOnUiThreadAsync(() =>
-            InvokeCoreAsync(
-                sut,
-                arg: "rescan",
-                runAsync: (_, _) => Task.FromResult(completion)));
+        var runTask = InvokeCoreAsync(
+            sut,
+            arg: "rescan",
+            runAsync: (_, _) => Task.FromResult(completion));
 
         await Task.Delay(100, TestContext.Current.CancellationToken);
         Assert.False(runTask.IsCompleted);
@@ -128,95 +116,87 @@ public sealed class ScanCoordinatorTests(AvaloniaHeadlessFixture ui)
         host.Verify(x => x.WhenIndexesRebuiltAsync(9, It.IsAny<CancellationToken>()), Times.Once);
 
         repo.VerifyNoOtherCalls();
-
-        await ui.RunOnUiThreadAsync(dialogService.Dispose);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task RunScanWithDialogCoreAsync_RecoveredMissingPath_RaisesIndexedAndCompleted()
     {
-        await ui.RunOnUiThreadAsync(async () =>
-        {
-            var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
-            var host = new Mock<IRepoHost>(MockBehavior.Strict);
-            host.SetupGet(x => x.Repo).Returns(repo.Object);
+        var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
+        var host = new Mock<IRepoHost>(MockBehavior.Strict);
+        host.SetupGet(x => x.Repo).Returns(repo.Object);
 
-            using var dialogService = new TestDialogService();
-            var finder = new Dff.DuplicateFileFinder(host.Object);
-            var sut = new ScanCoordinator(host.Object, finder, dialogService);
+        using var dialogService = new TestDialogService();
+        var finder = new Dff.DuplicateFileFinder(host.Object);
+        var sut = new ScanCoordinator(host.Object, finder, dialogService);
 
-            ScanIndexedEventArgs? indexed = null;
-            ScanCompletedEventArgs? completed = null;
+        ScanIndexedEventArgs? indexed = null;
+        ScanCompletedEventArgs? completed = null;
 
-            sut.ScanIndexed += (_, e) => indexed = e;
-            sut.ScanCompleted += (_, e) => completed = e;
+        sut.ScanIndexed += (_, e) => indexed = e;
+        sut.ScanCompleted += (_, e) => completed = e;
 
-            await InvokeCoreAsync(
-                sut,
-                arg: 55,
-                runAsync: (_, _) => throw new DirectoryNotFoundException("missing"),
-                tryRecoverMissingPathAsync: (_, _) =>
-                    Task.FromResult(new MissingPathResult(true, 17, 55)),
-                recoveryWorkingText: "Recovering...");
+        await InvokeCoreAsync(
+            sut,
+            arg: 55,
+            runAsync: (_, _) => throw new DirectoryNotFoundException("missing"),
+            tryRecoverMissingPathAsync: (_, _) =>
+                Task.FromResult(new MissingPathResult(true, 17, 55)),
+            recoveryWorkingText: "Recovering...");
 
-            Assert.False(sut.IsScanning);
+        Assert.False(sut.IsScanning);
 
-            Assert.NotNull(indexed);
-            Assert.Equal(55, indexed.Arg);
-            Assert.Equal(55, indexed.ScanRootId);
-            Assert.Equal(17, indexed.Generation);
+        Assert.NotNull(indexed);
+        Assert.Equal(55, indexed.Arg);
+        Assert.Equal(55, indexed.ScanRootId);
+        Assert.Equal(17, indexed.Generation);
 
-            Assert.NotNull(completed);
-            Assert.Equal(55, completed.Arg);
-            Assert.False(completed.Cancelled);
-            Assert.Null(completed.Error);
+        Assert.NotNull(completed);
+        Assert.Equal(55, completed.Arg);
+        Assert.False(completed.Cancelled);
+        Assert.Null(completed.Error);
 
-            host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
+        host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
 
-            repo.VerifyNoOtherCalls();
-        });
+        repo.VerifyNoOtherCalls();
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task RunScanWithDialogCoreAsync_Failure_RethrowsAndRaisesCompletedWithError()
     {
-        await ui.RunOnUiThreadAsync(async () =>
-        {
-            var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
-            var host = new Mock<IRepoHost>(MockBehavior.Strict);
-            host.SetupGet(x => x.Repo).Returns(repo.Object);
+        var repo = new Mock<IRepoInternal>(MockBehavior.Strict);
+        var host = new Mock<IRepoHost>(MockBehavior.Strict);
+        host.SetupGet(x => x.Repo).Returns(repo.Object);
 
-            using var dialogService = new TestDialogService();
-            var finder = new Dff.DuplicateFileFinder(host.Object);
-            var sut = new ScanCoordinator(host.Object, finder, dialogService);
+        using var dialogService = new TestDialogService();
+        var finder = new Dff.DuplicateFileFinder(host.Object);
+        var sut = new ScanCoordinator(host.Object, finder, dialogService);
 
-            ScanIndexedEventArgs? indexed = null;
-            ScanCompletedEventArgs? completed = null;
+        ScanIndexedEventArgs? indexed = null;
+        ScanCompletedEventArgs? completed = null;
 
-            sut.ScanIndexed += (_, e) => indexed = e;
-            sut.ScanCompleted += (_, e) => completed = e;
+        sut.ScanIndexed += (_, e) => indexed = e;
+        sut.ScanCompleted += (_, e) => completed = e;
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                InvokeCoreAsync(
-                    sut,
-                    arg: "bad-scan",
-                    runAsync: (_, _) => throw new InvalidOperationException("boom")));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            InvokeCoreAsync(
+                sut,
+                arg: "bad-scan",
+                runAsync: (_, _) => throw new InvalidOperationException("boom")));
 
-            Assert.Equal("boom", ex.Message);
-            Assert.False(sut.IsScanning);
+        Assert.Equal("boom", ex.Message);
+        Assert.False(sut.IsScanning);
 
-            Assert.Null(indexed);
+        Assert.Null(indexed);
 
-            Assert.NotNull(completed);
-            Assert.Equal("bad-scan", completed.Arg);
-            Assert.False(completed.Cancelled);
-            Assert.NotNull(completed.Error);
-            Assert.Equal("boom", completed.Error!.Message);
+        Assert.NotNull(completed);
+        Assert.Equal("bad-scan", completed.Arg);
+        Assert.False(completed.Cancelled);
+        Assert.NotNull(completed.Error);
+        Assert.Equal("boom", completed.Error!.Message);
 
-            host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
+        host.VerifyGet(x => x.Repo, Times.AtLeastOnce);
 
-            repo.VerifyNoOtherCalls();
-        });
+        repo.VerifyNoOtherCalls();
     }
 
     private static Task InvokeCoreAsync(

@@ -634,7 +634,8 @@ public sealed class TreeMapControl : Control
 
     private void RebuildCacheBitmapIfNeeded(Size arrangedSize)
     {
-        var scaling = VisualRoot?.RenderScaling ?? 1.0;
+        var toplevel = TopLevel.GetTopLevel(this);
+        var scaling = toplevel?.RenderScaling ?? 1.0;
 
         // Pixel size (rounded) for current control size
         var pxW = Math.Max(1, (int)Math.Ceiling(arrangedSize.Width * scaling));
