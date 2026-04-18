@@ -11,15 +11,14 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Avalonia" Version="11.3.6"/>
-        <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="11.1.5" />
-        <PackageReference Include="Avalonia.Desktop" Version="11.3.6"/>
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6"/>
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.6"/>
+        <PackageReference Include="Avalonia" Version="12.0.1" />
+        <PackageReference Include="Avalonia.Controls.ItemsRepeater" Version="12.0.0" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.1" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.1" />
         <PackageReference Include="Castle.Core" Version="5.2.1" />
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*"/>
-        <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.6"/>
-        <PackageReference Include="LoadingIndicators.Avalonia" Version="11.0.11.1" />
+        <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
 
         <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
         <PackageReference Include="Avalonia.Diagnostics" Version="11.3.6">
@@ -29,6 +28,7 @@
         <PackageReference Include="JetBrains.Annotations" Version="2025.2.2"/>
         <PackageReference Include="MessageBox.Avalonia" Version="3.2.0"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+        <PackageReference Include="Optris.LoadingIndicators.Avalonia" Version="12.0.3" />
     </ItemGroup>
 
     <ItemGroup>
