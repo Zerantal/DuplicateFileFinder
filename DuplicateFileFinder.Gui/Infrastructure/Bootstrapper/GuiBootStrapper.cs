@@ -1,4 +1,5 @@
 using DuplicateFileFinder.Gui.Application.Deletion;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
@@ -50,6 +51,7 @@ public static class GuiBootstrapper
 
         // Application
         services.AddSingleton<IDeletionWorkflowService, DeletionWorkflowService>();
+        services.AddSingleton<DuplicateExplorerSelectionContext>();
 
         // Duplicate groups
         services.AddSingleton<DuplicateGroupsViewModel>();
@@ -65,7 +67,9 @@ public static class GuiBootstrapper
         services.AddSingleton<TreeMapController>(sp =>
         {
             var h = sp.GetRequiredService<IRepoHost>();
-            var tm = new TreeMapController(h)
+            var selectionContext = sp.GetRequiredService<DuplicateExplorerSelectionContext>();
+            var disposer = sp.GetRequiredService<DisposableManager>();
+            var tm = new TreeMapController(h, selectionContext, disposer)
             {
                 Options = new TreeMapBuildOptions { MaxDepth = 8 }
             };

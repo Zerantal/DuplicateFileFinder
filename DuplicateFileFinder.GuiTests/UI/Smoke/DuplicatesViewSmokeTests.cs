@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
 
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
@@ -55,10 +56,17 @@ public sealed class DuplicatesViewSmokeTests
             builder: scanRootsBuilder,
             actions: scanRootsActions,
             deletionService: fakeDeletionService,
-            disposer: new DisposableManager());
+            disposer: new DisposableManager(),
+            selectionContext: new DuplicateExplorerSelectionContext());
 
         // ---- TreeMap ----
-        var treeMapController = new TreeMapController(host) { Options = new TreeMapBuildOptions { MaxDepth = 8 } };
+        var treeMapController = new TreeMapController(
+            host,
+            new DuplicateExplorerSelectionContext(),
+            new DisposableManager())
+        {
+            Options = new TreeMapBuildOptions { MaxDepth = 8 }
+        };
 
         var treeMapActionsVm = new TreeMapActionsViewModel(
             host,
@@ -72,7 +80,9 @@ public sealed class DuplicatesViewSmokeTests
             scanRootsVm,
             treeMapController,
             treeMapActionsVm,
-            duplicateGroupsVm);
+            duplicateGroupsVm,
+            new DuplicateExplorerSelectionContext(),
+            new DisposableManager());
 
         var view = new DuplicatesView { DataContext = vm };
 

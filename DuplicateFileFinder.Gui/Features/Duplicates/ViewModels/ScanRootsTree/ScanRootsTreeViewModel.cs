@@ -1,9 +1,11 @@
+using System.ComponentModel;
 using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using DuplicateFileFinder.Gui.Application.Deletion;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.ScanRootsTree;
 using DuplicateFileFinder.Gui.Infrastructure.Services;
 using DuplicateFileFinder.Gui.Infrastructure.Util;
@@ -22,6 +24,8 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     private readonly IScanRootsTreeNodeActions _actions;
     private readonly IDeletionWorkflowService _deletionService;
     private readonly ScanRootsTreeBuilder _builder;
+    // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
+    private readonly SharedSelectionBinder<ScanRootsRowViewModel> _selectionBinder;
 
     // ScanRootId -> index in Rows where the depth-0 root row currently lives
     private readonly Dictionary<long, int> _rootIndexByScanRootId = new();
@@ -31,6 +35,8 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     // Handle->row for quick selection
     private readonly Dictionary<DirHandle, ScanRootsRowViewModel> _rowByHandle = new();
+
+    private readonly DuplicateExplorerSelectionContext _selectionContext;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectedPath))]
@@ -47,24 +53,48 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         ScanRootsTreeBuilder builder,
         IScanRootsTreeNodeActions actions,
         IDeletionWorkflowService deletionService,
-        DisposableManager disposer)
+        DisposableManager disposer,
+        DuplicateExplorerSelectionContext selectionContext)
     {
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _deletionService = deletionService ?? throw new ArgumentNullException(nameof(deletionService));
         _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
+        _selectionContext = selectionContext ?? throw new ArgumentNullException(nameof(selectionContext));
+
+        _selectionBinder = new SharedSelectionBinder<ScanRootsRowViewModel>(
+            _selectionContext,
+            getLocalSelection: () => SelectedRow,
+            toSharedSelection: CreateSelectionTargetFromRow,
+            applySharedSelection: target => ApplySelectionTarget(target, centerAfterSelect: true));
 
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
         ToggleExpandedCommand = new RelayCommand<ScanRootsRowViewModel>(ToggleExpanded);
 
         repoEvents.ScanRootRemoved += ScanRootRemovedEventHandler;
         disposer.Add(() => repoEvents.ScanRootRemoved -= ScanRootRemovedEventHandler);
+
+        PropertyChangedEventHandler selfHandler = (_, e) =>
+        {
+            if (e.PropertyName == nameof(SelectedRow))
+                _selectionBinder.PublishFromLocal();
+        };
+
+        PropertyChangedEventHandler selectionHandler = (_, e) =>
+        {
+            if (e.PropertyName == nameof(DuplicateExplorerSelectionContext.Current))
+                _selectionBinder.ApplyFromShared();
+        };
+
+        PropertyChanged += selfHandler;
+        _selectionContext.PropertyChanged += selectionHandler;
+
+        _disposer.Add(() => PropertyChanged -= selfHandler);
+        _disposer.Add(() => _selectionContext.PropertyChanged -= selectionHandler);
     }
 
-    private void ScanRootRemovedEventHandler(object? sender, RepoScanRootRemovedEvent e)
-    {
+    private void ScanRootRemovedEventHandler(object? sender, RepoScanRootRemovedEvent e) =>
         RemoveScanRootFromRows(e.ScanRootIdValue);
-    }
 
     // Visible, virtualized rows
     public BulkObservableCollection<ScanRootsRowViewModel> Rows { get; } = [];
@@ -93,8 +123,11 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     public void Rebuild(RepoSnapshotView snapshot)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
-        _expanded.Clear();
+
+        var expandedToRestore = _expanded.ToArray();
+
         BuildFromRoots();
+        RestoreExpandedState(expandedToRestore);
     }
 
     private void BuildFromRoots()
@@ -462,13 +495,11 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         if (_snapshot is null)
             return;
 
-        var toRestore = _expanded.ToArray();
+        var toRestoreExpanded = _expanded.ToArray();
 
         BuildFromRoots();
-
-        foreach (var h in toRestore)
-            if (_rowByHandle.TryGetValue(h, out var row) && row is { HasLazyChildren: true, IsExpanded: false })
-                Expand(row);
+        RestoreExpandedState(toRestoreExpanded);
+        ApplySelectionTarget(_selectionContext.Current);
     }
 
     private Comparison<ScanRootsRowViewModel> GetComparison()
@@ -571,6 +602,155 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
+    // ----------------------------
+    // Selection synchronisation
+    // ----------------------------
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? CreateSelectionTargetFromRow(
+        ScanRootsRowViewModel? row)
+    {
+        if (_snapshot is null)
+            return null;
+
+        return DuplicateSelectionTranslator.FromTreeRow(_snapshot, row);
+    }
+
+    private bool TryResolveExistingOrAncestorHandle(DirHandle preferred, out DirHandle resolved)
+    {
+        var current = preferred;
+
+        while (current.IsValid)
+        {
+            if (_rowByHandle.ContainsKey(current))
+            {
+                resolved = current;
+                return true;
+            }
+
+            if (!_builder.TryGetParentDirHandle(current, out current))
+                break;
+        }
+
+        resolved = DirHandle.Invalid;
+        return false;
+    }
+
+    private void ApplySelectionTarget(
+        DuplicateExplorerSelectionContext.SelectionTarget? target,
+        bool centerAfterSelect = false)
+    {
+        var handle = ResolveHandleFromSharedSelection(target);
+        if (handle is not { IsValid: true } dirHandle)
+        {
+            SelectedRow = null;
+            return;
+        }
+
+        if (!EnsureVisible(dirHandle))
+        {
+            if (!TryResolveExistingOrAncestorHandle(dirHandle, out var resolvedAncestor) ||
+                !EnsureVisible(resolvedAncestor))
+            {
+                SelectedRow = null;
+                return;
+            }
+
+            dirHandle = resolvedAncestor;
+        }
+
+        SelectedRow = _rowByHandle.GetValueOrDefault(dirHandle);
+
+        if (centerAfterSelect && SelectedRow is not null)
+            RequestCenterSelectedRow?.Invoke();
+    }
+
+    private DirHandle? ResolveHandleFromSharedSelection(
+        DuplicateExplorerSelectionContext.SelectionTarget? target)
+    {
+        if (_snapshot is null)
+            return null;
+
+        var dirId = DuplicateSelectionTranslator.GetDesiredTreeDirectory(target);
+        if (dirId is not { } desiredDirId)
+            return null;
+
+        return _builder.TryGetDirHandle(desiredDirId, out var handle)
+            ? handle
+            : null;
+    }
+
+    private void RestoreExpandedState(IEnumerable<DirHandle> expandedHandles)
+    {
+        _expanded.Clear();
+
+        if (_snapshot is null)
+            return;
+
+        var ordered = expandedHandles
+            .Select(h =>
+            {
+                var depth = _builder.TryBuildAncestorChainToScanRoot(h, out var chain)
+                    ? chain.Count
+                    : int.MaxValue;
+                return (Handle: h, Depth: depth);
+            })
+            .OrderBy(x => x.Depth)
+            .ToArray();
+
+        foreach (var item in ordered)
+        {
+            if (item.Depth == int.MaxValue)
+                continue;
+
+            if (!_builder.TryBuildAncestorChainToScanRoot(item.Handle, out var chain) || chain.Count == 0)
+                continue;
+
+            if (!_rowByHandle.TryGetValue(chain[0], out var current))
+                continue;
+
+            for (var i = 1; i < chain.Count; i++)
+            {
+                if (current is { IsExpanded: false, HasLazyChildren: true })
+                    Expand(current);
+
+                if (!_rowByHandle.TryGetValue(chain[i], out current))
+                {
+                    current = null!;
+                    break;
+                }
+            }
+
+            if (current is { HasLazyChildren: true, IsExpanded: false })
+                Expand(current);
+        }
+    }
+
+    private bool EnsureVisible(DirHandle handle)
+    {
+        if (_rowByHandle.ContainsKey(handle))
+            return true;
+
+        if (!_builder.TryBuildAncestorChainToScanRoot(handle, out var chain) || chain.Count == 0)
+            return false;
+
+        if (!_rowByHandle.TryGetValue(chain[0], out var current))
+            return false;
+
+        for (var i = 1; i < chain.Count; i++)
+        {
+            if (current is { IsExpanded: false, HasLazyChildren: true })
+                Expand(current);
+
+            if (!_rowByHandle.TryGetValue(chain[i], out current))
+                return false;
+        }
+
+        return true;
+    }
+
+    // ------------------------------
+    // Cleanup
+    // ------------------------------
     public ValueTask DisposeAsync()
     {
         _disposer.Dispose();

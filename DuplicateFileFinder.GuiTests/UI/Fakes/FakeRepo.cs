@@ -21,6 +21,8 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
 
     public Dictionary<string, object> ReturnResultFor { get; } = new();
 
+    public RepoSnapshotView? SnapshotToReturn { get; set; }
+
     private T? Result<T>(T? defaultValue = default, [CallerMemberName] string memberName = "")
     {
         if (!ReturnResultFor.TryGetValue(memberName, out var result))
@@ -39,19 +41,32 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
 
     public IReadOnlyList<ScanRun> ScanRunsView => _scanRuns;
     public IReadOnlyList<ScanRoot> ScanRootsView => _scanRoots;
-    // ReSharper disable once ReturnTypeCanBeNotNullable
-    public ScanRootSnapshotView? TryGetScanRootView(ScanRootId scanRootId) => throw new NotImplementedException();
+
+    public ScanRootSnapshotView? TryGetScanRootView(ScanRootId scanRootId)
+    {
+        if (SnapshotToReturn?.Snapshots is null)
+            return null;
+
+        return SnapshotToReturn.Snapshots.GetValueOrDefault(scanRootId);
+    }
 
     public RepoSnapshotView GetRepoSnapshotView()
     {
-        return new RepoSnapshotView
-        {
-            Snapshots = null!,
-            ScanRoots = null!
-        };
+        if (SnapshotToReturn is not null)
+            return SnapshotToReturn;
+
+        return new RepoSnapshotView { Snapshots = null!, ScanRoots = null! };
     }
 
-    public bool HasScanCheckpoint(ScanRootId scanRootId) => throw new NotImplementedException();
+    public HashSet<ScanRootId> ScanRootsWithCheckpoints { get; } = [];
+    public Func<ScanRootId, bool>? HasScanCheckpointImpl { get; set; }
+    public bool HasScanCheckpoint(ScanRootId scanRootId)
+    {
+        if (HasScanCheckpointImpl is not null)
+            return HasScanCheckpointImpl(scanRootId);
+
+        return ScanRootsWithCheckpoints.Contains(scanRootId);
+    }
 
     Task<DeleteResult> IRepo.DeleteFileAsync(FileHandle file, CancellationToken ct)
     {
@@ -76,7 +91,7 @@ public sealed class FakeRepo(IEnumerable<ScanRoot>? scanRoots = null) : IRepo
     public void SetScanRoots(IEnumerable<ScanRoot> scanRoots)
         => _scanRoots = scanRoots.ToList();
 
-    public void Dispose() => throw new NotImplementedException();
+    public void Dispose() { }
 
-    public ValueTask DisposeAsync() => throw new NotImplementedException();
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

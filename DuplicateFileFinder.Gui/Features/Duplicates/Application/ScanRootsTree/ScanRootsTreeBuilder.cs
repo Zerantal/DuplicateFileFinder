@@ -96,9 +96,6 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
         return roots;
     }
 
-    public bool TryGetNode(DirHandle dirHandle, out ScanRootsTreeNode node)
-        => _nodesByDirHandle.TryGetValue(dirHandle, out node!);
-
     public bool TryGetDirHandle(DirId dirId, out DirHandle handle)
         => MainIndex.TryGetDir(dirId, out handle);
 
@@ -115,6 +112,21 @@ public sealed class ScanRootsTreeBuilder(IRepoHost host)
             return false;
 
         return true;
+    }
+
+    public bool TryGetParentDirHandle(DirHandle dirHandle, out DirHandle parentDirHandle)
+    {
+        parentDirHandle = DirHandle.Invalid;
+
+        if (_snapshot is null)
+            return false;
+
+        var dirRec = _snapshot.GetDirRecord(dirHandle);
+
+        if (dirRec.ParentDirId < 0)
+            return false;
+
+        return MainIndex.TryGetDir(dirRec.ParentDirId, out parentDirHandle);
     }
 
     public bool TryBuildAncestorChainToScanRoot(DirHandle target, out List<DirHandle> chainRootToTarget)

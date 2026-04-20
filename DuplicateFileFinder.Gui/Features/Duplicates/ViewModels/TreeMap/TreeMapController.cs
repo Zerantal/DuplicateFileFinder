@@ -1,7 +1,11 @@
+using System.ComponentModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using DuplicateFileFinder.Gui.Controls.TreeMap;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.Application.TreeMap;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
@@ -9,11 +13,17 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
-public partial class TreeMapController : ObservableObject
+public partial class TreeMapController : ObservableObject, IAsyncDisposable
 {
     private readonly IRepo _repo;
     private readonly ITreeIndexReadModel _treeIndex;
     private readonly IFileDirReadModel _fileDirIndex;
+    private readonly DisposableManager _disposer;
+
+    private readonly DuplicateExplorerSelectionContext _selectionContext;
+
+    // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
+    private readonly SharedSelectionBinder<TreeMapNode<ITreeMapNodeElement>> _selectionBinder;
 
     private RepoSnapshotView? _lastSnapshot;
 
@@ -29,13 +39,41 @@ public partial class TreeMapController : ObservableObject
 
     [ObservableProperty] private TreeMapNode<ITreeMapNodeElement>? _selectedNode;
 
-    public TreeMapController(IRepoHost host)
+    public TreeMapController(IRepoHost host,
+        DuplicateExplorerSelectionContext selectionContext,
+        DisposableManager disposer)
     {
         ArgumentNullException.ThrowIfNull(host);
+        _selectionContext = selectionContext ?? throw new ArgumentNullException(nameof(selectionContext));
+        _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         _repo = host.Repo ?? throw new ArgumentNullException(nameof(host));
         _treeIndex = host.TreeIndex;
         _fileDirIndex = host.FileDirIndex;
+
+        _selectionBinder = new SharedSelectionBinder<TreeMapNode<ITreeMapNodeElement>>(
+            _selectionContext,
+            getLocalSelection: () => SelectedNode,
+            toSharedSelection: CreateSelectionTargetFromNode,
+            applySharedSelection: ApplySelectionTarget);
+
+
+        PropertyChangedEventHandler selfHandler = (_, e) =>
+        {
+            if (e.PropertyName == nameof(SelectedNode))
+                _selectionBinder.PublishFromLocal();
+        };
+
+        PropertyChangedEventHandler selectionHandler = (_, e) =>
+        {
+            if (e.PropertyName == nameof(DuplicateExplorerSelectionContext.Current))
+                _selectionBinder.ApplyFromShared();
+        };
+        PropertyChanged += selfHandler;
+        _selectionContext.PropertyChanged += selectionHandler;
+
+        _disposer.Add(() => PropertyChanged -= selfHandler);
+        _disposer.Add(() => _selectionContext.PropertyChanged -= selectionHandler);
     }
 
     public TreeMapBuildOptions Options { get; init; } = TreeMapBuildOptions.Default;
@@ -106,7 +144,7 @@ public partial class TreeMapController : ObservableObject
             });
 
         RebuildLookups();
-        SelectedNode = null;
+        ApplySelectionTarget(_selectionContext.Current);
     }
 
     partial void OnMetricChanged(TreeMapMetric value)
@@ -128,7 +166,7 @@ public partial class TreeMapController : ObservableObject
             });
 
         RebuildLookups();
-        SelectedNode = null;
+        ApplySelectionTarget(_selectionContext.Current);
 
         OnPropertyChanged(nameof(IsMetricBytes));
         OnPropertyChanged(nameof(IsMetricFiles));
@@ -162,5 +200,99 @@ public partial class TreeMapController : ObservableObject
                     stack.Push(n.Children[i]);
             }
         }
+    }
+
+    // ------------------------------
+    // Selection synchronisation
+    // ------------------------------
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? CreateSelectionTargetFromNode(
+        TreeMapNode<ITreeMapNodeElement>? node)
+    {
+        if (_lastSnapshot is null)
+            return null;
+
+        return DuplicateSelectionTranslator.FromTreeMapNode(_lastSnapshot, node);
+    }
+
+    private void ApplySelectionTarget(DuplicateExplorerSelectionContext.SelectionTarget? target) =>
+        SelectedNode = ResolveNodeFromSelectionTarget(target);
+
+    private TreeMapNode<ITreeMapNodeElement>? ResolveNodeFromSelectionTarget(
+        DuplicateExplorerSelectionContext.SelectionTarget? target)
+    {
+        if (target is null)
+            return null;
+
+        if (target.Value.Kind == DuplicateExplorerSelectionContext.SelectionKind.File
+            && target.Value.FileId is { } fileId
+            && _fileDirIndex.TryGetFile(fileId, out var fileHandle)
+            && _fileNodeByHandle.TryGetValue(fileHandle, out var fileNode))
+        {
+            return fileNode;
+        }
+
+        DirId? desiredDirId = target.Value.Kind switch
+        {
+            DuplicateExplorerSelectionContext.SelectionKind.Directory => target.Value.DirId,
+            DuplicateExplorerSelectionContext.SelectionKind.File => target.Value.ParentDirId,
+            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket => target.Value.ParentDirId,
+            _ => null
+        };
+
+        if (desiredDirId is not { } dirId)
+            return null;
+
+        return TryResolveExistingOrAncestorDirNode(dirId, out var dirNode) ? dirNode : null;
+    }
+
+    private bool TryResolveExistingOrAncestorDirNode(
+        DirId preferredDirId,
+        out TreeMapNode<ITreeMapNodeElement> node)
+    {
+        var current = preferredDirId;
+
+        while (current >= 0)
+        {
+            if (_fileDirIndex.TryGetDir(current, out var handle)
+                && _dirNodeByHandle.TryGetValue(handle, out var resolvedNode))
+            {
+                node = resolvedNode;
+                return true;
+            }
+
+            if (!TryGetParentDirId(current, out current))
+                break;
+        }
+
+        node = null!;
+        return false;
+    }
+
+    private bool TryGetParentDirId(DirId dirId, out DirId parentDirId)
+    {
+        parentDirId = -1;
+
+        if (_lastSnapshot is null)
+            return false;
+
+        if (!_fileDirIndex.TryGetDir(dirId, out var handle))
+            return false;
+
+        var rec = _lastSnapshot.GetDirRecord(handle);
+        if (rec.ParentDirId < 0)
+            return false;
+
+        parentDirId = rec.ParentDirId;
+        return true;
+    }
+
+    // ------------------------------
+    // Cleanup
+    // ------------------------------
+    public ValueTask DisposeAsync()
+    {
+        _disposer.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
