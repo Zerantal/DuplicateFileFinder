@@ -11,7 +11,6 @@ using DuplicateFileFinder.GuiTests.Features.Duplicates.TestSupport;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
-using DuplicateFileFinderLib.Repository.Interfaces;
 
 using Moq;
 
@@ -45,7 +44,7 @@ public sealed class DuplicatesViewModelCrossViewSyncTests
 
         var current = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(env.SelectionContext.Current);
         Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.Directory, current.Kind);
-        Assert.Equal(300, current.DirId);
+        Assert.Equal(300, current.ContextDirectoryId);
 
         Assert.NotNull(env.ViewModel.TreeMapController.SelectedNode);
         var selectedDir = Assert.IsType<DirTreeMapElement>(env.ViewModel.TreeMapController.SelectedNode!.Element);
@@ -74,11 +73,10 @@ public sealed class DuplicatesViewModelCrossViewSyncTests
         var file700 = new FileHandle(1, 0);
         env.ViewModel.TreeMapController.SelectedNode = env.ViewModel.TreeMapController.FileNodeByHandle[file700];
 
-
         var current = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(env.SelectionContext.Current);
         Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.File, current.Kind);
         Assert.Equal(700, current.FileId);
-        Assert.Equal(200, current.ParentDirId);
+        Assert.Equal(200, current.ContextDirectoryId);
 
         Assert.NotNull(env.ViewModel.ScanRootsTree.SelectedRow);
         Assert.Equal(200, snapshot.GetDirRecord(env.ViewModel.ScanRootsTree.SelectedRow!.Dir).DirId);
@@ -86,60 +84,137 @@ public sealed class DuplicatesViewModelCrossViewSyncTests
         Assert.Equal(new DirHandle(1, 1), env.DuplicateGroups.SelectedSubtreeDir);
     }
 
+    [Fact]
+    public void LoadFromRepo_WhenSelectedDirectoryIsDeleted_PreReloadSelectionContainsDeletedDirAndParent()
+    {
+        var initialSnapshot = DuplicatesSelectionTestHelpers.BuildSnapshot(
+            scanRootId: 1,
+            dirs:
+            [
+                new(100, -1, "root"),
+                new(200, 100, "A"),
+                new(300, 200, "B")
+            ],
+            files:
+            [
+                new(700, 300, "f.txt", 123)
+            ]);
+
+        var env = CreateSut(initialSnapshot);
+
+        Assert.True(DuplicatesSelectionTestHelpers.TryGetDirHandle(initialSnapshot, 1, 300, out var dir300));
+        env.ViewModel.ScanRootsTree.NavigateToDir(dir300);
+
+        var before = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(env.SelectionContext.Current);
+        Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.Directory, before.Kind);
+        Assert.Equal(300, before.ContextDirectoryId);
+        Assert.Equal(200, before.ParentOfContextDirectoryId);
+    }
+
+    [Fact]
+    public void LoadFromRepo_WhenSelectedDirectoryIsDeleted_FallsBackToParentDirectory()
+    {
+        var initialSnapshot = DuplicatesSelectionTestHelpers.BuildSnapshot(
+            scanRootId: 1,
+            dirs:
+            [
+                new(100, -1, "root"),
+                new(200, 100, "A"),
+                new(300, 200, "B")
+            ],
+            files:
+            [
+                new(700, 300, "f.txt", 123)
+            ]);
+
+        var updatedSnapshot = DuplicatesSelectionTestHelpers.BuildSnapshot(
+            scanRootId: 1,
+            dirs:
+            [
+                new(100, -1, "root"),
+                new(200, 100, "A")
+            ],
+            files: []);
+
+        var env = CreateSut(initialSnapshot);
+
+        Assert.True(DuplicatesSelectionTestHelpers.TryGetDirHandle(initialSnapshot, 1, 300, out var dir300));
+        Assert.True(DuplicatesSelectionTestHelpers.TryGetDirHandle(updatedSnapshot, 1, 200, out var dir200));
+
+        env.ViewModel.ScanRootsTree.NavigateToDir(dir300);
+
+        var before = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(env.SelectionContext.Current);
+        Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.Directory, before.Kind);
+        Assert.Equal(300, before.ContextDirectoryId);
+        Assert.Equal(200, before.ParentOfContextDirectoryId);
+
+        env.Repo.SnapshotToReturn = updatedSnapshot;
+
+        DuplicatesSelectionTestHelpers.ResetAndSeedFileDir(env.FileDir, updatedSnapshot);
+        DuplicatesSelectionTestHelpers.ConfigureTreeIndex(env.TreeIndex, updatedSnapshot);
+
+        env.ViewModel.LoadFromRepo();
+
+        var after = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(env.SelectionContext.Current);
+        Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.Directory, after.Kind);
+        Assert.Equal(200, after.ContextDirectoryId);
+
+        Assert.NotNull(env.ViewModel.ScanRootsTree.SelectedRow);
+        Assert.Equal(200, updatedSnapshot.GetDirRecord(env.ViewModel.ScanRootsTree.SelectedRow!.Dir).DirId);
+
+        Assert.Equal(dir200, env.DuplicateGroups.SelectedSubtreeDir);
+    }
+
     private static Sut CreateSut(RepoSnapshotView snapshot)
     {
         var repo = new FakeRepo(snapshot.ScanRoots.Values) { SnapshotToReturn = snapshot };
+
         var fileDir = new FakeFileDirReadModel();
-        DuplicatesSelectionTestHelpers.SeedFileDir(fileDir, snapshot);
+        DuplicatesSelectionTestHelpers.ResetAndSeedFileDir(fileDir, snapshot);
 
-        var treeIndex = DuplicatesSelectionTestHelpers.BuildTreeIndex(snapshot);
-        var hashIndex = DuplicatesSelectionTestHelpers.BuildEmptyHashIndex();
+        var treeIndex = new FakeTreeIndex();
+        DuplicatesSelectionTestHelpers.ConfigureTreeIndex(treeIndex, snapshot);
 
-        var host = new Mock<IRepoHost>(MockBehavior.Strict);
-        host.SetupGet(x => x.Repo).Returns(repo);
-        host.SetupGet(x => x.FileDirIndex).Returns(fileDir);
-        host.SetupGet(x => x.TreeIndex).Returns(treeIndex);
-        host.SetupGet(x => x.HashIndex).Returns(hashIndex);
-        host.SetupGet(x => x.LastIndexedGeneration).Returns(1);
+        var hashIndex = new FakeHashIndex();
+
+        var host = new FakeRepoHost(repo) { FileDirIndex = fileDir, TreeIndex = treeIndex, HashIndex = hashIndex };
 
         var selectionContext = new DuplicateExplorerSelectionContext();
 
         var treeVm = new ScanRootsTreeViewModel(
+            host,
             new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher()),
-            new ScanRootsTreeBuilder(host.Object),
+            new ScanRootsTreeBuilder(host),
             Mock.Of<IScanRootsTreeNodeActions>(),
             Mock.Of<IDeletionWorkflowService>(),
             new DisposableManager(),
             selectionContext);
 
-        var treeMapVm = new TreeMapController(host.Object, selectionContext, new DisposableManager())
+        var treeMapVm = new TreeMapController(host, selectionContext, new DisposableManager())
         {
             Metric = TreeMapMetric.TotalBytes,
             Options = new TreeMapBuildOptions
             {
-                MaxDepth = 8,
-                MaxSubdirsPerDir = 64,
-                MaxFilesPerDir = 64,
-                MaxTotalFileNodes = 1024
+                MaxDepth = 8, MaxSubdirsPerDir = 64, MaxFilesPerDir = 64, MaxTotalFileNodes = 1024
             }
         };
 
-        var duplicateGroupsController = new DuplicateGroupsController(host.Object);
+        var duplicateGroupsController = new DuplicateGroupsController(host);
         var duplicateGroups = new DuplicateGroupsViewModel(
-            host.Object,
+            host,
             duplicateGroupsController,
             Mock.Of<IDeletionWorkflowService>(),
             Mock.Of<IClipboardService>());
 
         var treeMapActions = new TreeMapActionsViewModel(
-            host.Object,
+            host,
             Mock.Of<IScanCoordinator>(),
             Mock.Of<IDeletionWorkflowService>(),
             Mock.Of<IClipboardService>(),
             new DisposableManager());
 
         var vm = new DuplicatesViewModel(
-            host.Object,
+            host,
             treeVm,
             treeMapVm,
             treeMapActions,
@@ -147,11 +222,14 @@ public sealed class DuplicatesViewModelCrossViewSyncTests
             selectionContext,
             new DisposableManager());
 
-        return new Sut(vm, selectionContext, duplicateGroups);
+        return new Sut(vm, selectionContext, duplicateGroups, repo, fileDir, treeIndex);
     }
 
     private sealed record Sut(
         DuplicatesViewModel ViewModel,
         DuplicateExplorerSelectionContext SelectionContext,
-        DuplicateGroupsViewModel DuplicateGroups);
+        DuplicateGroupsViewModel DuplicateGroups,
+        FakeRepo Repo,
+        FakeFileDirReadModel FileDir,
+        FakeTreeIndex TreeIndex);
 }

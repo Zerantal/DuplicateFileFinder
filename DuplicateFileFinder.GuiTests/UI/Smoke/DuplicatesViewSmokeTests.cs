@@ -52,6 +52,7 @@ public sealed class DuplicatesViewSmokeTests
             clipboard: fakeClipboardService);
 
         var scanRootsVm = new ScanRootsTreeViewModel(
+            host,
             repoEvents: repoEventRelay,
             builder: scanRootsBuilder,
             actions: scanRootsActions,

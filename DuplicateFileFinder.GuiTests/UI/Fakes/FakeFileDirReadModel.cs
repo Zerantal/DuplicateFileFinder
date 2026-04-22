@@ -79,4 +79,21 @@ public sealed class FakeFileDirReadModel : IFileDirReadModel
 
         return FilePathsByHandle.TryGetValue(handle, out rel!);
     }
+
+    public void Reset()
+    {
+        DirHandlesById.Clear();
+        FileHandlesById.Clear();
+        DirPathsByHandle.Clear();
+        FilePathsByHandle.Clear();
+        DirPathsById.Clear();
+        FilePathsById.Clear();
+
+        TryGetFileImpl = null;
+        TryGetDirImpl = null;
+        TryGetDirPathByHandleImpl = null;
+        TryGetFilePathByHandleImpl = null;
+        TryGetDirPathByIdImpl = null;
+        TryGetFilePathByIdImpl = null;
+    }
 }

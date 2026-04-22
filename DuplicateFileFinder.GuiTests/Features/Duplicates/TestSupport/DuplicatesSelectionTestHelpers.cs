@@ -103,8 +103,16 @@ internal static class DuplicatesSelectionTestHelpers
         }
     }
 
-    internal static FakeTreeIndex BuildTreeIndex(RepoSnapshotView snapshot)
+    internal static void ResetAndSeedFileDir(FakeFileDirReadModel fileDir, RepoSnapshotView snapshot)
     {
+        fileDir.Reset();
+        SeedFileDir(fileDir, snapshot);
+    }
+
+    internal static void ConfigureTreeIndex(FakeTreeIndex treeIndex, RepoSnapshotView snapshot)
+    {
+        treeIndex.Reset();
+
         var childDirsByParent = new Dictionary<DirHandle, DirHandle[]>();
         var childFilesByParent = new Dictionary<DirHandle, FileHandle[]>();
         var statsByDir = new Dictionary<DirHandle, DirAggregateStats>();
@@ -147,56 +155,55 @@ internal static class DuplicatesSelectionTestHelpers
         foreach (var dir in childDirsByParent.Keys)
             statsByDir[dir] = ComputeStats(dir);
 
-        return new FakeTreeIndex()
-        {
-            GetChildDirsImpl = dir =>
-                childDirsByParent.TryGetValue(dir, out var children)
-                    ? children
-                    : ReadOnlySpan<DirHandle>.Empty,
-            GetChildFilesImpl = dir =>
-                childFilesByParent.TryGetValue(dir, out var files)
-                    ? files
-                    : ReadOnlySpan<FileHandle>.Empty,
-            GetDirStatsImpl = dir =>
-                statsByDir.TryGetValue(dir, out var stats)
-                    ? stats
-                    : new DirAggregateStats
-                    {
-                        TotalBytes = 0,
-                        FileCount = 0,
-                        DirCount = 0,
-                        DuplicateFiles = 0,
-                        DuplicateBytes = 0
-                    }
-        };
+        treeIndex.GetChildDirsImpl = dir =>
+            childDirsByParent.TryGetValue(dir, out var children)
+                ? children
+                : ReadOnlySpan<DirHandle>.Empty;
+
+        treeIndex.GetChildFilesImpl = dir =>
+            childFilesByParent.TryGetValue(dir, out var files)
+                ? files
+                : ReadOnlySpan<FileHandle>.Empty;
+
+        treeIndex.GetDirStatsImpl = dir =>
+            statsByDir.TryGetValue(dir, out var stats)
+                ? stats
+                : new DirAggregateStats
+                {
+                    TotalBytes = 0,
+                    FileCount = 0,
+                    DirCount = 0,
+                    DuplicateFiles = 0,
+                    DuplicateBytes = 0
+                };
 
         DirAggregateStats ComputeStats(DirHandle dir)
         {
             var childDirs = childDirsByParent.TryGetValue(dir, out var dirs) ? dirs : [];
             var childFiles = childFilesByParent.TryGetValue(dir, out var files) ? files : [];
 
-            var totalDirs = childDirs.Length;
-            var totalFiles = childFiles.Length;
-            long totalBytes = childFiles.Length * 100L;
+        var totalDirs = childDirs.Length;
+        var totalFiles = childFiles.Length;
+        long totalBytes = childFiles.Length == 0 ? 0 : childFiles.Length * 100L;
 
-            foreach (var child in childDirs)
-            {
-                var childStats = ComputeStats(child);
-                totalDirs += childStats.DirCount;
-                totalFiles += childStats.FileCount;
-                totalBytes += childStats.TotalBytes;
-            }
-
-            return new DirAggregateStats
-            {
-                DirCount = totalDirs,
-                FileCount = totalFiles,
-                TotalBytes = totalBytes,
-                DuplicateFiles = 0,
-                DuplicateBytes = 0
-            };
+        foreach (var child in childDirs)
+        {
+            var childStats = ComputeStats(child);
+            totalDirs += childStats.DirCount;
+            totalFiles += childStats.FileCount;
+            totalBytes += childStats.TotalBytes;
         }
+
+        return new DirAggregateStats
+        {
+            DirCount = totalDirs,
+            FileCount = totalFiles,
+            TotalBytes = totalBytes,
+            DuplicateFiles = 0,
+            DuplicateBytes = 0
+        };
     }
+}
 
     internal static bool TryGetDirHandle(
         RepoSnapshotView snapshot,

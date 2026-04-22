@@ -7,8 +7,6 @@ using DuplicateFileFinder.Gui.Infrastructure.Util;
 using DuplicateFileFinder.GuiTests.Features.Duplicates.TestSupport;
 using DuplicateFileFinder.GuiTests.UI.Fakes;
 
-using DuplicateFileFinderLib.Repository.Interfaces;
-
 using Moq;
 
 using Xunit;
@@ -30,24 +28,30 @@ public sealed class ScanRootsTreeSelectionSyncTests
             ],
             files: []);
 
-        var repo = new FakeRepo(snapshot.ScanRoots.Values) { SnapshotToReturn = snapshot };
+        var repo = new FakeRepo(snapshot.ScanRoots.Values)
+        {
+            SnapshotToReturn = snapshot
+        };
+
         var fileDir = new FakeFileDirReadModel();
-        DuplicatesSelectionTestHelpers.SeedFileDir(fileDir, snapshot);
+        DuplicatesSelectionTestHelpers.ResetAndSeedFileDir(fileDir, snapshot);
 
-        var treeIndex = DuplicatesSelectionTestHelpers.BuildTreeIndex(snapshot);
+        var treeIndex = new FakeTreeIndex();
+        DuplicatesSelectionTestHelpers.ConfigureTreeIndex(treeIndex, snapshot);
 
-        var host = new Mock<IRepoHost>(MockBehavior.Strict);
-        host.SetupGet(x => x.Repo).Returns(repo);
-        host.SetupGet(x => x.FileDirIndex).Returns(fileDir);
-        host.SetupGet(x => x.TreeIndex).Returns(treeIndex);
-        host.SetupGet(x => x.HashIndex).Returns(DuplicatesSelectionTestHelpers.BuildEmptyHashIndex());
-        host.SetupGet(x => x.LastIndexedGeneration).Returns(1);
+        var host = new FakeRepoHost(repo)
+        {
+            FileDirIndex = fileDir,
+            TreeIndex = treeIndex,
+            HashIndex = new FakeHashIndex()
+        };
 
         var selectionContext = new DuplicateExplorerSelectionContext();
 
         var vm = new ScanRootsTreeViewModel(
+            host,
             new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher()),
-            new ScanRootsTreeBuilder(host.Object),
+            new ScanRootsTreeBuilder(host),
             Mock.Of<IScanRootsTreeNodeActions>(),
             Mock.Of<IDeletionWorkflowService>(),
             new DisposableManager(),
@@ -61,8 +65,8 @@ public sealed class ScanRootsTreeSelectionSyncTests
 
         var current = Assert.IsType<DuplicateExplorerSelectionContext.SelectionTarget>(selectionContext.Current);
         Assert.Equal(DuplicateExplorerSelectionContext.SelectionKind.Directory, current.Kind);
-        Assert.Equal(300, current.DirId);
-        Assert.Equal(200, current.ParentDirId);
+        Assert.Equal(300, current.ContextDirectoryId);
+        Assert.Equal(200, current.ParentOfContextDirectoryId);
 
         Assert.NotNull(vm.SelectedRow);
         Assert.Equal(300, snapshot.GetDirRecord(vm.SelectedRow!.Dir).DirId);
@@ -80,24 +84,30 @@ public sealed class ScanRootsTreeSelectionSyncTests
             ],
             files: []);
 
-        var repo = new FakeRepo(snapshot.ScanRoots.Values) { SnapshotToReturn = snapshot };
+        var repo = new FakeRepo(snapshot.ScanRoots.Values)
+        {
+            SnapshotToReturn = snapshot
+        };
+
         var fileDir = new FakeFileDirReadModel();
-        DuplicatesSelectionTestHelpers.SeedFileDir(fileDir, snapshot);
+        DuplicatesSelectionTestHelpers.ResetAndSeedFileDir(fileDir, snapshot);
 
-        var treeIndex = DuplicatesSelectionTestHelpers.BuildTreeIndex(snapshot);
+        var treeIndex = new FakeTreeIndex();
+        DuplicatesSelectionTestHelpers.ConfigureTreeIndex(treeIndex, snapshot);
 
-        var host = new Mock<IRepoHost>(MockBehavior.Strict);
-        host.SetupGet(x => x.Repo).Returns(repo);
-        host.SetupGet(x => x.FileDirIndex).Returns(fileDir);
-        host.SetupGet(x => x.TreeIndex).Returns(treeIndex);
-        host.SetupGet(x => x.HashIndex).Returns(DuplicatesSelectionTestHelpers.BuildEmptyHashIndex());
-        host.SetupGet(x => x.LastIndexedGeneration).Returns(1);
+        var host = new FakeRepoHost(repo)
+        {
+            FileDirIndex = fileDir,
+            TreeIndex = treeIndex,
+            HashIndex = new FakeHashIndex()
+        };
 
         var selectionContext = new DuplicateExplorerSelectionContext();
 
         var vm = new ScanRootsTreeViewModel(
+            host,
             new RepoUiEventRelayPlugin(new AvaloniaUiDispatcher()),
-            new ScanRootsTreeBuilder(host.Object),
+            new ScanRootsTreeBuilder(host),
             Mock.Of<IScanRootsTreeNodeActions>(),
             Mock.Of<IDeletionWorkflowService>(),
             new DisposableManager(),
@@ -108,7 +118,7 @@ public sealed class ScanRootsTreeSelectionSyncTests
         Assert.True(DuplicatesSelectionTestHelpers.TryGetDirHandle(snapshot, 1, 200, out var dir200));
 
         vm.NavigateToDir(dir200);
-        selectionContext.Current = DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(200, 100);
+        selectionContext.Current = DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory([100, 200]);
 
         Assert.NotNull(vm.SelectedRow);
         Assert.Equal(200, snapshot.GetDirRecord(vm.SelectedRow!.Dir).DirId);

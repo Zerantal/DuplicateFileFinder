@@ -50,4 +50,13 @@ public sealed class FakeTreeIndex : ITreeIndexReadModel
         preorder = 0;
         return false;
     }
+
+    public void Reset()
+    {
+        GetDirStatsImpl = null;
+        GetChildDirsImpl = null;
+        GetChildFilesImpl = null;
+        TryGetSubtreeRangeImpl = null;
+        TryGetFileDirPreorderImpl = null;
+    }
 }

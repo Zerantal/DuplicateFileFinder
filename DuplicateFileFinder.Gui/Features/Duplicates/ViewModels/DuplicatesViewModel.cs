@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -138,103 +139,80 @@ public class DuplicatesViewModel : ObservableObject
     {
         var capturedSelection = _selectionContext.Current;
 
-        ScanRootsTree.Rebuild(snapshot);
-
-        DuplicateGroups.Rebuild(snapshot);
-
-        using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
+        using (_selectionContext.SuspendNotifications())
         {
-            TreeMapController.Rebuild(snapshot);
-        }
+            ScanRootsTree.Rebuild(snapshot);
+            DuplicateGroups.Rebuild(snapshot);
 
-        var restoredSelection = ResolveSelectionTarget(snapshot, capturedSelection);
-        _selectionContext.SetCurrent(restoredSelection, forceNotify: true);
+            using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
+            {
+                TreeMapController.Rebuild(snapshot);
+            }
+
+            var restoredSelection = ResolveSelectionTarget(capturedSelection);
+            _selectionContext.Current = restoredSelection;
+        }
     }
 
     private void SyncDuplicateGroupsFilterFromSelection()
     {
-        var dirId = DuplicateSelectionTranslator.GetDesiredTreeDirectory(_selectionContext.Current);
-
         DirHandle? subtree = null;
-        if (dirId is { } existingDirId && _fileDirIndex.TryGetDir(existingDirId, out var handle))
+
+        if (_selectionContext.Current?.ContextDirectoryId is { } dirId
+            && _fileDirIndex.TryGetDir(dirId, out var handle))
+        {
             subtree = handle;
+        }
 
         DuplicateGroups.SelectedSubtreeDir = subtree;
     }
 
     private DuplicateExplorerSelectionContext.SelectionTarget? ResolveSelectionTarget(
-        RepoSnapshotView snapshot,
         DuplicateExplorerSelectionContext.SelectionTarget? captured)
     {
         if (captured is null)
             return null;
 
-        if (captured.Value.Kind == DuplicateExplorerSelectionContext.SelectionKind.File
-            && captured.Value.FileId is { } fileId
-            && _fileDirIndex.TryGetFile(fileId, out _))
+        return captured.Value.Kind switch
         {
-            return captured;
-        }
+            DuplicateExplorerSelectionContext.SelectionKind.Directory =>
+                ResolveDirectoryLikeSelection(captured.Value.DirectoryChain),
 
-        DirId? desiredDirId = captured.Value.Kind switch
-        {
-            DuplicateExplorerSelectionContext.SelectionKind.Directory => captured.Value.DirId,
-            DuplicateExplorerSelectionContext.SelectionKind.File => captured.Value.ParentDirId,
-            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket => captured.Value.ParentDirId,
+            DuplicateExplorerSelectionContext.SelectionKind.File =>
+                ResolveFileSelection(captured.Value),
+
+            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket =>
+                ResolveDirectoryLikeSelection(captured.Value.DirectoryChain),
+
             _ => null
         };
-
-        if (desiredDirId is not { } dirId)
-            return null;
-
-        if (!TryResolveExistingOrAncestorDirId(snapshot, dirId, out var resolvedDirId))
-            return null;
-
-        DirId? parentDirId = TryGetParentDirId(snapshot, resolvedDirId, out var parent)
-            ? parent
-            : null;
-
-        return DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(resolvedDirId, parentDirId);
     }
 
-    private bool TryResolveExistingOrAncestorDirId(
-        RepoSnapshotView snapshot,
-        DirId preferredDirId,
-        out DirId resolvedDirId)
+    private DuplicateExplorerSelectionContext.SelectionTarget? ResolveFileSelection(
+        DuplicateExplorerSelectionContext.SelectionTarget captured)
     {
-        var current = preferredDirId;
+        if (captured.FileId is { } fileId && _fileDirIndex.TryGetFile(fileId, out _))
+            return captured;
 
-        while (current >= 0)
+        return ResolveDirectoryLikeSelection(captured.DirectoryChain);
+    }
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? ResolveDirectoryLikeSelection(
+        ImmutableArray<DirId> capturedChain)
+    {
+        if (capturedChain.IsDefaultOrEmpty)
+            return null;
+
+        for (var i = capturedChain.Length - 1; i >= 0; i--)
         {
-            if (_fileDirIndex.TryGetDir(current, out _))
-            {
-                resolvedDirId = current;
-                return true;
-            }
+            var candidateDirId = capturedChain[i];
+            if (!_fileDirIndex.TryGetDir(candidateDirId, out _))
+                continue;
 
-            if (!TryGetParentDirId(snapshot, current, out current))
-                break;
+            var survivingChain = capturedChain.Take(i + 1).ToImmutableArray();
+            return DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(survivingChain);
         }
 
-        resolvedDirId = -1;
-        return false;
-    }
-
-    private bool TryGetParentDirId(
-        RepoSnapshotView snapshot,
-        DirId dirId,
-        out DirId parentDirId)
-    {
-        parentDirId = -1;
-
-        if (!_fileDirIndex.TryGetDir(dirId, out var handle))
-            return false;
-
-        var rec = snapshot.GetDirRecord(handle);
-        if (rec.ParentDirId < 0)
-            return false;
-
-        parentDirId = rec.ParentDirId;
-        return true;
+        return null;
     }
 }

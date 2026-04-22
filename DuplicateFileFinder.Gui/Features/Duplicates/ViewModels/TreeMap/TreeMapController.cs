@@ -212,7 +212,7 @@ public partial class TreeMapController : ObservableObject, IAsyncDisposable
         if (_lastSnapshot is null)
             return null;
 
-        return DuplicateSelectionTranslator.FromTreeMapNode(_lastSnapshot, node);
+        return DuplicateSelectionTranslator.FromTreeMapNode(_lastSnapshot, _fileDirIndex, node);
     }
 
     private void ApplySelectionTarget(DuplicateExplorerSelectionContext.SelectionTarget? target) =>
@@ -232,18 +232,13 @@ public partial class TreeMapController : ObservableObject, IAsyncDisposable
             return fileNode;
         }
 
-        DirId? desiredDirId = target.Value.Kind switch
+        if (target.Value.ContextDirectoryId is { } dirId
+            && TryResolveExistingOrAncestorDirNode(dirId, out var dirNode))
         {
-            DuplicateExplorerSelectionContext.SelectionKind.Directory => target.Value.DirId,
-            DuplicateExplorerSelectionContext.SelectionKind.File => target.Value.ParentDirId,
-            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket => target.Value.ParentDirId,
-            _ => null
-        };
+            return dirNode;
+        }
 
-        if (desiredDirId is not { } dirId)
-            return null;
-
-        return TryResolveExistingOrAncestorDirNode(dirId, out var dirNode) ? dirNode : null;
+        return null;
     }
 
     private bool TryResolveExistingOrAncestorDirNode(

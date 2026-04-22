@@ -1,8 +1,11 @@
+using System.Collections.Immutable;
+
 using DuplicateFileFinder.Gui.Controls.TreeMap;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.Application;
 
@@ -10,19 +13,21 @@ public static class DuplicateSelectionTranslator
 {
     public static DuplicateExplorerSelectionContext.SelectionTarget? FromTreeRow(
         RepoSnapshotView snapshot,
+        IFileDirReadModel fileDirIndex,
         ScanRootsRowViewModel? row)
     {
         if (row?.Dir is not { IsValid: true } dirHandle)
             return null;
 
-        var rec = snapshot.GetDirRecord(dirHandle);
-        var parentDirId = rec.ParentDirId >= 0 ? (DirId?)rec.ParentDirId : null;
-
-        return DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(rec.DirId, parentDirId);
+        var chain = BuildDirectoryChain(snapshot, fileDirIndex, dirHandle);
+        return chain.Length == 0
+            ? null
+            : DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(chain);
     }
 
     public static DuplicateExplorerSelectionContext.SelectionTarget? FromTreeMapNode(
         RepoSnapshotView snapshot,
+        IFileDirReadModel fileDirIndex,
         TreeMapNode<ITreeMapNodeElement>? node)
     {
         if (node?.Element is null)
@@ -31,42 +36,62 @@ public static class DuplicateSelectionTranslator
         switch (node.Element)
         {
             case DirTreeMapElement dirElement:
-                {
-                    var rec = snapshot.GetDirRecord(dirElement.Dir);
-                    var parentDirId = rec.ParentDirId >= 0 ? (DirId?)rec.ParentDirId : null;
-                    return DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(rec.DirId, parentDirId);
-                }
+            {
+                var chain = BuildDirectoryChain(snapshot, fileDirIndex, dirElement.Dir);
+                return chain.Length == 0
+                    ? null
+                    : DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(chain);
+            }
 
             case FileTreeMapElement fileElement:
-                {
-                    var rec = snapshot.GetFileRecord(fileElement.File);
-                    var parentDirId = rec.DirId >= 0 ? (DirId?)rec.DirId : null;
-                    return DuplicateExplorerSelectionContext.SelectionTarget.ForFile(rec.FileId, parentDirId);
-                }
+            {
+                var fileRec = snapshot.GetFileRecord(fileElement.File);
+
+                if (!fileDirIndex.TryGetDir(fileRec.DirId, out var parentDirHandle))
+                    return null;
+
+                var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDirHandle);
+                return chain.Length == 0
+                    ? null
+                    : DuplicateExplorerSelectionContext.SelectionTarget.ForFile(fileRec.FileId, chain);
+            }
 
             case SyntheticTreeMapElement { ParentDir: { } parentDir }:
-                {
-                    var rec = snapshot.GetDirRecord(parentDir);
-                    return DuplicateExplorerSelectionContext.SelectionTarget.ForSyntheticDirectoryBucket(rec.DirId);
-                }
+            {
+                var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDir);
+                return chain.Length == 0
+                    ? null
+                    : DuplicateExplorerSelectionContext.SelectionTarget.ForSyntheticDirectoryBucket(chain);
+            }
 
             default:
                 return null;
         }
     }
 
-    public static DirId? GetDesiredTreeDirectory(
-        DuplicateExplorerSelectionContext.SelectionTarget? target)
-    {
-        if (target is null)
-            return null;
 
-        return target.Value.Kind switch
+
+    private static ImmutableArray<DirId> BuildDirectoryChain(
+        RepoSnapshotView snapshot,
+        IFileDirReadModel fileDirIndex,
+        DirHandle dirHandle)
+    {
+        var builder = ImmutableArray.CreateBuilder<DirId>();
+        var current = dirHandle;
+
+        while (current.IsValid)
         {
-            DuplicateExplorerSelectionContext.SelectionKind.Directory => target.Value.DirId,
-            DuplicateExplorerSelectionContext.SelectionKind.File => target.Value.ParentDirId,
-            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket => target.Value.ParentDirId,
-            _ => null
-        };
+            var rec = snapshot.GetDirRecord(current);
+            builder.Add(rec.DirId);
+
+            if (rec.ParentDirId < 0)
+                break;
+
+            if (!fileDirIndex.TryGetDir(rec.ParentDirId, out current))
+                break;
+        }
+
+        builder.Reverse();
+        return builder.ToImmutable();
     }
 }

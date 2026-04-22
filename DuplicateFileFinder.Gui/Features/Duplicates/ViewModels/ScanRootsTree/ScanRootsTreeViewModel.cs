@@ -12,6 +12,8 @@ using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Core.RepoEventing;
+using DuplicateFileFinderLib.Repository.Interfaces;
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 // ReSharper disable UnusedParameterInPartialMethod
 
@@ -24,6 +26,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     private readonly IScanRootsTreeNodeActions _actions;
     private readonly IDeletionWorkflowService _deletionService;
     private readonly ScanRootsTreeBuilder _builder;
+
     // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
     private readonly SharedSelectionBinder<ScanRootsRowViewModel> _selectionBinder;
 
@@ -31,24 +34,25 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     private readonly Dictionary<long, int> _rootIndexByScanRootId = new();
 
     // Remember expanded handles so Resort/Rebuild can restore expansion state
-    private readonly HashSet<DirHandle> _expanded = new();
+    private readonly HashSet<DirHandle> _expanded = [];
 
     // Handle->row for quick selection
     private readonly Dictionary<DirHandle, ScanRootsRowViewModel> _rowByHandle = new();
 
     private readonly DuplicateExplorerSelectionContext _selectionContext;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SelectedPath))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedPath))]
     private ScanRootsRowViewModel? _selectedRow;
 
     private RepoSnapshotView? _snapshot;
+    private readonly IFileDirReadModel _fileDirIndex;
 
     [ObservableProperty] private ScanRootsSortColumn _sortColumn = ScanRootsSortColumn.Size;
 
     [ObservableProperty] private bool _sortDescending = true;
 
     public ScanRootsTreeViewModel(
+        IRepoHost host,
         RepoUiEventRelayPlugin repoEvents,
         ScanRootsTreeBuilder builder,
         IScanRootsTreeNodeActions actions,
@@ -56,11 +60,14 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         DisposableManager disposer,
         DuplicateExplorerSelectionContext selectionContext)
     {
+        ArgumentNullException.ThrowIfNull(host);
+
         _builder = builder ?? throw new ArgumentNullException(nameof(builder));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _deletionService = deletionService ?? throw new ArgumentNullException(nameof(deletionService));
         _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
         _selectionContext = selectionContext ?? throw new ArgumentNullException(nameof(selectionContext));
+        _fileDirIndex = host.FileDirIndex;
 
         _selectionBinder = new SharedSelectionBinder<ScanRootsRowViewModel>(
             _selectionContext,
@@ -148,7 +155,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
                 Rows.Add(CreateRow(model, 0));
 
             ApplyRootSort();
-            RebuildRootIndexMap_NoLock();
+            RebuildRootIndexMap();
         }
         finally
         {
@@ -156,7 +163,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
-    private void RebuildRootIndexMap_NoLock()
+    private void RebuildRootIndexMap()
     {
         _rootIndexByScanRootId.Clear();
 
@@ -269,7 +276,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
                 Rows.Insert(idx++, CreateRow(child, childDepth));
 
             var inserted = ordered.Count;
-            AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: insertAt + 1, delta: inserted);
+            AdjustRootIndicesAfterMutation(startIndexInclusive: insertAt + 1, delta: inserted);
         }
         finally
         {
@@ -310,7 +317,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
             }
 
             if (removed > 0)
-                AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: start + 1, delta: -removed);
+                AdjustRootIndicesAfterMutation(startIndexInclusive: start + 1, delta: -removed);
         }
         finally
         {
@@ -320,145 +327,30 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     // ---- Navigation API
 
-    // public void NavigateToDir(DirHandle dirHandle) => NavigateToDirHandleLazyFast(dirHandle);
-    public void NavigateToDir(DirHandle dirHandle) => NavigateToDirHandleLazyFull(dirHandle);
+    public void NavigateToDir(DirHandle dirHandle)
+    {
+        var row = TryEnsureVisibleRow(dirHandle);
+        if (row is not null)
+            SelectRowAndCenter(row);
+    }
 
     public void NavigateToFile(FileHandle fileHandle)
     {
-        // if (_builder.TryGetParentDirHandle(fileHandle, out var parent))
-        //     NavigateToDirHandleLazyFast(parent);
         if (_builder.TryGetParentDirHandle(fileHandle, out var parent))
-            NavigateToDirHandleLazyFull(parent);
-    }
-
-    // This expands the path using full child creation, which materializes all siblings.
-    private void NavigateToDirHandleLazyFull(DirHandle target)
-    {
-        if (_snapshot is null)
-            return;
-
-        if (!_builder.TryBuildAncestorChainToScanRoot(target, out var chain))
-            return;
-
-        // Find root row
-        if (!_rowByHandle.TryGetValue(chain[0], out var current))
-            return;
-
-        // Expand path with full sibling enumeration
-        for (var i = 1; i < chain.Count; i++)
-        {
-            var parentRow = current;
-            var parentIndex = Rows.IndexOf(parentRow);
-            if (parentIndex < 0)
-                return;
-
-            if (!parentRow.IsExpanded)
-                Expand(parentRow);
-
-            var childHandle = chain[i];
-
-            if (!_rowByHandle.TryGetValue(childHandle, out current))
-                return;
-        }
-
-        SelectRowAndCenter(current);
-    }
-
-    // This only expands the path using fast child creation, without loading all siblings
-    // ReSharper disable once UnusedMember.Local
-    private void NavigateToDirHandleLazyFast(DirHandle target)
-    {
-        if (_snapshot is null)
-            return;
-
-        if (!_builder.TryBuildAncestorChainToScanRoot(target, out var chain))
-            return;
-
-        // Find root row
-        if (!_rowByHandle.TryGetValue(chain[0], out var current))
-            return;
-
-        // Expand path using FAST child creation (no sibling enumeration)
-        for (var i = 1; i < chain.Count; i++)
-        {
-            var parentRow = current;
-            var parentIndex = Rows.IndexOf(parentRow);
-            if (parentIndex < 0)
-                return;
-
-            var childHandle = chain[i];
-
-            // Ensure parent is marked expanded (for UI glyph/state)
-            parentRow.IsExpanded = true;
-            _expanded.Add(parentRow.Dir);
-
-            // If the child row already exists in the visible rows at the expected depth, use it.
-            if (_rowByHandle.TryGetValue(childHandle, out var existing))
-            {
-                current = existing;
-                continue;
-            }
-
-            // Ensure child MODEL without materializing siblings (critical).
-            if (!_builder.TryEnsureChildNodeFast(parentRow.Model, childHandle, out var childModel))
-                return;
-
-            // Insert child row directly under the parent if the subtree isn't already visible.
-            // If the next row is already a descendant, we don't insert here (avoid duplicates).
-            var nextIndex = parentIndex + 1;
-            if (nextIndex < Rows.Count && Rows[nextIndex].Depth > parentRow.Depth)
-                // subtree already present; try find the child in the visible range
-                current = FindInVisibleSubtree(parentRow, childHandle) ??
-                          CreateAndInsertSingleChild(parentRow, childModel);
-            else
-                current = CreateAndInsertSingleChild(parentRow, childModel);
-        }
-
-        SelectRowAndCenter(current);
-    }
-
-    private ScanRootsRowViewModel CreateAndInsertSingleChild(ScanRootsRowViewModel parentRow,
-        ScanRootsTreeNode childModel)
-    {
-        var parentIndex = Rows.IndexOf(parentRow);
-        var row = CreateRow(childModel, parentRow.Depth + 1);
-
-        Rows.Insert(parentIndex + 1, row);
-        return row;
-    }
-
-    private ScanRootsRowViewModel? FindInVisibleSubtree(ScanRootsRowViewModel parent, DirHandle wanted)
-    {
-        var start = Rows.IndexOf(parent);
-        if (start < 0)
-            return null;
-
-        var parentDepth = parent.Depth;
-        for (var i = start + 1; i < Rows.Count && Rows[i].Depth > parentDepth; i++)
-            if (Rows[i].Dir.Equals(wanted))
-                return Rows[i];
-
-        return null;
+            NavigateToDir(parent);
     }
 
     // ---- Ordering ----
 
     private List<ScanRootsTreeNode> OrderModels(List<ScanRootsTreeNode> models)
     {
-        var cmp = GetComparison();
-
         var list = models.ToList();
-        list.Sort((a, b) => cmp(Project(a), Project(b)));
+        list.Sort(GetModelComparison());
 
         if (SortDescending)
             list.Reverse();
 
         return list;
-
-        ScanRootsRowViewModel Project(ScanRootsTreeNode m)
-        {
-            return new ScanRootsRowViewModel(m, null, null, 0);
-        }
     }
 
     private void ApplyRootSort()
@@ -488,6 +380,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
+
     private void ResortVisible()
     {
         // Minimal-pain approach:
@@ -500,6 +393,20 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         BuildFromRoots();
         RestoreExpandedState(toRestoreExpanded);
         ApplySelectionTarget(_selectionContext.Current);
+    }
+
+    private Comparison<ScanRootsTreeNode> GetModelComparison()
+    {
+        return SortColumn switch
+        {
+            ScanRootsSortColumn.Name => static (a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name),
+            ScanRootsSortColumn.Size => static (a, b) => a.TotalBytes.CompareTo(b.TotalBytes),
+            ScanRootsSortColumn.Items => static (a, b) => a.ItemCount.CompareTo(b.ItemCount),
+            ScanRootsSortColumn.Files => static (a, b) => a.FileCount.CompareTo(b.FileCount),
+            ScanRootsSortColumn.DupFiles => static (a, b) => a.DuplicateFiles.CompareTo(b.DuplicateFiles),
+            ScanRootsSortColumn.DupBytes => static (a, b) => a.DuplicateBytes.CompareTo(b.DuplicateBytes),
+            _ => static (_, _) => 0
+        };
     }
 
     private Comparison<ScanRootsRowViewModel> GetComparison()
@@ -518,67 +425,36 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     private void RemoveScanRootFromRows(long scanRootId)
     {
-        if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out var rootIndex))
-            return; // already removed / not visible
+        if (!TryGetValidatedRootIndex(scanRootId, out var rootIndex))
+            return;
 
-        if (rootIndex < 0 || rootIndex >= Rows.Count)
-        {
-            // Map got stale somehow; fall back to a quick rebuild of the map and retry once.
-            RebuildRootIndexMap_NoLock();
-            if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex))
-                return;
-            if (rootIndex < 0 || rootIndex >= Rows.Count)
-                return;
-        }
+        var endExclusive = rootIndex + 1;
+        while (endExclusive < Rows.Count && Rows[endExclusive].Depth > 0)
+            endExclusive++;
 
-        // Verify root at index (defensive)
-        var rootRow = Rows[rootIndex];
-        if (rootRow.Depth != 0 || rootRow.ScanRootId != scanRootId)
-        {
-            // Map stale due to unusual reorder; rebuild and retry once
-            RebuildRootIndexMap_NoLock();
-            if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex))
-                return;
+        var rowsToRemove = endExclusive - rootIndex;
+        if (rowsToRemove <= 0)
+            return;
 
-            rootRow = Rows[rootIndex];
-            if (rootRow.Depth != 0 || rootRow.ScanRootId != scanRootId)
-                return;
-        }
-
-        // If selection is inside subtree, clear it
-        if (SelectedRow is not null && SelectedRow.ScanRootId == scanRootId)
-            SelectedRow = null;
+        ClearSelectionIfInsideRemovedRoot(rootIndex, rowsToRemove);
 
         Rows.BeginUpdate();
         try
         {
-            // Remove contiguous visible range: root + its descendants until next root (depth 0) or end.
-            var removeAt = rootIndex;
-            var removedCount = 0;
-
-            while (removeAt < Rows.Count)
+            for (var i = 0; i < rowsToRemove; i++)
             {
-                if (removedCount > 0 && Rows[removeAt].Depth == 0)
-                    break; // next root => stop
-
-                var row = Rows[removeAt];
-
-                // Clear caches for real handles
+                var row = Rows[rootIndex];
                 if (row.Dir.IsValid)
                 {
                     _expanded.Remove(row.Dir);
                     _rowByHandle.Remove(row.Dir);
                 }
 
-                Rows.RemoveAt(removeAt);
-                removedCount++;
+                Rows.RemoveAt(rootIndex);
             }
 
-            // Remove root entry from root-index map
             _rootIndexByScanRootId.Remove(scanRootId);
-
-            // Adjust cached root indices for roots after the removed region
-            AdjustRootIndicesAfterMutation_NoLock(startIndexInclusive: rootIndex, delta: -removedCount);
+            AdjustRootIndicesAfterMutation(rootIndex, -rowsToRemove);
         }
         finally
         {
@@ -586,13 +462,8 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
-    private void AdjustRootIndicesAfterMutation_NoLock(int startIndexInclusive, int delta)
+    private void AdjustRootIndicesAfterMutation(int startIndexInclusive, int delta)
     {
-        if (delta == 0 || _rootIndexByScanRootId.Count == 0)
-            return;
-
-        // Only roots whose index is >= startIndexInclusive are affected
-        // (root rows can be anywhere due to expansions above them).
         var keys = _rootIndexByScanRootId.Keys.ToArray();
         foreach (var key in keys)
         {
@@ -600,6 +471,31 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
             if (idx >= startIndexInclusive)
                 _rootIndexByScanRootId[key] = idx + delta;
         }
+    }
+
+    private bool TryGetValidatedRootIndex(long scanRootId, out int rootIndex)
+    {
+        if (!_rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex))
+            return false;
+
+        if (rootIndex >= 0 && rootIndex < Rows.Count)
+            return true;
+
+        RebuildRootIndexMap();
+
+        return _rootIndexByScanRootId.TryGetValue(scanRootId, out rootIndex)
+               && rootIndex >= 0
+               && rootIndex < Rows.Count;
+    }
+
+    private void ClearSelectionIfInsideRemovedRoot(int rootIndex, int rowsToRemove)
+    {
+        if (SelectedRow is null)
+            return;
+
+        var selectedIndex = Rows.IndexOf(SelectedRow);
+        if (selectedIndex >= rootIndex && selectedIndex < rootIndex + rowsToRemove)
+            SelectedRow = null;
     }
 
     // ----------------------------
@@ -612,7 +508,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         if (_snapshot is null)
             return null;
 
-        return DuplicateSelectionTranslator.FromTreeRow(_snapshot, row);
+        return DuplicateSelectionTranslator.FromTreeRow(_snapshot, _fileDirIndex, row);
     }
 
     private bool TryResolveExistingOrAncestorHandle(DirHandle preferred, out DirHandle resolved)
@@ -639,7 +535,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         DuplicateExplorerSelectionContext.SelectionTarget? target,
         bool centerAfterSelect = false)
     {
-        var handle = ResolveHandleFromSharedSelection(target);
+        var handle = ResolveHandleFromSelectionTarget(target);
         if (handle is not { IsValid: true } dirHandle)
         {
             SelectedRow = null;
@@ -664,14 +560,13 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
             RequestCenterSelectedRow?.Invoke();
     }
 
-    private DirHandle? ResolveHandleFromSharedSelection(
+    private DirHandle? ResolveHandleFromSelectionTarget(
         DuplicateExplorerSelectionContext.SelectionTarget? target)
     {
         if (_snapshot is null)
             return null;
 
-        var dirId = DuplicateSelectionTranslator.GetDesiredTreeDirectory(target);
-        if (dirId is not { } desiredDirId)
+        if (target?.ContextDirectoryId is not { } desiredDirId)
             return null;
 
         return _builder.TryGetDirHandle(desiredDirId, out var handle)
@@ -725,27 +620,32 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         }
     }
 
-    private bool EnsureVisible(DirHandle handle)
-    {
-        if (_rowByHandle.ContainsKey(handle))
-            return true;
+    private bool EnsureVisible(DirHandle handle) => TryEnsureVisibleRow(handle) is not null;
 
-        if (!_builder.TryBuildAncestorChainToScanRoot(handle, out var chain) || chain.Count == 0)
-            return false;
+    private ScanRootsRowViewModel? TryEnsureVisibleRow(DirHandle target)
+    {
+        if (_snapshot is null)
+            return null;
+
+        if (_rowByHandle.TryGetValue(target, out var existing))
+            return existing;
+
+        if (!_builder.TryBuildAncestorChainToScanRoot(target, out var chain) || chain.Count == 0)
+            return null;
 
         if (!_rowByHandle.TryGetValue(chain[0], out var current))
-            return false;
+            return null;
 
         for (var i = 1; i < chain.Count; i++)
         {
-            if (current is { IsExpanded: false, HasLazyChildren: true })
+            if (!current.IsExpanded)
                 Expand(current);
 
             if (!_rowByHandle.TryGetValue(chain[i], out current))
-                return false;
+                return null;
         }
 
-        return true;
+        return current;
     }
 
     // ------------------------------

@@ -35,4 +35,11 @@ public sealed class FakeHashIndex : IHashIndexReadModel
 
     public int TotalDuplicateFileCount { get; init; }
     public long TotalSpaceTakenByDuplicates { get; init; }
+
+    public void Reset()
+    {
+        GetGroupsPageImpl = null;
+        GetGroupsPageWithFilterImpl = null;
+        GetGroupFilesImpl = null;
+    }
 }
