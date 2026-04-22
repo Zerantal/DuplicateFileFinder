@@ -182,28 +182,28 @@ internal static class DuplicatesSelectionTestHelpers
             var childDirs = childDirsByParent.TryGetValue(dir, out var dirs) ? dirs : [];
             var childFiles = childFilesByParent.TryGetValue(dir, out var files) ? files : [];
 
-        var totalDirs = childDirs.Length;
-        var totalFiles = childFiles.Length;
-        long totalBytes = childFiles.Length == 0 ? 0 : childFiles.Length * 100L;
+            var totalDirs = childDirs.Length;
+            var totalFiles = childFiles.Length;
+            long totalBytes = childFiles.Length == 0 ? 0 : childFiles.Length * 100L;
 
-        foreach (var child in childDirs)
-        {
-            var childStats = ComputeStats(child);
-            totalDirs += childStats.DirCount;
-            totalFiles += childStats.FileCount;
-            totalBytes += childStats.TotalBytes;
+            foreach (var child in childDirs)
+            {
+                var childStats = ComputeStats(child);
+                totalDirs += childStats.DirCount;
+                totalFiles += childStats.FileCount;
+                totalBytes += childStats.TotalBytes;
+            }
+
+            return new DirAggregateStats
+            {
+                DirCount = totalDirs,
+                FileCount = totalFiles,
+                TotalBytes = totalBytes,
+                DuplicateFiles = 0,
+                DuplicateBytes = 0
+            };
         }
-
-        return new DirAggregateStats
-        {
-            DirCount = totalDirs,
-            FileCount = totalFiles,
-            TotalBytes = totalBytes,
-            DuplicateFiles = 0,
-            DuplicateBytes = 0
-        };
     }
-}
 
     internal static bool TryGetDirHandle(
         RepoSnapshotView snapshot,

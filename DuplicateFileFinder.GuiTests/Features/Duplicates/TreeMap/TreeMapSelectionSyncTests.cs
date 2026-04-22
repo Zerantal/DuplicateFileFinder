@@ -148,7 +148,7 @@ public sealed class TreeMapSelectionSyncTests
         }
 
         return null;
-}
+    }
 
     private static IEnumerable<TreeMapNode<ITreeMapNodeElement>> Traverse(TreeMapNode<ITreeMapNodeElement> root)
     {

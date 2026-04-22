@@ -36,33 +36,33 @@ public static class DuplicateSelectionTranslator
         switch (node.Element)
         {
             case DirTreeMapElement dirElement:
-            {
-                var chain = BuildDirectoryChain(snapshot, fileDirIndex, dirElement.Dir);
-                return chain.Length == 0
-                    ? null
-                    : DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(chain);
-            }
+                {
+                    var chain = BuildDirectoryChain(snapshot, fileDirIndex, dirElement.Dir);
+                    return chain.Length == 0
+                        ? null
+                        : DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(chain);
+                }
 
             case FileTreeMapElement fileElement:
-            {
-                var fileRec = snapshot.GetFileRecord(fileElement.File);
+                {
+                    var fileRec = snapshot.GetFileRecord(fileElement.File);
 
-                if (!fileDirIndex.TryGetDir(fileRec.DirId, out var parentDirHandle))
-                    return null;
+                    if (!fileDirIndex.TryGetDir(fileRec.DirId, out var parentDirHandle))
+                        return null;
 
-                var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDirHandle);
-                return chain.Length == 0
-                    ? null
-                    : DuplicateExplorerSelectionContext.SelectionTarget.ForFile(fileRec.FileId, chain);
-            }
+                    var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDirHandle);
+                    return chain.Length == 0
+                        ? null
+                        : DuplicateExplorerSelectionContext.SelectionTarget.ForFile(fileRec.FileId, chain);
+                }
 
             case SyntheticTreeMapElement { ParentDir: { } parentDir }:
-            {
-                var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDir);
-                return chain.Length == 0
-                    ? null
-                    : DuplicateExplorerSelectionContext.SelectionTarget.ForSyntheticDirectoryBucket(chain);
-            }
+                {
+                    var chain = BuildDirectoryChain(snapshot, fileDirIndex, parentDir);
+                    return chain.Length == 0
+                        ? null
+                        : DuplicateExplorerSelectionContext.SelectionTarget.ForSyntheticDirectoryBucket(chain);
+                }
 
             default:
                 return null;

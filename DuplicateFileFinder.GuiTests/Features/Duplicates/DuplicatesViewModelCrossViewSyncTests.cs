@@ -195,7 +195,10 @@ public sealed class DuplicatesViewModelCrossViewSyncTests
             Metric = TreeMapMetric.TotalBytes,
             Options = new TreeMapBuildOptions
             {
-                MaxDepth = 8, MaxSubdirsPerDir = 64, MaxFilesPerDir = 64, MaxTotalFileNodes = 1024
+                MaxDepth = 8,
+                MaxSubdirsPerDir = 64,
+                MaxFilesPerDir = 64,
+                MaxTotalFileNodes = 1024
             }
         };
 

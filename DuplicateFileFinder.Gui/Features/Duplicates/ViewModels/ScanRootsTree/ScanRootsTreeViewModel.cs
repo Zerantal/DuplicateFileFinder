@@ -41,7 +41,8 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
     private readonly DuplicateExplorerSelectionContext _selectionContext;
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(SelectedPath))]
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectedPath))]
     private ScanRootsRowViewModel? _selectedRow;
 
     private RepoSnapshotView? _snapshot;
