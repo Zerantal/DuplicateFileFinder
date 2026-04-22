@@ -1,22 +1,29 @@
+using System.Collections.Immutable;
+using System.ComponentModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using DuplicateFileFinder.Gui.Controls.TreeMap;
+using DuplicateFileFinder.Gui.Features.Duplicates.Application;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.DuplicateGroups;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 using DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.TreeMap;
+using DuplicateFileFinder.Gui.Infrastructure.Util;
 
 using DuplicateFileFinderLib.Logging;
 using DuplicateFileFinderLib.Repository.Core.Models;
 using DuplicateFileFinderLib.Repository.Interfaces;
-// ReSharper disable PartialTypeWithSinglePart
+using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels;
 
-public partial class DuplicatesViewModel : ObservableObject
+public class DuplicatesViewModel : ObservableObject
 {
     private readonly IRepo _repo;
+    private readonly IFileDirReadModel _fileDirIndex;
+    private readonly DuplicateExplorerSelectionContext _selectionContext;
 
-    private bool _syncingSelection;
+    // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
+    private readonly DisposableManager _disposer;
 
     public ScanRootsTreeViewModel ScanRootsTree { get; }
     public TreeMapActionsViewModel TreeMapActions { get; }
@@ -27,129 +34,31 @@ public partial class DuplicatesViewModel : ObservableObject
         ScanRootsTreeViewModel scanRootsTree,
         TreeMapController treeMapController,
         TreeMapActionsViewModel treeMapActions,
-        DuplicateGroupsViewModel duplicateGroups)
+        DuplicateGroupsViewModel duplicateGroups,
+        DuplicateExplorerSelectionContext selectionContext,
+        DisposableManager disposer)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _repo = host.Repo;
+        _fileDirIndex = host.FileDirIndex;
+        _selectionContext = selectionContext ?? throw new ArgumentNullException(nameof(selectionContext));
+        _disposer = disposer ?? throw new ArgumentNullException(nameof(disposer));
 
         ScanRootsTree = scanRootsTree ?? throw new ArgumentNullException(nameof(scanRootsTree));
         TreeMapController = treeMapController ?? throw new ArgumentNullException(nameof(treeMapController));
         TreeMapActions = treeMapActions ?? throw new ArgumentNullException(nameof(treeMapActions));
         DuplicateGroups = duplicateGroups ?? throw new ArgumentNullException(nameof(duplicateGroups));
 
-        // treemap selection drives navigation
-        TreeMapController.PropertyChanged += (_, e) =>
+        PropertyChangedEventHandler selectionHandler = (_, e) =>
         {
-            if (e.PropertyName == nameof(TreeMapController.SelectedNode))
-                OnTreeMapSelectionChanged();
+            if (e.PropertyName == nameof(DuplicateExplorerSelectionContext.Current))
+                SyncDuplicateGroupsFilterFromSelection();
         };
-
-        // scan-roots selection drives treemap sync + duplicates subtree filter
-        ScanRootsTree.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName != nameof(ScanRootsTree.SelectedRow)) return;
-            OnScanRootsTreeSelectionChanged();
-            OnScanRootsTreeSelectionChanged_DuplicatesFilter();
-        };
+        _selectionContext.PropertyChanged += selectionHandler;
+        _disposer.Add(() => _selectionContext.PropertyChanged -= selectionHandler);
 
         LoadFromRepo();
-    }
-
-    private void OnScanRootsTreeSelectionChanged_DuplicatesFilter()
-    {
-        var row = ScanRootsTree.SelectedRow;
-
-        if (row?.Dir is { IsValid: true } dir)
-            DuplicateGroups.SelectedSubtreeDir = dir;
-        else
-            DuplicateGroups.SelectedSubtreeDir = null;
-    }
-
-    private void OnScanRootsTreeSelectionChanged()
-    {
-        if (_syncingSelection)
-            return;
-
-        var row = ScanRootsTree.SelectedRow;
-        if (row is null)
-        {
-            _syncingSelection = true;
-            try { TreeMapController.SelectedNode = null; }
-            finally { _syncingSelection = false; }
-            return;
-        }
-
-        // Nearest-ancestor fallback:
-        // try the selected row; if it isn't present in the treemap (depth cap, metric pruning, etc),
-        // walk up parents until we find something that exists.
-        var model = row.Model;
-        TreeMapNode<ITreeMapNodeElement>? target = null;
-
-        while (model is not null)
-        {
-            var dir = model.Dir;
-            if (dir.IsValid && TreeMapController.DirNodeByHandle.TryGetValue(dir, out var node))
-            {
-                target = node;
-                break;
-            }
-
-            model = model.Parent;
-        }
-
-        _syncingSelection = true;
-        try
-        {
-            // Prefer setting on UI thread to keep property-changed ordering consistent with view updates
-            Avalonia.Threading.Dispatcher.UIThread.Post(
-                () => TreeMapController.SelectedNode = target, // may be null if nothing found
-                Avalonia.Threading.DispatcherPriority.Background);
-        }
-        finally
-        {
-            _syncingSelection = false;
-        }
-    }
-
-    private void OnTreeMapSelectionChanged()
-    {
-        if (_syncingSelection)
-            return;
-
-        var node = TreeMapController.SelectedNode;
-        if (node?.Element == null)
-            return;
-
-        _syncingSelection = true;
-        try
-        {
-            if (node.Element is DirTreeMapElement dirNode)
-            {
-                var dir = dirNode.Dir;
-                Avalonia.Threading.Dispatcher.UIThread.Post(
-                    () => ScanRootsTree.NavigateToDir(dir),
-                    Avalonia.Threading.DispatcherPriority.Background);
-            }
-            else if (node.Element is FileTreeMapElement fileNode)
-            {
-                var file = fileNode.File;
-                Avalonia.Threading.Dispatcher.UIThread.Post(
-                    () => ScanRootsTree.NavigateToFile(file),
-                    Avalonia.Threading.DispatcherPriority.Background);
-            }
-            else if (node.Element is SyntheticTreeMapElement { ParentDir: not null } otherNode)
-            {
-                var dir = otherNode.ParentDir.Value;
-                Avalonia.Threading.Dispatcher.UIThread.Post(
-                    () => ScanRootsTree.NavigateToDir(dir),
-                    Avalonia.Threading.DispatcherPriority.Background);
-            }
-        }
-        finally
-        {
-            _syncingSelection = false;
-        }
     }
 
     // Expose treemap controller for binding
@@ -228,13 +137,82 @@ public partial class DuplicatesViewModel : ObservableObject
 
     private void InitializeFromSnapshot(RepoSnapshotView snapshot)
     {
-        ScanRootsTree.Rebuild(snapshot);
+        var capturedSelection = _selectionContext.Current;
 
-        DuplicateGroups.Rebuild(snapshot);
-
-        using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
+        using (_selectionContext.SuspendNotifications())
         {
-            TreeMapController.Rebuild(snapshot);
+            ScanRootsTree.Rebuild(snapshot);
+            DuplicateGroups.Rebuild(snapshot);
+
+            using (TimingLog.StartPhase("BuildDirectoryTreeMap()"))
+            {
+                TreeMapController.Rebuild(snapshot);
+            }
+
+            var restoredSelection = ResolveSelectionTarget(capturedSelection);
+            _selectionContext.Current = restoredSelection;
         }
+    }
+
+    private void SyncDuplicateGroupsFilterFromSelection()
+    {
+        DirHandle? subtree = null;
+
+        if (_selectionContext.Current?.ContextDirectoryId is { } dirId
+            && _fileDirIndex.TryGetDir(dirId, out var handle))
+        {
+            subtree = handle;
+        }
+
+        DuplicateGroups.SelectedSubtreeDir = subtree;
+    }
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? ResolveSelectionTarget(
+        DuplicateExplorerSelectionContext.SelectionTarget? captured)
+    {
+        if (captured is null)
+            return null;
+
+        return captured.Value.Kind switch
+        {
+            DuplicateExplorerSelectionContext.SelectionKind.Directory =>
+                ResolveDirectoryLikeSelection(captured.Value.DirectoryChain),
+
+            DuplicateExplorerSelectionContext.SelectionKind.File =>
+                ResolveFileSelection(captured.Value),
+
+            DuplicateExplorerSelectionContext.SelectionKind.SyntheticDirectoryBucket =>
+                ResolveDirectoryLikeSelection(captured.Value.DirectoryChain),
+
+            _ => null
+        };
+    }
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? ResolveFileSelection(
+        DuplicateExplorerSelectionContext.SelectionTarget captured)
+    {
+        if (captured.FileId is { } fileId && _fileDirIndex.TryGetFile(fileId, out _))
+            return captured;
+
+        return ResolveDirectoryLikeSelection(captured.DirectoryChain);
+    }
+
+    private DuplicateExplorerSelectionContext.SelectionTarget? ResolveDirectoryLikeSelection(
+        ImmutableArray<DirId> capturedChain)
+    {
+        if (capturedChain.IsDefaultOrEmpty)
+            return null;
+
+        for (var i = capturedChain.Length - 1; i >= 0; i--)
+        {
+            var candidateDirId = capturedChain[i];
+            if (!_fileDirIndex.TryGetDir(candidateDirId, out _))
+                continue;
+
+            var survivingChain = capturedChain.Take(i + 1).ToImmutableArray();
+            return DuplicateExplorerSelectionContext.SelectionTarget.ForDirectory(survivingChain);
+        }
+
+        return null;
     }
 }
