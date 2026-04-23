@@ -20,7 +20,7 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
 
     public string NameArrow => " ▼";
     public string SizeArrow => string.Empty;
-    public string ItemsArrow => string.Empty;
+    public string ItemsArrow => " ▼";
     public string FilesArrow => string.Empty;
     public string DupFilesArrow => string.Empty;
     public string DupBytesArrow => string.Empty;

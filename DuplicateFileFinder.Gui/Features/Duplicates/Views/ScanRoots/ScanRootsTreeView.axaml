@@ -14,22 +14,44 @@
   x:DataType="scanRootsTree:IScanRootsTreeViewContext"
   d:DataContext="{x:Static scanRootsTree:ScanRootsTreeDesignData.Instance}"
   d:DesignWidth="980"
-  d:DesignHeight="960">
+  d:DesignHeight="360">
 
   <UserControl.Resources>
-    <!-- Stronger accent-tinted fill so selection is visible in both light and dark themes. -->
-    <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#7F2D7DFF" />
+    <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#552D7DFF" />
+    <SolidColorBrush x:Key="ScanRootsSelectedRowRailBrush" Color="#FF2D7DFF" />
     <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
 
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
                                                SelectedBrush="{StaticResource ScanRootsSelectedRowBrush}"
                                                UnselectedBrush="Transparent" />
+    <converters:SelectedRowBackgroundConverter x:Key="SelectedRowRailConverter"
+                                               SelectedBrush="{StaticResource ScanRootsSelectedRowRailBrush}"
+                                               UnselectedBrush="Transparent" />
   </UserControl.Resources>
 
   <UserControl.Styles>
+    <!-- Debug outlining -->
+    <Styles>
+      <Style Selector="Border.debug-outline">
+        <Setter Property="BorderBrush" Value="#80FF0000" />
+        <Setter Property="BorderThickness" Value="2" />
+      </Style>
+
+      <Style Selector="Button.debug-outline">
+        <Setter Property="BorderBrush" Value="Orange" />
+        <Setter Property="BorderThickness" Value="2" />
+      </Style>
+
+      <Style Selector="Grid.debug-outline">
+        <Setter Property="ShowGridLines" Value="True" />
+      </Style>
+    </Styles>
+    <!-- ==================== -->
+
     <Style Selector="Border.scanroots-row">
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="MinHeight" Value="24" />
     </Style>
 
     <Style Selector="Button.scanroot-header:pointerover">
@@ -44,24 +66,6 @@
       <Setter Property="Opacity" Value="0.6" />
     </Style>
 
-    <!-- Debug outlining -->
-    <Styles>
-      <Style Selector="Border.debug-outline">
-        <Setter Property="BorderBrush" Value="#80FF0000" />
-        <Setter Property="BorderThickness" Value="2" />
-      </Style>
-
-      <Style Selector="Button.debug-outline">
-        <Setter Property="BorderBrush" Value="GreenYellow" />
-        <Setter Property="BorderThickness" Value="2" />
-      </Style>
-
-      <Style Selector="Grid.debug-outline">
-        <Setter Property="ShowGridLines" Value="True" />
-      </Style>
-    </Styles>
-    <!-- ==================== -->
-
     <Style Selector="Button.scanroot-header">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -70,7 +74,8 @@
 
       <Setter Property="Template">
         <ControlTemplate>
-          <Grid ColumnDefinitions="*,16">
+          <Grid ColumnDefinitions="*,20"
+                Margin="0,0,4,0">
 
             <TextBlock
               Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Text)}"
@@ -80,6 +85,8 @@
 
             <TextBlock Grid.Column="1"
                        Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
                        VerticalAlignment="Center"
                        Foreground="{TemplateBinding Foreground}" />
           </Grid>
@@ -119,6 +126,12 @@
       <Setter Property="Opacity" Value="1" />
     </Style>
 
+    <Style Selector="TextBlock.scanroots-number">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontFamily" Value="monospace" />
+    </Style>
+
     <!-- Row hover/selection  -->
     <Style Selector="Border.scanroots-row:pointerover">
       <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
@@ -135,7 +148,8 @@
             Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100" Classes="debug-outline">
+            ColumnDefinitions="2*,200,100,100,100,100,100"
+            Classes="debug-outline">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
@@ -148,10 +162,10 @@
         <Button Grid.Column="1"
                 Classes="scanroot-header"
                 scanRoots:HeaderButton.Text="Subtree %"
+                scanRoots:HeaderButton.TextAlignment="Center"
                 IsHitTestVisible="False"
                 MinWidth="100"
-                MaxWidth="400"
-                HorizontalAlignment="Center"/>
+                MaxWidth="400" />
 
         <Button Grid.Column="2"
                 Classes="scanroot-header"
@@ -195,6 +209,9 @@
 
       </Grid>
     </Border>
+    <Border DockPanel.Dock="Top"
+            Height="1"
+            Background="{DynamicResource ThemeBorderMidBrush}" />
 
     <!-- Virtualized "tree" -->
     <!-- ReSharper disable once InconsistentNaming -->
@@ -252,46 +269,63 @@
               </Border.ContextMenu>
 
               <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
-                    Margin="4,0,4,0"
-                    Background="Transparent" Classes="debug-outline">
+                    Margin="3,0,3,0"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    Classes="debug-outline">
 
                 <!-- Name column: indent + expander glyph + text -->
-                <DockPanel Grid.Column="0" LastChildFill="True">
+                <Grid Grid.Column="0"
+                      ColumnDefinitions="3,*">
+                  <Border Grid.Column="0">
+                    <Border.Background>
+                      <MultiBinding Converter="{StaticResource SelectedRowRailConverter}">
+                        <Binding />
+                        <Binding Path="$parent[UserControl].((scanRootsTree:IScanRootsTreeViewContext)DataContext).SelectedRow" />
+                      </MultiBinding>
+                    </Border.Background>
+                  </Border>
 
-                  <!-- Indent: depth provided by converter -->
-                  <Border Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
+                  <DockPanel Grid.Column="1"
+                            LastChildFill="True"
+                            VerticalAlignment="Center">
 
-                  <!-- Expander button -->
-                  <Button Classes="scanroots-expander"
-                          IsVisible="{Binding HasLazyChildren}"
-                          Command="{Binding $parent[UserControl].((scanRootsTree:IScanRootsTreeViewContext)DataContext).ToggleExpandedCommand}"
-                          CommandParameter="{Binding}">
-                    <Path Width="10"
-                          Height="10"
-                          Data="{Binding IsExpanded, Converter={StaticResource ExpandedToGeometryConverter}}"
-                          Stroke="{DynamicResource SystemControlForegroundBaseHighBrush}"
-                          StrokeThickness="1.6"
-                          StrokeLineCap="Round"
-                          StrokeJoin="Round" />
-                  </Button>
+                    <!-- Indent: depth provided by converter -->
+                    <Border Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
 
-                  <!-- Name -->
-                  <TextBlock Text="{Binding DisplayName}"
-                             TextTrimming="CharacterEllipsis"
-                             FontFamily="monospace" />
-                </DockPanel>
+                    <!-- Expander button -->
+                    <Button Classes="scanroots-expander"
+                            IsVisible="{Binding HasLazyChildren}"
+                            Command="{Binding $parent[UserControl].((scanRootsTree:IScanRootsTreeViewContext)DataContext).ToggleExpandedCommand}"
+                            CommandParameter="{Binding}">
+                      <Path Width="10"
+                            Height="10"
+                            Data="{Binding IsExpanded, Converter={StaticResource ExpandedToGeometryConverter}}"
+                            Stroke="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                            StrokeThickness="1.6"
+                            StrokeLineCap="Round"
+                            StrokeJoin="Round" />
+                    </Button>
+
+                    <!-- Name -->
+                    <TextBlock Text="{Binding DisplayName}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               FontFamily="monospace" />
+                  </DockPanel>
+                </Grid>
 
                 <!-- Subtree % -->
                 <Grid Grid.Column="1"
                       ColumnDefinitions="*,Auto"
                       VerticalAlignment="Center"
-                      HorizontalAlignment="Center"
                       MinWidth="100"
                       MaxWidth="400">
+
                   <ProgressBar Value="{Binding PercentOfScanRoot}"
                                Maximum="100"
                                Height="14"
-                               Margin="0,0,6,0" />
+                               Margin="3,0,3,0" />
                   <TextBlock Grid.Column="0"
                              Text="{Binding PercentOfScanRoot, StringFormat={}{0:F1}%}"
                              FontSize="11"
@@ -300,28 +334,33 @@
 
                 <!-- Size -->
                 <TextBlock Grid.Column="2"
+                           Classes="scanroots-number"
                            Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}"
-                           HorizontalAlignment="Right" />
+                           Margin="8,0,0,0" />
 
                 <!-- Items -->
                 <TextBlock Grid.Column="3"
+                           Classes="scanroots-number"
                            Text="{Binding ItemCount, StringFormat={}{0:N0}}"
-                           HorizontalAlignment="Right" />
+                           Margin="8,0,0,0" />
 
                 <!-- Files -->
                 <TextBlock Grid.Column="4"
+                           Classes="scanroots-number"
                            Text="{Binding FileCount, StringFormat={}{0:N0}}"
-                           HorizontalAlignment="Right" />
+                           Margin="8,0,0,0" />
 
                 <!-- Dup Files -->
                 <TextBlock Grid.Column="5"
+                           Classes="scanroots-number"
                            Text="{Binding DuplicateFiles, StringFormat={}{0:N0}}"
-                           HorizontalAlignment="Right" />
+                           Margin="8,0,0,0" />
 
                 <!-- Dup Bytes -->
                 <TextBlock Grid.Column="6"
+                           Classes="scanroots-number"
                            Text="{Binding DuplicateBytes, Converter={StaticResource BytesToHuman}}"
-                           HorizontalAlignment="Right" />
+                           Margin="8,0,0,0" />
 
               </Grid>
             </Border>
