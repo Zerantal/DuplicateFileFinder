@@ -132,6 +132,12 @@
       <Setter Property="FontFamily" Value="monospace" />
     </Style>
 
+    <Style Selector="Border.scanroots-number-cell">
+      <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+      <Setter Property="BorderThickness" Value="1,0,0,0" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+    </Style>
+
     <!-- Row hover/selection  -->
     <Style Selector="Border.scanroots-row:pointerover">
       <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
@@ -148,8 +154,7 @@
             Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100"
-            Classes="debug-outline">
+            ColumnDefinitions="2*,200,100,100,100,100,100">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
@@ -213,26 +218,27 @@
             Height="1"
             Background="{DynamicResource ThemeBorderMidBrush}" />
 
-    <!-- Virtualized "tree" -->
-    <!-- ReSharper disable once InconsistentNaming -->
-    <ScrollViewer x:Name="PART_Scroller">
+    <Grid>
+      <!-- Virtualized "tree" -->
       <!-- ReSharper disable once InconsistentNaming -->
-      <ItemsRepeater x:Name="PART_Repeater"
-                     ItemsSource="{Binding Rows}">
-        <ItemsRepeater.Layout>
-          <!-- default vertical stack; ItemsRepeater provides virtualization -->
-          <StackLayout Orientation="Vertical" />
-        </ItemsRepeater.Layout>
+      <ScrollViewer x:Name="PART_Scroller">
+        <!-- ReSharper disable once InconsistentNaming -->
+        <ItemsRepeater x:Name="PART_Repeater"
+                       ItemsSource="{Binding Rows}">
+          <ItemsRepeater.Layout>
+            <!-- default vertical stack; ItemsRepeater provides virtualization -->
+            <StackLayout Orientation="Vertical" />
+          </ItemsRepeater.Layout>
 
-        <!-- Delete key binding (same semantics as TreeView version) -->
-        <ItemsRepeater.KeyBindings>
-          <KeyBinding Gesture="Delete"
-                      Command="{Binding SelectedRow.DeleteFromDiskCommand,
+          <!-- Delete key binding (same semantics as TreeView version) -->
+          <ItemsRepeater.KeyBindings>
+            <KeyBinding Gesture="Delete"
+                        Command="{Binding SelectedRow.DeleteFromDiskCommand,
                                       FallbackValue={x:Static util:Commands.DisabledCommand}}" />
-        </ItemsRepeater.KeyBindings>
+          </ItemsRepeater.KeyBindings>
 
-        <ItemsRepeater.ItemTemplate>
-          <DataTemplate x:DataType="scanRootsTree:ScanRootsRowViewModel">
+          <ItemsRepeater.ItemTemplate>
+            <DataTemplate x:DataType="scanRootsTree:ScanRootsRowViewModel">
 
             <!-- Row wrapper -->
             <Border Classes="scanroots-row"
@@ -271,8 +277,7 @@
               <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
                     Margin="3,0,3,0"
                     VerticalAlignment="Center"
-                    Background="Transparent"
-                    Classes="debug-outline">
+                    Background="Transparent">
 
                 <!-- Name column: indent + expander glyph + text -->
                 <Grid Grid.Column="0"
@@ -333,41 +338,72 @@
                 </Grid>
 
                 <!-- Size -->
-                <TextBlock Grid.Column="2"
-                           Classes="scanroots-number"
-                           Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}"
-                           Margin="8,0,0,0" />
+                <Border Grid.Column="2"
+                        Classes="scanroots-number-cell"
+                        Padding="8,0,0,0">
+                  <TextBlock Classes="scanroots-number"
+                             Text="{Binding TotalBytes, Converter={StaticResource BytesToHuman}}" />
+                </Border>
 
                 <!-- Items -->
-                <TextBlock Grid.Column="3"
-                           Classes="scanroots-number"
-                           Text="{Binding ItemCount, StringFormat={}{0:N0}}"
-                           Margin="8,0,0,0" />
+                <Border Grid.Column="3"
+                        Classes="scanroots-number-cell"
+                        Padding="8,0,0,0">
+                  <TextBlock Classes="scanroots-number"
+                             Text="{Binding ItemCount, StringFormat={}{0:N0}}" />
+                </Border>
 
                 <!-- Files -->
-                <TextBlock Grid.Column="4"
-                           Classes="scanroots-number"
-                           Text="{Binding FileCount, StringFormat={}{0:N0}}"
-                           Margin="8,0,0,0" />
+                <Border Grid.Column="4"
+                        Classes="scanroots-number-cell"
+                        Padding="8,0,0,0">
+                  <TextBlock Classes="scanroots-number"
+                             Text="{Binding FileCount, StringFormat={}{0:N0}}" />
+                </Border>
 
                 <!-- Dup Files -->
-                <TextBlock Grid.Column="5"
-                           Classes="scanroots-number"
-                           Text="{Binding DuplicateFiles, StringFormat={}{0:N0}}"
-                           Margin="8,0,0,0" />
+                <Border Grid.Column="5"
+                        Classes="scanroots-number-cell"
+                        Padding="8,0,0,0">
+                  <TextBlock Classes="scanroots-number"
+                             Text="{Binding DuplicateFiles, StringFormat={}{0:N0}}" />
+                </Border>
 
                 <!-- Dup Bytes -->
-                <TextBlock Grid.Column="6"
-                           Classes="scanroots-number"
-                           Text="{Binding DuplicateBytes, Converter={StaticResource BytesToHuman}}"
-                           Margin="8,0,0,0" />
+                <Border Grid.Column="6"
+                        Classes="scanroots-number-cell"
+                        Padding="8,0,0,0">
+                  <TextBlock Classes="scanroots-number"
+                             Text="{Binding DuplicateBytes, Converter={StaticResource BytesToHuman}}" />
+                </Border>
 
               </Grid>
             </Border>
-          </DataTemplate>
-        </ItemsRepeater.ItemTemplate>
-      </ItemsRepeater>
-    </ScrollViewer>
+            </DataTemplate>
+          </ItemsRepeater.ItemTemplate>
+        </ItemsRepeater>
+      </ScrollViewer>
+
+      <!-- ReSharper disable once InconsistentNaming -->
+      <Border x:Name="PART_EmptyState"
+              IsVisible="False"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Padding="14,10"
+              Background="{DynamicResource ThemeControlLowBrush}"
+              BorderBrush="{DynamicResource ThemeBorderMidBrush}"
+              BorderThickness="1"
+              CornerRadius="6">
+        <StackPanel Spacing="4">
+          <TextBlock Text="No scan roots to display"
+                     HorizontalAlignment="Center"
+                     FontWeight="SemiBold" />
+          <TextBlock Text="Add a location or run a scan to populate this view."
+                     HorizontalAlignment="Center"
+                     Opacity="0.85" />
+        </StackPanel>
+      </Border>
+    </Grid>
 
   </DockPanel>
 </UserControl>

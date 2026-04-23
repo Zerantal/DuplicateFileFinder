@@ -1,3 +1,5 @@
+using System.Collections.Specialized;
+
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -11,6 +13,8 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots;
 public partial class ScanRootsTreeView : UserControl
 {
     private ScanRootsTreeViewModel? _vm;
+    private INotifyCollectionChanged? _rowsNotify;
+    private IScanRootsTreeViewContext? _viewContext;
 
     public ScanRootsTreeView()
     {
@@ -25,19 +29,44 @@ public partial class ScanRootsTreeView : UserControl
     {
         UnhookVm();
 
-        _vm = DataContext as ScanRootsTreeViewModel;
-        if (_vm is null)
-            return;
+        _viewContext = DataContext as IScanRootsTreeViewContext;
+        _rowsNotify = _viewContext?.Rows;
+        if (_rowsNotify is not null)
+            _rowsNotify.CollectionChanged += RowsOnCollectionChanged;
 
-        _vm.RequestCenterSelectedRow += VmOnRequestCenterSelectedRow;
+        _vm = DataContext as ScanRootsTreeViewModel;
+        if (_vm is not null)
+            _vm.RequestCenterSelectedRow += VmOnRequestCenterSelectedRow;
+
+        UpdateEmptyStateVisibility();
     }
 
     private void UnhookVm()
     {
+        if (_rowsNotify is not null)
+            _rowsNotify.CollectionChanged -= RowsOnCollectionChanged;
+        _rowsNotify = null;
+        _viewContext = null;
+
         if (_vm is not null)
             _vm.RequestCenterSelectedRow -= VmOnRequestCenterSelectedRow;
 
         _vm = null;
+    }
+
+    private void RowsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        UpdateEmptyStateVisibility();
+
+    private void UpdateEmptyStateVisibility()
+    {
+        var scroller = this.FindControl<ScrollViewer>("PART_Scroller");
+        var empty = this.FindControl<Border>("PART_EmptyState");
+        if (scroller is null || empty is null)
+            return;
+
+        var hasRows = _viewContext?.Rows.Count > 0;
+        scroller.IsVisible = hasRows;
+        empty.IsVisible = !hasRows;
     }
 
     private void VmOnRequestCenterSelectedRow() =>

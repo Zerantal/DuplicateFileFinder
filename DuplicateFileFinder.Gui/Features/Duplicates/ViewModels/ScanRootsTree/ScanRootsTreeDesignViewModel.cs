@@ -30,8 +30,6 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
 
     public ScanRootsTreeDesignViewModel()
     {
-        // Debugger.Break();
-        Debug.WriteLine("Design time constructor");
 
         var root = CreateRow(
             name: @"C:\Projects",
