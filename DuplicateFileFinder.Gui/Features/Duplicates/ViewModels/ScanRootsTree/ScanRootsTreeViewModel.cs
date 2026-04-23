@@ -19,7 +19,7 @@ using DuplicateFileFinderLib.Repository.Plugins.Interfaces;
 
 namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 
-public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDisposable
+public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDisposable, IScanRootsTreeViewContext
 {
     private readonly DisposableManager _disposer;
 
