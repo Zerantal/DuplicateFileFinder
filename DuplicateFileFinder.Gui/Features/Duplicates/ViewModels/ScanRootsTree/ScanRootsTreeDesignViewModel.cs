@@ -30,6 +30,8 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
 
     public ScanRootsTreeDesignViewModel()
     {
+        const long scanRootBytes = 128L * 1024 * 1024 * 1024;
+        var rng = new Random(1337);
 
         var root = CreateRow(
             name: @"C:\Projects",
@@ -39,43 +41,57 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
             hasLazyChildren: true,
             isExpanded: true,
             percentOfScanRoot: 82.0,
-            totalBytes: 128L * 1024 * 1024 * 1024,
+            totalBytes: scanRootBytes,
             fileCount: 10128,
             dirCount: 2312,
             duplicateFiles: 1240,
             duplicateBytes: 4700L * 1024 * 1024);
 
-        var child1 = CreateRow(
-            name: "src",
-            fullPath: @"C:\Projects\src",
-            depth: 1,
-            isScanRoot: false,
-            hasLazyChildren: true,
-            isExpanded: false,
-            percentOfScanRoot: 44.0,
-            totalBytes: 61L * 1024 * 1024 * 1024,
-            fileCount: 5112,
-            dirCount: 990,
-            duplicateFiles: 812,
-            duplicateBytes: 2100L * 1024 * 1024);
-
-        var child2 = CreateRow(
-            name: @"src\Features",
-            fullPath: @"C:\Projects\src\Features",
-            depth: 2,
-            isScanRoot: false,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 19.0,
-            totalBytes: 14L * 1024 * 1024 * 1024,
-            fileCount: 1140,
-            dirCount: 268,
-            duplicateFiles: 114,
-            duplicateBytes: 312L * 1024 * 1024);
-
         Rows.Add(root);
-        Rows.Add(child1);
-        Rows.Add(child2);
+
+        // Add enough rows to guarantee scrolling in design preview.
+        var topFolders = new[]
+        {
+            "src", "tools", "docs", "tests", "assets", "samples", "scripts", "benchmarks"
+        };
+
+        for (var i = 0; i < 120; i++)
+        {
+            var depth = i % 3 + 1; // 1..3
+            var top = topFolders[i % topFolders.Length];
+            var segmentA = $"module-{i % 24:D2}";
+            var segmentB = $"feature-{rng.Next(1, 60):D2}";
+
+            var name = depth switch
+            {
+                1 => top,
+                2 => $@"{top}\{segmentA}",
+                _ => $@"{top}\{segmentA}\{segmentB}"
+            };
+
+            var fullPath = $@"C:\Projects\{name}";
+            var percent = Math.Round(rng.NextDouble() * 100.0, 1);
+            var bytes = rng.NextInt64(80L * 1024 * 1024, 16L * 1024 * 1024 * 1024);
+            var files = rng.Next(40, 9000);
+            var dirs = rng.Next(8, 2200);
+            var dupFiles = rng.Next(0, Math.Max(1, files / 4));
+            var dupBytes = rng.NextInt64(0, Math.Max(1L, bytes / 3));
+
+            Rows.Add(CreateRow(
+                name: name,
+                fullPath: fullPath,
+                depth: depth,
+                isScanRoot: false,
+                hasLazyChildren: depth < 3 && rng.NextDouble() > 0.35,
+                isExpanded: false,
+                percentOfScanRoot: percent,
+                totalBytes: bytes,
+                fileCount: files,
+                dirCount: dirs,
+                duplicateFiles: dupFiles,
+                duplicateBytes: dupBytes));
+        }
+
         SelectedRow = root;
     }
 
