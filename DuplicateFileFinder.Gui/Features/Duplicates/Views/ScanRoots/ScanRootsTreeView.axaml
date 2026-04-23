@@ -17,15 +17,26 @@
   d:DesignHeight="960">
 
   <UserControl.Resources>
+    <!-- Stronger accent-tinted fill so selection is visible in both light and dark themes. -->
+    <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#7F2D7DFF" />
+
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
-                                               SelectedBrush="#FF2D7DFF"
+                                               SelectedBrush="{StaticResource ScanRootsSelectedRowBrush}"
                                                UnselectedBrush="Transparent" />
   </UserControl.Resources>
 
   <UserControl.Styles>
+    <Style Selector="Border.scanroots-row">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
 
     <Style Selector="Button.scanroot-header:pointerover">
-      <Setter Property="Background" Value="#22FFFFFF" />
+      <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
+    </Style>
+
+    <Style Selector="Button.scanroot-header:pressed">
+      <Setter Property="Background" Value="{DynamicResource ThemeControlMidBrush}" />
     </Style>
 
     <Style Selector="Button.scanroot-header:disabled">
@@ -35,6 +46,8 @@
     <Style Selector="Button.scanroot-header">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundBrush}" />
+      <Setter Property="Background" Value="Transparent" />
 
       <Setter Property="Template">
         <ControlTemplate>
@@ -46,13 +59,13 @@
               HorizontalAlignment="Stretch"
               VerticalAlignment="Center"
               TextAlignment="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.TextAlignment)}"
-              Foreground="White" />
+              Foreground="{DynamicResource ThemeForegroundBrush}" />
 
             <TextBlock Grid.Column="1"
                        Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
-                       Foreground="White" />
+                       Foreground="{DynamicResource ThemeForegroundBrush}" />
           </Grid>
         </ControlTemplate>
       </Setter>
@@ -60,7 +73,9 @@
 
     <!-- Row hover/selection  -->
     <Style Selector="Border.scanroots-row:pointerover">
-      <Setter Property="Background" Value="#11FFFFFF" />
+      <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderMidBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
     </Style>
 
   </UserControl.Styles>
@@ -69,7 +84,7 @@
 
     <!-- Header (same grid/columns as original) -->
     <Border DockPanel.Dock="Top"
-            Background="#333"
+            Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
             ColumnDefinitions="2*,200,100,100,100,100,100">
