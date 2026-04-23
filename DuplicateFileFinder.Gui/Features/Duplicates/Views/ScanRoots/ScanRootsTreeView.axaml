@@ -19,6 +19,7 @@
   <UserControl.Resources>
     <!-- Stronger accent-tinted fill so selection is visible in both light and dark themes. -->
     <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#7F2D7DFF" />
+    <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
 
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
                                                SelectedBrush="{StaticResource ScanRootsSelectedRowBrush}"
@@ -43,32 +44,79 @@
       <Setter Property="Opacity" Value="0.6" />
     </Style>
 
+    <!-- Debug outlining -->
+    <Styles>
+      <Style Selector="Border.debug-outline">
+        <Setter Property="BorderBrush" Value="#80FF0000" />
+        <Setter Property="BorderThickness" Value="2" />
+      </Style>
+
+      <Style Selector="Button.debug-outline">
+        <Setter Property="BorderBrush" Value="GreenYellow" />
+        <Setter Property="BorderThickness" Value="2" />
+      </Style>
+
+      <Style Selector="Grid.debug-outline">
+        <Setter Property="ShowGridLines" Value="True" />
+      </Style>
+    </Styles>
+    <!-- ==================== -->
+
     <Style Selector="Button.scanroot-header">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
-      <Setter Property="Foreground" Value="{DynamicResource ThemeForegroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
       <Setter Property="Background" Value="Transparent" />
 
       <Setter Property="Template">
         <ControlTemplate>
-          <Grid ColumnDefinitions="*,16"
-                HorizontalAlignment="Stretch">
+          <Grid ColumnDefinitions="*,16">
 
             <TextBlock
               Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Text)}"
-              HorizontalAlignment="Stretch"
               VerticalAlignment="Center"
               TextAlignment="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.TextAlignment)}"
-              Foreground="{DynamicResource ThemeForegroundBrush}" />
+              Foreground="{TemplateBinding Foreground}" />
 
             <TextBlock Grid.Column="1"
                        Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
-                       HorizontalAlignment="Center"
                        VerticalAlignment="Center"
-                       Foreground="{DynamicResource ThemeForegroundBrush}" />
+                       Foreground="{TemplateBinding Foreground}" />
           </Grid>
         </ControlTemplate>
       </Setter>
+    </Style>
+
+    <Style Selector="Button.scanroots-expander">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="Opacity" Value="0.7" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+
+    <Style Selector="Button.scanroots-expander:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <Style Selector="Button.scanroots-expander:pressed">
+      <Setter Property="Background" Value="{DynamicResource ThemeControlMidBrush}" />
+      <Setter Property="Opacity" Value="1" />
     </Style>
 
     <!-- Row hover/selection  -->
@@ -87,7 +135,7 @@
             Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100">
+            ColumnDefinitions="2*,200,100,100,100,100,100" Classes="debug-outline">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
@@ -102,7 +150,8 @@
                 scanRoots:HeaderButton.Text="Subtree %"
                 IsHitTestVisible="False"
                 MinWidth="100"
-                MaxWidth="400" />
+                MaxWidth="400"
+                HorizontalAlignment="Center"/>
 
         <Button Grid.Column="2"
                 Classes="scanroot-header"
@@ -203,8 +252,8 @@
               </Border.ContextMenu>
 
               <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
-                    Margin="0,0,16,0"
-                    Background="Transparent">
+                    Margin="4,0,4,0"
+                    Background="Transparent" Classes="debug-outline">
 
                 <!-- Name column: indent + expander glyph + text -->
                 <DockPanel Grid.Column="0" LastChildFill="True">
@@ -213,16 +262,18 @@
                   <Border Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
 
                   <!-- Expander button -->
-                  <Button Width="16"
-                          Height="16"
-                          Padding="0"
-                          Margin="0,0,4,0"
-                          Background="Transparent"
-                          BorderThickness="0"
+                  <Button Classes="scanroots-expander"
                           IsVisible="{Binding HasLazyChildren}"
                           Command="{Binding $parent[UserControl].((scanRootsTree:IScanRootsTreeViewContext)DataContext).ToggleExpandedCommand}"
-                          CommandParameter="{Binding}"
-                          Content="{Binding IsExpanded, Converter={StaticResource ExpandedToGlyphConverter}}" />
+                          CommandParameter="{Binding}">
+                    <Path Width="10"
+                          Height="10"
+                          Data="{Binding IsExpanded, Converter={StaticResource ExpandedToGeometryConverter}}"
+                          Stroke="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                          StrokeThickness="1.6"
+                          StrokeLineCap="Round"
+                          StrokeJoin="Round" />
+                  </Button>
 
                   <!-- Name -->
                   <TextBlock Text="{Binding DisplayName}"
@@ -234,6 +285,7 @@
                 <Grid Grid.Column="1"
                       ColumnDefinitions="*,Auto"
                       VerticalAlignment="Center"
+                      HorizontalAlignment="Center"
                       MinWidth="100"
                       MaxWidth="400">
                   <ProgressBar Value="{Binding PercentOfScanRoot}"
