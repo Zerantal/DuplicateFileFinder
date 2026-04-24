@@ -12,17 +12,29 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots;
 
 public partial class ScanRootsTreeView : UserControl
 {
+    private const double HeaderBasePadding = 4;
     private ScanRootsTreeViewModel? _vm;
     private INotifyCollectionChanged? _rowsNotify;
     private IScanRootsTreeViewContext? _viewContext;
+    private ScrollViewer? _scroller;
+    private Border? _headerHost;
+    private Border? _rowsHost;
 
     public ScanRootsTreeView()
     {
         InitializeComponent();
 
         DataContextChanged += (_, _) => HookVm();
-        AttachedToVisualTree += (_, _) => HookVm();
-        DetachedFromVisualTree += (_, _) => UnhookVm();
+        AttachedToVisualTree += (_, _) =>
+        {
+            HookVm();
+            LayoutUpdated += OnLayoutUpdated;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            LayoutUpdated -= OnLayoutUpdated;
+            UnhookVm();
+        };
     }
 
     private void HookVm()
@@ -34,11 +46,18 @@ public partial class ScanRootsTreeView : UserControl
         if (_rowsNotify is not null)
             _rowsNotify.CollectionChanged += RowsOnCollectionChanged;
 
+        _headerHost = this.FindControl<Border>("PART_HeaderHost");
+        _rowsHost = this.FindControl<Border>("PART_RowsHost");
+        _scroller = this.FindControl<ScrollViewer>("PART_Scroller");
+        if (_scroller is not null)
+            _scroller.ScrollChanged += ScrollerOnScrollChanged;
+
         _vm = DataContext as ScanRootsTreeViewModel;
         if (_vm is not null)
             _vm.RequestCenterSelectedRow += VmOnRequestCenterSelectedRow;
 
         UpdateEmptyStateVisibility();
+        UpdateHeaderScrollbarGutter();
     }
 
     private void UnhookVm()
@@ -48,6 +67,12 @@ public partial class ScanRootsTreeView : UserControl
         _rowsNotify = null;
         _viewContext = null;
 
+        if (_scroller is not null)
+            _scroller.ScrollChanged -= ScrollerOnScrollChanged;
+        _scroller = null;
+        _headerHost = null;
+        _rowsHost = null;
+
         if (_vm is not null)
             _vm.RequestCenterSelectedRow -= VmOnRequestCenterSelectedRow;
 
@@ -55,7 +80,19 @@ public partial class ScanRootsTreeView : UserControl
     }
 
     private void RowsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        UpdateChromeState();
+
+    private void ScrollerOnScrollChanged(object? sender, ScrollChangedEventArgs e) =>
+        UpdateHeaderScrollbarGutter();
+
+    private void OnLayoutUpdated(object? sender, EventArgs e) =>
+        UpdateHeaderScrollbarGutter();
+
+    private void UpdateChromeState()
+    {
         UpdateEmptyStateVisibility();
+        UpdateHeaderScrollbarGutter();
+    }
 
     private void UpdateEmptyStateVisibility()
     {
@@ -67,6 +104,39 @@ public partial class ScanRootsTreeView : UserControl
         var hasRows = _viewContext?.Rows.Count > 0;
         scroller.IsVisible = hasRows;
         empty.IsVisible = !hasRows;
+    }
+
+    private void UpdateHeaderScrollbarGutter()
+    {
+        if (_headerHost is null || _rowsHost is null || _scroller is null)
+            return;
+
+        var hasVerticalScrollbar = _scroller.Extent.Height - _scroller.Viewport.Height > 0.5;
+        var gutter = hasVerticalScrollbar ? GetScrollbarGutter() : 0;
+        var rightPadding = HeaderBasePadding + gutter;
+        var targetPadding = new Thickness(HeaderBasePadding, HeaderBasePadding, rightPadding, HeaderBasePadding);
+        var rowsPadding = new Thickness(0, 0, gutter, 0);
+
+        if (_headerHost.Padding != targetPadding)
+            _headerHost.Padding = targetPadding;
+
+        if (_rowsHost.Padding != rowsPadding)
+            _rowsHost.Padding = rowsPadding;
+    }
+
+    private double GetScrollbarGutter()
+    {
+        if (Resources.TryGetValue("ScanRootsScrollbarGutter", out var value))
+        {
+            if (value is double d)
+                return d;
+            if (value is int i)
+                return i;
+            if (value is float f)
+                return f;
+        }
+
+        return 14;
     }
 
     private void VmOnRequestCenterSelectedRow() =>

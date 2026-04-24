@@ -17,6 +17,7 @@
   d:DesignHeight="360">
 
   <UserControl.Resources>
+    <x:Double x:Key="ScanRootsScrollbarGutter">14</x:Double>
     <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#552D7DFF" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowRailBrush" Color="#FF2D7DFF" />
     <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
@@ -130,6 +131,7 @@
       <Setter Property="HorizontalAlignment" Value="Right" />
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="FontFamily" Value="monospace" />
+      <Setter Property="LineHeight" Value="16" />
     </Style>
 
     <Style Selector="Border.scanroots-number-cell">
@@ -138,9 +140,14 @@
       <Setter Property="Margin" Value="4,0,0,0" />
     </Style>
 
+    <Style Selector="TextBlock.scanroots-name">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontFamily" Value="monospace" />
+      <Setter Property="LineHeight" Value="16" />
+    </Style>
+
     <!-- Row hover/selection  -->
     <Style Selector="Border.scanroots-row:pointerover">
-      <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderMidBrush}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
@@ -151,10 +158,11 @@
 
     <!-- Header (same grid/columns as original) -->
     <Border DockPanel.Dock="Top"
+            x:Name="PART_HeaderHost"
             Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100">
+            ColumnDefinitions="2*,200,100,100,100,100,100"  Classes="debug-outline">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
@@ -222,23 +230,24 @@
       <!-- Virtualized "tree" -->
       <!-- ReSharper disable once InconsistentNaming -->
       <ScrollViewer x:Name="PART_Scroller">
-        <!-- ReSharper disable once InconsistentNaming -->
-        <ItemsRepeater x:Name="PART_Repeater"
-                       ItemsSource="{Binding Rows}">
-          <ItemsRepeater.Layout>
-            <!-- default vertical stack; ItemsRepeater provides virtualization -->
-            <StackLayout Orientation="Vertical" />
-          </ItemsRepeater.Layout>
+        <Border x:Name="PART_RowsHost">
+          <!-- ReSharper disable once InconsistentNaming -->
+          <ItemsRepeater x:Name="PART_Repeater"
+                         ItemsSource="{Binding Rows}">
+            <ItemsRepeater.Layout>
+              <!-- default vertical stack; ItemsRepeater provides virtualization -->
+              <StackLayout Orientation="Vertical" />
+            </ItemsRepeater.Layout>
 
-          <!-- Delete key binding (same semantics as TreeView version) -->
-          <ItemsRepeater.KeyBindings>
-            <KeyBinding Gesture="Delete"
-                        Command="{Binding SelectedRow.DeleteFromDiskCommand,
+            <!-- Delete key binding (same semantics as TreeView version) -->
+            <ItemsRepeater.KeyBindings>
+              <KeyBinding Gesture="Delete"
+                          Command="{Binding SelectedRow.DeleteFromDiskCommand,
                                       FallbackValue={x:Static util:Commands.DisabledCommand}}" />
-          </ItemsRepeater.KeyBindings>
+            </ItemsRepeater.KeyBindings>
 
-          <ItemsRepeater.ItemTemplate>
-            <DataTemplate x:DataType="scanRootsTree:ScanRootsRowViewModel">
+            <ItemsRepeater.ItemTemplate>
+              <DataTemplate x:DataType="scanRootsTree:ScanRootsRowViewModel">
 
             <!-- Row wrapper -->
             <Border Classes="scanroots-row"
@@ -277,7 +286,7 @@
               <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
                     Margin="3,0,3,0"
                     VerticalAlignment="Center"
-                    Background="Transparent">
+                    Background="Transparent" Classes="debug_outline">
 
                 <!-- Name column: indent + expander glyph + text -->
                 <Grid Grid.Column="0"
@@ -314,9 +323,9 @@
 
                     <!-- Name -->
                     <TextBlock Text="{Binding DisplayName}"
-                               VerticalAlignment="Center"
+                               Classes="scanroots-name"
                                TextTrimming="CharacterEllipsis"
-                               FontFamily="monospace" />
+                               />
                   </DockPanel>
                 </Grid>
 
@@ -347,7 +356,7 @@
 
                 <!-- Items -->
                 <Border Grid.Column="3"
-                        Classes="scanroots-number-cell"
+                        Classes="scanroots-number-cell, debug-outline"
                         Padding="8,0,0,0">
                   <TextBlock Classes="scanroots-number"
                              Text="{Binding ItemCount, StringFormat={}{0:N0}}" />
@@ -379,9 +388,10 @@
 
               </Grid>
             </Border>
-            </DataTemplate>
-          </ItemsRepeater.ItemTemplate>
-        </ItemsRepeater>
+              </DataTemplate>
+            </ItemsRepeater.ItemTemplate>
+          </ItemsRepeater>
+        </Border>
       </ScrollViewer>
 
       <!-- ReSharper disable once InconsistentNaming -->
