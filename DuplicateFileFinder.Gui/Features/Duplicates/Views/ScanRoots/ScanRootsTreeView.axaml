@@ -133,7 +133,7 @@
       <Setter Property="Width" Value="16" />
       <Setter Property="Height" Value="16" />
       <Setter Property="Padding" Value="0" />
-      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="Margin" Value="0" />
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
       <Setter Property="CornerRadius" Value="2" />
@@ -355,15 +355,17 @@
                     </Border.Background>
                   </Border>
 
-                  <DockPanel Grid.Column="1"
-                            LastChildFill="True"
-                            VerticalAlignment="Center">
+                  <Grid Grid.Column="1"
+                        ColumnDefinitions="Auto,24,*"
+                        VerticalAlignment="Center">
 
                     <!-- Indent: depth provided by converter -->
-                    <Border Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
+                    <Border Grid.Column="0"
+                            Width="{Binding Depth, Converter={StaticResource DepthToIndentWidthConverter}}" />
 
                     <!-- Expander button -->
-                    <Button Classes="scanroots-expander"
+                    <Button Grid.Column="1"
+                            Classes="scanroots-expander"
                             IsVisible="{Binding HasLazyChildren}"
                             Command="{Binding $parent[UserControl].((scanRootsTree:IScanRootsTreeViewContext)DataContext).ToggleExpandedCommand}"
                             CommandParameter="{Binding}">
@@ -377,11 +379,12 @@
                     </Button>
 
                     <!-- Name -->
-                    <TextBlock Text="{Binding DisplayName}"
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding DisplayName}"
                                Classes="scanroots-name"
                                TextTrimming="CharacterEllipsis"
                                />
-                  </DockPanel>
+                  </Grid>
                 </Grid>
 
                 <!-- Subtree % -->
