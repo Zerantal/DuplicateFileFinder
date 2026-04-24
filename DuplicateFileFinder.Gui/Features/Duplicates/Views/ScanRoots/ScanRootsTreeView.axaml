@@ -162,7 +162,7 @@
             Background="{DynamicResource ThemeControlMidBrush}"
             Padding="4">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100"  Classes="debug-outline">
+            ColumnDefinitions="2*,200,100,100,100,100,100">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
@@ -356,7 +356,7 @@
 
                 <!-- Items -->
                 <Border Grid.Column="3"
-                        Classes="scanroots-number-cell, debug-outline"
+                        Classes="scanroots-number-cell"
                         Padding="8,0,0,0">
                   <TextBlock Classes="scanroots-number"
                              Text="{Binding ItemCount, StringFormat={}{0:N0}}" />
