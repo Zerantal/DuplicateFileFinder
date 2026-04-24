@@ -61,7 +61,6 @@ public partial class ScanRootsTreeView : UserControl
         if (_vm is not null)
             _vm.RequestCenterSelectedRow += VmOnRequestCenterSelectedRow;
 
-        UpdateEmptyStateVisibility();
         UpdateHeaderScrollbarGutter();
         UpdateRowVisualStates();
     }
@@ -108,21 +107,8 @@ public partial class ScanRootsTreeView : UserControl
 
     private void UpdateChromeState()
     {
-        UpdateEmptyStateVisibility();
         UpdateHeaderScrollbarGutter();
         UpdateRowVisualStates();
-    }
-
-    private void UpdateEmptyStateVisibility()
-    {
-        var scroller = this.FindControl<ScrollViewer>("PART_Scroller");
-        var empty = this.FindControl<Border>("PART_EmptyState");
-        if (scroller is null || empty is null)
-            return;
-
-        var hasRows = _viewContext?.Rows.Count > 0;
-        scroller.IsVisible = hasRows;
-        empty.IsVisible = !hasRows;
     }
 
     private void UpdateHeaderScrollbarGutter()

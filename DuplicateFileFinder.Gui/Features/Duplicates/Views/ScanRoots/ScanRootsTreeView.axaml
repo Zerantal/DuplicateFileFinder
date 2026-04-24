@@ -24,7 +24,10 @@
     <SolidColorBrush x:Key="ScanRootsRowHoverBorderBrush" Color="#6683A8D8" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowBorderBrush" Color="#FF4B86F8" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowFocusBorderBrush" Color="#FF8CB8FF" />
+    <SolidColorBrush x:Key="ScanRootsHeaderActiveBrush" Color="#443B82F6" />
+    <SolidColorBrush x:Key="ScanRootsHeaderActiveBorderBrush" Color="#557EA6FF" />
     <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
+    <converters:EnumEqualsConverter x:Key="EnumEqualsConverter" />
 
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
                                                SelectedBrush="{StaticResource ScanRootsSelectedRowBrush}"
@@ -63,10 +66,12 @@
 
     <Style Selector="Button.scanroot-header:pointerover">
       <Setter Property="Background" Value="{DynamicResource ThemeControlLowBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ThemeBorderMidBrush}" />
     </Style>
 
     <Style Selector="Button.scanroot-header:pressed">
-      <Setter Property="Background" Value="{DynamicResource ThemeControlMidBrush}" />
+      <Setter Property="Background" Value="{StaticResource ScanRootsHeaderActiveBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource ScanRootsHeaderActiveBorderBrush}" />
     </Style>
 
     <Style Selector="Button.scanroot-header:disabled">
@@ -78,27 +83,50 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
       <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="FontWeight" Value="SemiBold" />
 
       <Setter Property="Template">
         <ControlTemplate>
-          <Grid ColumnDefinitions="*,20"
-                Margin="0,0,4,0">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <Grid ColumnDefinitions="*,Auto"
+                  Margin="8,6,12,6">
 
-            <TextBlock
-              Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Text)}"
-              VerticalAlignment="Center"
-              TextAlignment="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.TextAlignment)}"
-              Foreground="{TemplateBinding Foreground}" />
+              <TextBlock
+                Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Text)}"
+                VerticalAlignment="Center"
+                TextAlignment="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.TextAlignment)}"
+                Foreground="{TemplateBinding Foreground}" />
 
-            <TextBlock Grid.Column="1"
-                       Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       VerticalAlignment="Center"
-                       Foreground="{TemplateBinding Foreground}" />
-          </Grid>
+              <TextBlock Grid.Column="1"
+                         Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(scanRoots:HeaderButton.Arrow)}"
+                         Margin="6,0,0,0"
+                         HorizontalAlignment="Center"
+                         TextAlignment="Center"
+                         VerticalAlignment="Center"
+                         FontSize="11"
+                         Foreground="{TemplateBinding Foreground}" />
+            </Grid>
+          </Border>
         </ControlTemplate>
       </Setter>
+    </Style>
+
+    <Style Selector="Button.scanroot-header.active-sort">
+      <Setter Property="Background" Value="{StaticResource ScanRootsHeaderActiveBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource ScanRootsHeaderActiveBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <Style Selector="Button.scanroot-header.passive-header">
+      <Setter Property="Opacity" Value="0.78" />
+      <Setter Property="FontWeight" Value="Medium" />
     </Style>
 
     <Style Selector="Button.scanroots-expander">
@@ -183,12 +211,15 @@
     <Border DockPanel.Dock="Top"
             x:Name="PART_HeaderHost"
             Background="{DynamicResource ThemeControlMidBrush}"
-            Padding="4">
+            BorderBrush="{DynamicResource ThemeBorderMidBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="6,5">
       <Grid x:DataType="scanRootsTree:IScanRootsTreeViewContext"
-            ColumnDefinitions="2*,200,100,100,100,100,100">
+            ColumnDefinitions="2*,200,110,110,110,110,110">
 
         <Button Grid.Column="0"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=Name}"
                 scanRoots:HeaderButton.Text="Name"
                 scanRoots:HeaderButton.Arrow="{Binding NameArrow}"
                 scanRoots:HeaderButton.TextAlignment="Left"
@@ -196,7 +227,7 @@
                 CommandParameter="{x:Static scanRootsTree:ScanRootsSortColumn.Name}" />
 
         <Button Grid.Column="1"
-                Classes="scanroot-header"
+                Classes="scanroot-header passive-header"
                 scanRoots:HeaderButton.Text="Subtree %"
                 scanRoots:HeaderButton.TextAlignment="Center"
                 IsHitTestVisible="False"
@@ -205,6 +236,7 @@
 
         <Button Grid.Column="2"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=Size}"
                 scanRoots:HeaderButton.Text="Size"
                 scanRoots:HeaderButton.Arrow="{Binding SizeArrow}"
                 scanRoots:HeaderButton.TextAlignment="Right"
@@ -213,6 +245,7 @@
 
         <Button Grid.Column="3"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=Items}"
                 scanRoots:HeaderButton.Text="Items"
                 scanRoots:HeaderButton.Arrow="{Binding ItemsArrow}"
                 scanRoots:HeaderButton.TextAlignment="Right"
@@ -221,6 +254,7 @@
 
         <Button Grid.Column="4"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=Files}"
                 scanRoots:HeaderButton.Text="Files"
                 scanRoots:HeaderButton.Arrow="{Binding FilesArrow}"
                 scanRoots:HeaderButton.TextAlignment="Right"
@@ -229,6 +263,7 @@
 
         <Button Grid.Column="5"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=DupFiles}"
                 scanRoots:HeaderButton.Text="Dup Files"
                 scanRoots:HeaderButton.Arrow="{Binding DupFilesArrow}"
                 scanRoots:HeaderButton.TextAlignment="Right"
@@ -237,6 +272,7 @@
 
         <Button Grid.Column="6"
                 Classes="scanroot-header"
+                Classes.active-sort="{Binding SortColumn, Converter={StaticResource EnumEqualsConverter}, ConverterParameter=DupBytes}"
                 scanRoots:HeaderButton.Text="Dup Size"
                 scanRoots:HeaderButton.Arrow="{Binding DupBytesArrow}"
                 scanRoots:HeaderButton.TextAlignment="Right"
@@ -245,13 +281,10 @@
 
       </Grid>
     </Border>
-    <Border DockPanel.Dock="Top"
-            Height="1"
-            Background="{DynamicResource ThemeBorderMidBrush}" />
-
     <Grid>
       <!-- Virtualized "tree" -->
-      <ScrollViewer x:Name="PART_Scroller">
+      <ScrollViewer x:Name="PART_Scroller"
+                    IsVisible="{Binding HasRows}">
         <Border x:Name="PART_RowsHost">
           <ItemsRepeater x:Name="PART_Repeater"
                          ItemsSource="{Binding Rows}">
@@ -305,7 +338,7 @@
                 </ContextMenu>
               </Border.ContextMenu>
 
-              <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
+              <Grid ColumnDefinitions="2*,200,110,110,110,110,110"
                     Margin="4,0,4,0"
                     VerticalAlignment="Center"
                     Background="Transparent">
@@ -418,7 +451,7 @@
 
       <!-- ReSharper disable once InconsistentNaming -->
       <Border x:Name="PART_EmptyState"
-              IsVisible="False"
+              IsVisible="{Binding !HasRows}"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
               Padding="14,10"

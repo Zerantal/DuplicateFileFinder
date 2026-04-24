@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows.Input;
+using System.Collections.Specialized;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -76,6 +77,8 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
             toSharedSelection: CreateSelectionTargetFromRow,
             applySharedSelection: target => ApplySelectionTarget(target, centerAfterSelect: true));
 
+        Rows.CollectionChanged += RowsOnCollectionChanged;
+
         SortByCommand = new RelayCommand<ScanRootsSortColumn>(SortBy);
         ToggleExpandedCommand = new RelayCommand<ScanRootsRowViewModel>(ToggleExpanded);
 
@@ -99,13 +102,18 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
 
         _disposer.Add(() => PropertyChanged -= selfHandler);
         _disposer.Add(() => _selectionContext.PropertyChanged -= selectionHandler);
+        _disposer.Add(() => Rows.CollectionChanged -= RowsOnCollectionChanged);
     }
+
+    private void RowsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        OnPropertyChanged(nameof(HasRows));
 
     private void ScanRootRemovedEventHandler(object? sender, RepoScanRootRemovedEvent e) =>
         RemoveScanRootFromRows(e.ScanRootIdValue);
 
     // Visible, virtualized rows
     public BulkObservableCollection<ScanRootsRowViewModel> Rows { get; } = [];
+    public bool HasRows => Rows.Count > 0;
 
     public string? SelectedPath => SelectedRow?.FullPath;
 
@@ -162,6 +170,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
         {
             Rows.EndUpdate();
         }
+
     }
 
     private void RebuildRootIndexMap()
@@ -214,7 +223,7 @@ public sealed partial class ScanRootsTreeViewModel : ObservableObject, IAsyncDis
     // ---- Sort indicators
 
     private string ArrowFor(ScanRootsSortColumn column)
-        => SortColumn != column ? string.Empty : SortDescending ? " ▼" : " ▲";
+        => SortColumn != column ? string.Empty : SortDescending ? "▼" : "▲";
 
     partial void OnSortColumnChanged(ScanRootsSortColumn value) => OnSortHeaderChanged();
     partial void OnSortDescendingChanged(bool value) => OnSortHeaderChanged();

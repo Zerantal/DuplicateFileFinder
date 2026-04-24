@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using System.Collections.Specialized;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,12 +15,16 @@ namespace DuplicateFileFinder.Gui.Features.Duplicates.ViewModels.ScanRootsTree;
 public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, IScanRootsTreeViewContext
 {
     public BulkObservableCollection<ScanRootsRowViewModel> Rows { get; } = new();
+    public bool HasRows => Rows.Count > 0;
 
     public ScanRootsRowViewModel? SelectedRow { get; set; }
 
-    public string NameArrow => " ▼";
-    public string SizeArrow => string.Empty;
-    public string ItemsArrow => " ▼";
+    public ScanRootsSortColumn SortColumn => ScanRootsSortColumn.Size;
+    public bool SortDescending => true;
+
+    public string NameArrow => string.Empty;
+    public string SizeArrow => "▼";
+    public string ItemsArrow => string.Empty;
     public string FilesArrow => string.Empty;
     public string DupFilesArrow => string.Empty;
     public string DupBytesArrow => string.Empty;
@@ -29,6 +34,8 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
 
     public ScanRootsTreeDesignViewModel()
     {
+        Rows.CollectionChanged += RowsOnCollectionChanged;
+
         const long scanRootBytes = 128L * 1024 * 1024 * 1024;
         var rng = new Random(1337);
 
@@ -134,4 +141,7 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
 
         return row;
     }
+
+    private void RowsOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        OnPropertyChanged(nameof(HasRows));
 }
