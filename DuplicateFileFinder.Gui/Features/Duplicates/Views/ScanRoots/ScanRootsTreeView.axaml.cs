@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.ComponentModel;
 
 using Avalonia;
 using Avalonia.Controls;
@@ -16,6 +17,7 @@ public partial class ScanRootsTreeView : UserControl
     private ScanRootsTreeViewModel? _vm;
     private INotifyCollectionChanged? _rowsNotify;
     private IScanRootsTreeViewContext? _viewContext;
+    private INotifyPropertyChanged? _viewContextNotify;
     private ScrollViewer? _scroller;
     private Border? _headerHost;
     private Border? _rowsHost;
@@ -45,6 +47,9 @@ public partial class ScanRootsTreeView : UserControl
         _rowsNotify = _viewContext?.Rows;
         if (_rowsNotify is not null)
             _rowsNotify.CollectionChanged += RowsOnCollectionChanged;
+        _viewContextNotify = _viewContext as INotifyPropertyChanged;
+        if (_viewContextNotify is not null)
+            _viewContextNotify.PropertyChanged += ViewContextOnPropertyChanged;
 
         _headerHost = this.FindControl<Border>("PART_HeaderHost");
         _rowsHost = this.FindControl<Border>("PART_RowsHost");
@@ -58,6 +63,7 @@ public partial class ScanRootsTreeView : UserControl
 
         UpdateEmptyStateVisibility();
         UpdateHeaderScrollbarGutter();
+        UpdateRowVisualStates();
     }
 
     private void UnhookVm()
@@ -65,6 +71,9 @@ public partial class ScanRootsTreeView : UserControl
         if (_rowsNotify is not null)
             _rowsNotify.CollectionChanged -= RowsOnCollectionChanged;
         _rowsNotify = null;
+        if (_viewContextNotify is not null)
+            _viewContextNotify.PropertyChanged -= ViewContextOnPropertyChanged;
+        _viewContextNotify = null;
         _viewContext = null;
 
         if (_scroller is not null)
@@ -85,13 +94,23 @@ public partial class ScanRootsTreeView : UserControl
     private void ScrollerOnScrollChanged(object? sender, ScrollChangedEventArgs e) =>
         UpdateHeaderScrollbarGutter();
 
-    private void OnLayoutUpdated(object? sender, EventArgs e) =>
+    private void OnLayoutUpdated(object? sender, EventArgs e)
+    {
         UpdateHeaderScrollbarGutter();
+        UpdateRowVisualStates();
+    }
+
+    private void ViewContextOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(IScanRootsTreeViewContext.SelectedRow))
+            UpdateRowVisualStates();
+    }
 
     private void UpdateChromeState()
     {
         UpdateEmptyStateVisibility();
         UpdateHeaderScrollbarGutter();
+        UpdateRowVisualStates();
     }
 
     private void UpdateEmptyStateVisibility()
@@ -157,7 +176,37 @@ public partial class ScanRootsTreeView : UserControl
             return;
 
         vm.SelectedRow = row;
+        c.Focus();
         e.Handled = true;
+    }
+
+    private void UpdateRowVisualStates()
+    {
+        var repeater = this.FindControl<ItemsRepeater>("PART_Repeater");
+        if (repeater is null)
+            return;
+
+        var selectedRow = _viewContext?.SelectedRow;
+        foreach (var visual in repeater.GetVisualChildren())
+        {
+            if (visual is not Border border || !border.Classes.Contains("scanroots-row"))
+                continue;
+
+            var isSelected = ReferenceEquals(border.DataContext, selectedRow);
+            SetClass(border, "selected", isSelected);
+        }
+    }
+
+    private static void SetClass(StyledElement element, string className, bool enabled)
+    {
+        if (enabled)
+        {
+            if (!element.Classes.Contains(className))
+                element.Classes.Add(className);
+            return;
+        }
+
+        element.Classes.Remove(className);
     }
 
     private void CenterSelectedRow()
