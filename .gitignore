@@ -99,6 +99,7 @@ TestResults/
 *.dotCover
 *.ncrunchsolution
 *.trx
+DuplicateFileFinder.GuiTests/UI/Snapshots/Artifacts/
 
 # Local config / secrets
 appsettings.Development.json
@@ -134,4 +135,3 @@ resharper-host.log
 .idea/.idea.ReSharperCaches
 Avalonia.XAML.Intermediate/
 AvaloniaVSCache/
-

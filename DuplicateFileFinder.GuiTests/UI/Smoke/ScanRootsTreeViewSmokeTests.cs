@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -143,12 +144,24 @@ public sealed class ScanRootsTreeViewSmokeTests
 
     private static void AssertSnapshot(string snapshotName, byte[] pngBytes)
     {
-        var snapshotsDir = GetSnapshotsDirectory();
-        Directory.CreateDirectory(snapshotsDir);
+        var snapshotsRoot = GetSnapshotsRoot();
+        var baselinesDir = Path.Combine(snapshotsRoot, "Baselines");
+        var artifactsDir = Path.Combine(snapshotsRoot, "Artifacts");
+        Directory.CreateDirectory(baselinesDir);
+        Directory.CreateDirectory(artifactsDir);
 
-        var hashPath = Path.Combine(snapshotsDir, $"{snapshotName}.sha256");
-        var pngPath = Path.Combine(snapshotsDir, $"{snapshotName}.png");
-        var actualPath = Path.Combine(snapshotsDir, $"{snapshotName}.actual.png");
+        var hashPath = Path.Combine(baselinesDir, $"{snapshotName}.sha256");
+        var pngPath = Path.Combine(baselinesDir, $"{snapshotName}.png");
+        var actualPath = Path.Combine(artifactsDir, $"{snapshotName}.actual.png");
+        var reportPath = Path.Combine(artifactsDir, $"{snapshotName}.diff.md");
+
+        // Backward-compatible read path for older snapshots before Baselines/Artifacts split.
+        var legacyHashPath = Path.Combine(snapshotsRoot, $"{snapshotName}.sha256");
+        var legacyPngPath = Path.Combine(snapshotsRoot, $"{snapshotName}.png");
+        if (!File.Exists(hashPath) && File.Exists(legacyHashPath))
+            hashPath = legacyHashPath;
+        if (!File.Exists(pngPath) && File.Exists(legacyPngPath))
+            pngPath = legacyPngPath;
 
         var hash = Convert.ToHexString(SHA256.HashData(pngBytes));
         var update = string.Equals(
@@ -158,8 +171,14 @@ public sealed class ScanRootsTreeViewSmokeTests
 
         if (update || !File.Exists(hashPath))
         {
-            File.WriteAllText(hashPath, hash + Environment.NewLine);
-            File.WriteAllBytes(pngPath, pngBytes);
+            var baselineHashPath = Path.Combine(baselinesDir, $"{snapshotName}.sha256");
+            var baselinePngPath = Path.Combine(baselinesDir, $"{snapshotName}.png");
+            File.WriteAllText(baselineHashPath, hash + Environment.NewLine);
+            File.WriteAllBytes(baselinePngPath, pngBytes);
+            if (File.Exists(actualPath))
+                File.Delete(actualPath);
+            if (File.Exists(reportPath))
+                File.Delete(reportPath);
             return;
         }
 
@@ -168,13 +187,87 @@ public sealed class ScanRootsTreeViewSmokeTests
             return;
 
         File.WriteAllBytes(actualPath, pngBytes);
+        WriteDiffReport(snapshotName, hashPath, pngPath, actualPath, reportPath, expected, hash);
+
+        var aiHint = TryRunAiReviewHook(pngPath, actualPath, reportPath);
         Assert.Fail(
             $"Snapshot mismatch for '{snapshotName}'. Expected hash={expected}, actual hash={hash}. " +
-            $"Wrote actual image to: {actualPath}. " +
+            $"Wrote actual image to: {actualPath}. Wrote diff report: {reportPath}. {aiHint}" +
             "Set UPDATE_SNAPSHOTS=1 to accept updated snapshots.");
     }
 
-    private static string GetSnapshotsDirectory()
+    private static void WriteDiffReport(
+        string snapshotName,
+        string hashPath,
+        string expectedPngPath,
+        string actualPngPath,
+        string reportPath,
+        string expectedHash,
+        string actualHash)
+    {
+        var lines = new[]
+        {
+            $"# Snapshot Diff: {snapshotName}",
+            string.Empty,
+            "## Files",
+            $"- Expected hash file: `{hashPath}`",
+            $"- Expected image: `{expectedPngPath}`",
+            $"- Actual image: `{actualPngPath}`",
+            string.Empty,
+            "## Hashes",
+            $"- Expected: `{expectedHash}`",
+            $"- Actual: `{actualHash}`",
+            string.Empty,
+            "## AI Review (Optional)",
+            "Run this command to request an automated visual diff summary:",
+            $"`SNAPSHOT_AI_REVIEW=1 scripts/ai_snapshot_review.sh \"{expectedPngPath}\" \"{actualPngPath}\" \"{reportPath}\"`",
+            string.Empty
+        };
+
+        File.WriteAllLines(reportPath, lines);
+    }
+
+    private static string TryRunAiReviewHook(string expectedPngPath, string actualPngPath, string reportPath)
+    {
+        var run = string.Equals(
+            Environment.GetEnvironmentVariable("SNAPSHOT_AI_REVIEW"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+        if (!run)
+            return "Set SNAPSHOT_AI_REVIEW=1 to run AI review hook. ";
+
+        try
+        {
+            var scriptPath = Path.Combine(GetRepoRoot(), "scripts", "ai_snapshot_review.sh");
+            if (!File.Exists(scriptPath))
+                return $"AI review hook script not found: {scriptPath}. ";
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = scriptPath,
+                Arguments = $"\"{expectedPngPath}\" \"{actualPngPath}\" \"{reportPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using var p = Process.Start(psi);
+            if (p is null)
+                return "AI review hook failed to start. ";
+
+            p.WaitForExit(60_000);
+            if (p.ExitCode == 0)
+                return $"AI review written to {reportPath}. ";
+
+            var err = p.StandardError.ReadToEnd().Trim();
+            return $"AI review hook failed (exit {p.ExitCode}): {err}. ";
+        }
+        catch (Exception ex)
+        {
+            return $"AI review hook threw: {ex.Message}. ";
+        }
+    }
+
+    private static string GetSnapshotsRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
@@ -187,5 +280,11 @@ public sealed class ScanRootsTreeViewSmokeTests
         }
 
         throw new DirectoryNotFoundException("Could not locate repository root for snapshot storage.");
+    }
+
+    private static string GetRepoRoot()
+    {
+        var snapshots = GetSnapshotsRoot();
+        return Directory.GetParent(Directory.GetParent(Directory.GetParent(snapshots)!.FullName)!.FullName)!.FullName;
     }
 }
