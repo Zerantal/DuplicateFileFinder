@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;

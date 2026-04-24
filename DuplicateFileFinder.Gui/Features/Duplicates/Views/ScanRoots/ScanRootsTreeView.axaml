@@ -1,5 +1,5 @@
 <!-- DuplicateFileFinder.Gui/Features/Duplicates/Views/ScanRoots/ScanRootsFlatTreeView.axaml -->
-
+<!-- ReSharper disable InconsistentNaming -->
 <UserControl
   x:Class="DuplicateFileFinder.Gui.Features.Duplicates.Views.ScanRoots.ScanRootsTreeView"
   xmlns="https://github.com/avaloniaui"
@@ -17,6 +17,7 @@
   d:DesignHeight="360">
 
   <UserControl.Resources>
+    <!-- ReSharper disable once Xaml.RedundantResource -->
     <x:Double x:Key="ScanRootsScrollbarGutter">14</x:Double>
     <SolidColorBrush x:Key="ScanRootsSelectedRowBrush" Color="#552D7DFF" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowRailBrush" Color="#FF2D7DFF" />
@@ -228,10 +229,8 @@
 
     <Grid>
       <!-- Virtualized "tree" -->
-      <!-- ReSharper disable once InconsistentNaming -->
       <ScrollViewer x:Name="PART_Scroller">
         <Border x:Name="PART_RowsHost">
-          <!-- ReSharper disable once InconsistentNaming -->
           <ItemsRepeater x:Name="PART_Repeater"
                          ItemsSource="{Binding Rows}">
             <ItemsRepeater.Layout>
@@ -286,7 +285,7 @@
               <Grid ColumnDefinitions="2*,200,100,100,100,100,100"
                     Margin="3,0,3,0"
                     VerticalAlignment="Center"
-                    Background="Transparent" Classes="debug_outline">
+                    Background="Transparent">
 
                 <!-- Name column: indent + expander glyph + text -->
                 <Grid Grid.Column="0"
