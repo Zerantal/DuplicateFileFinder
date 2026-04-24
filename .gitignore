@@ -123,6 +123,7 @@ _ReSharper*/
 *.DotSettings.user
 resharper-host/
 resharper-host.log
+.codex
 
 # Editor backups
 *.bak
