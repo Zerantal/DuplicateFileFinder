@@ -26,8 +26,12 @@
     <SolidColorBrush x:Key="ScanRootsSelectedRowFocusBorderBrush" Color="#FF8CB8FF" />
     <SolidColorBrush x:Key="ScanRootsHeaderActiveBrush" Color="#443B82F6" />
     <SolidColorBrush x:Key="ScanRootsHeaderActiveBorderBrush" Color="#557EA6FF" />
+    <SolidColorBrush x:Key="ScanRootsPercentTrackBrush" Color="#334A5568" />
+    <SolidColorBrush x:Key="ScanRootsPercentFillBrush" Color="#FF1684E0" />
+    <SolidColorBrush x:Key="ScanRootsPercentLabelBrush" Color="#EAF4FF" />
     <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
     <converters:EnumEqualsConverter x:Key="EnumEqualsConverter" />
+    <converters:PercentToGridLengthConverter x:Key="PercentToGridLengthConverter" />
 
     <converters:SelectedRowBackgroundConverter x:Key="SelectedRowBackgroundConverter"
                                                SelectedBrush="{StaticResource ScanRootsSelectedRowBrush}"
@@ -178,6 +182,26 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="FontFamily" Value="monospace" />
       <Setter Property="LineHeight" Value="16" />
+    </Style>
+
+    <Style Selector="Border.scanroots-percent-track">
+      <Setter Property="Height" Value="16" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Background" Value="{StaticResource ScanRootsPercentTrackBrush}" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <Style Selector="Border.scanroots-percent-fill">
+      <Setter Property="Background" Value="{StaticResource ScanRootsPercentFillBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.scanroots-percent-label">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource ScanRootsPercentLabelBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="8,0,8,0" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
 
     <Style Selector="Border.scanroots-row:pointerover">
@@ -389,19 +413,27 @@
 
                 <!-- Subtree % -->
                 <Grid Grid.Column="1"
-                      ColumnDefinitions="*,Auto"
                       VerticalAlignment="Center"
                       MinWidth="100"
                       MaxWidth="400">
+                  <Border Classes="scanroots-percent-track"
+                          Margin="3,0,3,0">
+                    <Grid>
+                      <Grid Classes="scanroots-percent-track">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="{Binding PercentOfScanRoot, Converter={StaticResource PercentToGridLengthConverter}}" />
+                          <ColumnDefinition Width="{Binding PercentOfScanRoot, Converter={StaticResource PercentToGridLengthConverter}, ConverterParameter=remaining}" />
+                        </Grid.ColumnDefinitions>
 
-                  <ProgressBar Value="{Binding PercentOfScanRoot}"
-                               Maximum="100"
-                               Height="14"
-                               Margin="3,0,3,0" />
-                  <TextBlock Grid.Column="0"
-                             Text="{Binding PercentOfScanRoot, StringFormat={}{0:F1}%}"
-                             FontSize="11"
-                             VerticalAlignment="Center" />
+                        <Border Grid.Column="0"
+                                Classes="scanroots-percent-fill" />
+                      </Grid>
+
+                      <TextBlock Text="{Binding PercentOfScanRoot, StringFormat={}{0:F1}%}"
+                                 Classes="scanroots-percent-label"
+                                 HorizontalAlignment="Left" />
+                    </Grid>
+                  </Border>
                 </Grid>
 
                 <!-- Size -->
