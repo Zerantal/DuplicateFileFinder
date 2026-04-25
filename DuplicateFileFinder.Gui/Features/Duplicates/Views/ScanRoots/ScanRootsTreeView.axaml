@@ -198,7 +198,7 @@
     <Style Selector="TextBlock.scanroots-percent-label">
       <Setter Property="FontSize" Value="11" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Foreground" Value="{StaticResource ScanRootsPercentLabelBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="Margin" Value="8,0,8,0" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
