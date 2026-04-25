@@ -24,11 +24,18 @@
     <SolidColorBrush x:Key="ScanRootsRowHoverBorderBrush" Color="#6683A8D8" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowBorderBrush" Color="#FF4B86F8" />
     <SolidColorBrush x:Key="ScanRootsSelectedRowFocusBorderBrush" Color="#FF8CB8FF" />
+    <SolidColorBrush x:Key="ScanRootsRootRowBrush" Color="#163B82F6" />
+    <SolidColorBrush x:Key="ScanRootsRootRowBorderBrush" Color="#4A5A8DF0" />
+    <SolidColorBrush x:Key="ScanRootsFolderFillBrush" Color="#B6D3E9" />
+    <SolidColorBrush x:Key="ScanRootsFolderStrokeBrush" Color="#6E8CA8" />
+    <SolidColorBrush x:Key="ScanRootsRootFolderFillBrush" Color="#9FBEFF" />
+    <SolidColorBrush x:Key="ScanRootsRootFolderStrokeBrush" Color="#3E73E6" />
+    <SolidColorBrush x:Key="ScanRootsRootFolderAccentBrush" Color="#FF3E73E6" />
     <SolidColorBrush x:Key="ScanRootsHeaderActiveBrush" Color="#443B82F6" />
     <SolidColorBrush x:Key="ScanRootsHeaderActiveBorderBrush" Color="#557EA6FF" />
     <SolidColorBrush x:Key="ScanRootsPercentTrackBrush" Color="#334A5568" />
     <SolidColorBrush x:Key="ScanRootsPercentFillBrush" Color="#FF1684E0" />
-    <SolidColorBrush x:Key="ScanRootsPercentLabelBrush" Color="#EAF4FF" />
+    <StreamGeometry x:Key="ScanRootsFolderIconGeometry">M1.5,5.5 L6.2,5.5 C6.6,5.5 6.9,5.35 7.15,5.1 L8.35,3.9 C8.6,3.65 8.9,3.5 9.3,3.5 L14.6,3.5 C15.7,3.5 16.5,4.3 16.5,5.4 L16.5,12.8 C16.5,13.9 15.7,14.7 14.6,14.7 L3.4,14.7 C2.3,14.7 1.5,13.9 1.5,12.8 Z</StreamGeometry>
     <converters:ExpandedToGeometryConverter x:Key="ExpandedToGeometryConverter" />
     <converters:EnumEqualsConverter x:Key="EnumEqualsConverter" />
     <converters:PercentToGridLengthConverter x:Key="PercentToGridLengthConverter" />
@@ -189,13 +196,50 @@
       <Setter Property="LineHeight" Value="16" />
     </Style>
 
+    <Style Selector="Path.scanroots-folder-icon">
+      <Setter Property="Data" Value="{StaticResource ScanRootsFolderIconGeometry}" />
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Fill" Value="{StaticResource ScanRootsFolderFillBrush}" />
+      <Setter Property="Stroke" Value="{StaticResource ScanRootsFolderStrokeBrush}" />
+      <Setter Property="StrokeThickness" Value="1" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+
+    <Style Selector="Path.scanroots-folder-icon.scanroots-root-folder-icon">
+      <Setter Property="Fill" Value="{StaticResource ScanRootsRootFolderFillBrush}" />
+      <Setter Property="Stroke" Value="{StaticResource ScanRootsRootFolderStrokeBrush}" />
+      <Setter Property="StrokeThickness" Value="1.2" />
+    </Style>
+
+    <Style Selector="Ellipse.scanroots-root-folder-accent">
+      <Setter Property="Width" Value="4" />
+      <Setter Property="Height" Value="4" />
+      <Setter Property="Fill" Value="{StaticResource ScanRootsRootFolderAccentBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="0,1,1,0" />
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="Ellipse.scanroots-root-folder-accent.scanroots-root-folder-accent-visible">
+      <Setter Property="IsVisible" Value="True" />
+    </Style>
+
     <Style Selector="TextBlock.scanroots-name.scanroots-root-name">
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
 
     <Style Selector="Border.scanroots-row.scanroots-root-row">
+      <Setter Property="Background" Value="{StaticResource ScanRootsRootRowBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="BorderBrush" Value="#335A8DF0" />
+      <Setter Property="BorderBrush" Value="{StaticResource ScanRootsRootRowBorderBrush}" />
+    </Style>
+
+    <Style Selector="Border.scanroots-row.scanroots-root-row:pointerover">
+      <Setter Property="BorderBrush" Value="{StaticResource ScanRootsSelectedRowBorderBrush}" />
     </Style>
 
     <Style Selector="Border.scanroots-percent-track">
@@ -395,7 +439,7 @@
                   </Border>
 
                   <Grid Grid.Column="1"
-                        ColumnDefinitions="Auto,24,*"
+                        ColumnDefinitions="Auto,24,Auto,*"
                         VerticalAlignment="Center">
 
                     <!-- Indent: depth provided by converter -->
@@ -417,8 +461,18 @@
                             StrokeJoin="Round" />
                     </Button>
 
+                    <Grid Grid.Column="2"
+                          Width="16"
+                          Height="16"
+                          Margin="0,0,6,0">
+                      <Path Classes="scanroots-folder-icon"
+                            Classes.scanroots-root-folder-icon="{Binding IsScanRoot}" />
+                      <Ellipse Classes="scanroots-root-folder-accent"
+                               Classes.scanroots-root-folder-accent-visible="{Binding IsScanRoot}" />
+                    </Grid>
+
                     <!-- Name -->
-                    <TextBlock Grid.Column="2"
+                    <TextBlock Grid.Column="3"
                                Text="{Binding DisplayName}"
                                Classes="scanroots-name"
                                Classes.scanroots-root-name="{Binding IsScanRoot}"

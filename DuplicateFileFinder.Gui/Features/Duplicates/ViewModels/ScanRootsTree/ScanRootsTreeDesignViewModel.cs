@@ -1,5 +1,5 @@
-using System.Windows.Input;
 using System.Collections.Specialized;
+using System.Windows.Input;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,249 +36,87 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
     {
         Rows.CollectionChanged += RowsOnCollectionChanged;
 
-        const long scanRootBytes = 128L * 1024 * 1024 * 1024;
+        const double projectsRootTotalGb = 128.0;
+        const double archiveRootTotalGb = 94.0;
 
-        var root = CreateRow(
+        var projectsRoot = CreateRow(
             name: @"C:\Projects",
             fullPath: @"C:\Projects",
             depth: 0,
             isScanRoot: true,
             hasLazyChildren: true,
             isExpanded: true,
-            percentOfScanRoot: 82.0,
-            totalBytes: scanRootBytes,
-            fileCount: 10128,
-            dirCount: 2312,
-            duplicateFiles: 1240,
-            duplicateBytes: 4700L * 1024 * 1024);
+            percentOfScanRoot: 100.0,
+            scanRootTotalBytes: ToBytes(projectsRootTotalGb),
+            totalBytes: ToBytes(projectsRootTotalGb),
+            fileCount: 28430,
+            dirCount: 6420,
+            duplicateFiles: 1876,
+            duplicateBytes: ToBytes(21.4));
+        Rows.Add(projectsRoot);
 
-        Rows.Add(root);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "src", 1, true, true, 13.6, 8643, 2107, 419, 2.4);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"src\core", 2, true, false, 14.2, 8412, 1915, 15, 3.7);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"src\feature-pack", 2, true, true, 10.1, 8434, 1121, 1042, 2.2);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"src\feature-pack\ui", 3, false, false, 4.2, 2610, 280, 211, 0.86);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"src\feature-pack\services", 3, false, false, 3.6, 1974, 194, 144, 0.64);
 
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: "src",
-            depth: 1,
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "tests", 1, true, true, 12.4, 5180, 1808, 272, 0.391);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"tests\assets", 2, true, true, 9.8, 3137, 372, 162, 4.2);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"tests\assets\module-04", 3, false, false, 5.6, 2250, 148, 77, 1.3);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"tests\integration", 2, false, false, 0.9, 2744, 550, 101, 0.122);
+
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-10", 1, true, true, 9.1, 3160, 504, 188, 1.1);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"workspace-10\src", 2, true, false, 5.2, 1580, 184, 74, 0.62);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"workspace-10\tests", 2, false, false, 2.1, 880, 119, 29, 0.14);
+
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-09", 1, false, false, 8.4, 2870, 462, 166, 0.94);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-08", 1, true, false, 7.7, 2610, 411, 143, 0.81);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-07", 1, false, false, 7.1, 2380, 398, 129, 0.74);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "scripts", 1, false, false, 6.1, 2606, 1154, 162, 1.3);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "benchmarks", 1, true, true, 5.6, 8340, 1300, 125, 0.118);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"benchmarks\module-07", 2, true, true, 7.3, 3663, 1493, 489, 2.2);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, @"benchmarks\module-07\feature-52", 3, false, false, 2.8, 1466, 211, 211, 0.91);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-06", 1, true, false, 4.9, 1840, 356, 101, 0.58);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-05", 1, false, false, 4.3, 1520, 284, 88, 0.41);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-04", 1, false, false, 3.6, 1290, 250, 62, 0.33);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-03", 1, false, false, 3.1, 1180, 216, 49, 0.26);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-02", 1, false, false, 2.7, 1040, 191, 38, 0.19);
+        AddVisibleRow(@"C:\Projects", projectsRootTotalGb, "workspace-01", 1, false, false, 2.2, 920, 160, 31, 0.12);
+
+        var archiveRoot = CreateRow(
+            name: @"D:\Archive",
+            fullPath: @"D:\Archive",
+            depth: 0,
+            isScanRoot: true,
             hasLazyChildren: true,
             isExpanded: true,
-            percentOfScanRoot: 11.8,
-            totalBytes: 13600,
-            fileCount: 8643,
-            dirCount: 2107,
-            duplicateFiles: 419,
-            duplicateBytesGb: 2.4);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"src\core",
-            depth: 2,
-            hasLazyChildren: true,
-            isExpanded: false,
-            percentOfScanRoot: 5.1,
-            totalBytes: 14200,
-            fileCount: 8412,
-            dirCount: 1915,
-            duplicateFiles: 15,
-            duplicateBytesGb: 3.7);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"src\feature-pack",
-            depth: 2,
-            hasLazyChildren: true,
-            isExpanded: true,
-            percentOfScanRoot: 8.4,
-            totalBytes: 10100,
-            fileCount: 8434,
-            dirCount: 1121,
-            duplicateFiles: 1042,
-            duplicateBytesGb: 2.2);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"src\feature-pack\ui",
-            depth: 3,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 3.7,
-            totalBytes: 4200,
-            fileCount: 2610,
-            dirCount: 280,
-            duplicateFiles: 211,
-            duplicateBytesGb: 0.86);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"src\feature-pack\services",
-            depth: 3,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 2.9,
-            totalBytes: 3600,
-            fileCount: 1974,
-            dirCount: 194,
-            duplicateFiles: 144,
-            duplicateBytesGb: 0.64);
+            percentOfScanRoot: 100.0,
+            scanRootTotalBytes: ToBytes(archiveRootTotalGb),
+            totalBytes: ToBytes(archiveRootTotalGb),
+            fileCount: 6120,
+            dirCount: 1448,
+            duplicateFiles: 804,
+            duplicateBytes: ToBytes(18.6));
+        Rows.Add(archiveRoot);
 
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: "tests",
-            depth: 1,
-            hasLazyChildren: true,
-            isExpanded: true,
-            percentOfScanRoot: 11.0,
-            totalBytes: 1300,
-            fileCount: 5180,
-            dirCount: 1808,
-            duplicateFiles: 272,
-            duplicateBytesGb: 0.391);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"tests\integration",
-            depth: 2,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 3.0,
-            totalBytes: 900,
-            fileCount: 2744,
-            dirCount: 550,
-            duplicateFiles: 101,
-            duplicateBytesGb: 0.122);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"tests\assets",
-            depth: 2,
-            hasLazyChildren: true,
-            isExpanded: true,
-            percentOfScanRoot: 3.8,
-            totalBytes: 14500,
-            fileCount: 3137,
-            dirCount: 372,
-            duplicateFiles: 162,
-            duplicateBytesGb: 4.2);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"tests\assets\module-04",
-            depth: 3,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 1.9,
-            totalBytes: 5600,
-            fileCount: 2250,
-            dirCount: 148,
-            duplicateFiles: 77,
-            duplicateBytesGb: 1.3);
+        AddVisibleRow(@"D:\Archive", archiveRootTotalGb, "photos", 1, true, true, 43.3, 2480, 511, 402, 8.2);
+        AddVisibleRow(@"D:\Archive", archiveRootTotalGb, @"photos\raw", 2, false, false, 26.7, 1182, 104, 113, 2.1);
+        AddVisibleRow(@"D:\Archive", archiveRootTotalGb, @"photos\exports", 2, false, false, 9.1, 904, 88, 251, 4.9);
+        AddVisibleRow(@"D:\Archive", archiveRootTotalGb, "video", 1, true, false, 29.6, 640, 213, 294, 7.3);
+        AddVisibleRow(@"D:\Archive", archiveRootTotalGb, "documents", 1, false, false, 7.6, 2010, 524, 44, 0.6);
 
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: "scripts",
-            depth: 1,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 9.3,
-            totalBytes: 6100,
-            fileCount: 2606,
-            dirCount: 1154,
-            duplicateFiles: 162,
-            duplicateBytesGb: 1.3);
-
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: "benchmarks",
-            depth: 1,
-            hasLazyChildren: true,
-            isExpanded: true,
-            percentOfScanRoot: 14.9,
-            totalBytes: 5600,
-            fileCount: 8340,
-            dirCount: 1300,
-            duplicateFiles: 125,
-            duplicateBytesGb: 0.118);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"benchmarks\module-07",
-            depth: 2,
-            hasLazyChildren: true,
-            isExpanded: true,
-            percentOfScanRoot: 9.6,
-            totalBytes: 7300,
-            fileCount: 3663,
-            dirCount: 1493,
-            duplicateFiles: 489,
-            duplicateBytesGb: 2.2);
-        AddVisibleRow(
-            rootPath: @"C:\Projects",
-            relativePath: @"benchmarks\module-07\feature-52",
-            depth: 3,
-            hasLazyChildren: false,
-            isExpanded: false,
-            percentOfScanRoot: 5.2,
-            totalBytes: 2800,
-            fileCount: 1466,
-            dirCount: 211,
-            duplicateFiles: 211,
-            duplicateBytesGb: 0.91);
-
-        for (var i = 0; i < 18; i++)
-        {
-            var groupName = $"workspace-{i + 1:D2}";
-            var percent = 12.0 + i * 1.7;
-            var totalBytes = 2200 + i * 410;
-            var files = 900 + i * 180;
-            var dirs = 140 + i * 21;
-            var dupFiles = 30 + i * 9;
-            var dupBytes = 240 + i * 70;
-            var isExpanded = i % 3 == 0;
-
-            AddVisibleRow(
-                rootPath: @"C:\Projects",
-                relativePath: groupName,
-                depth: 1,
-                hasLazyChildren: true,
-                isExpanded: isExpanded,
-                percentOfScanRoot: percent,
-                totalBytes: totalBytes,
-                fileCount: files,
-                dirCount: dirs,
-                duplicateFiles: dupFiles,
-                duplicateBytesGb: dupBytes / 1024.0);
-
-            if (!isExpanded)
-                continue;
-
-            AddVisibleRow(
-                rootPath: @"C:\Projects",
-                relativePath: $@"{groupName}\src",
-                depth: 2,
-                hasLazyChildren: i % 2 == 0,
-                isExpanded: false,
-                percentOfScanRoot: percent * 0.46,
-                totalBytes: totalBytes * 0.54,
-                fileCount: (int)(files * 0.52),
-                dirCount: (int)(dirs * 0.40),
-                duplicateFiles: (int)(dupFiles * 0.35),
-                duplicateBytesGb: dupBytes * 0.48 / 1024.0);
-
-            AddVisibleRow(
-                rootPath: @"C:\Projects",
-                relativePath: $@"{groupName}\tests",
-                depth: 2,
-                hasLazyChildren: false,
-                isExpanded: false,
-                percentOfScanRoot: percent * 0.27,
-                totalBytes: totalBytes * 0.28,
-                fileCount: (int)(files * 0.31),
-                dirCount: (int)(dirs * 0.24),
-                duplicateFiles: (int)(dupFiles * 0.22),
-                duplicateBytesGb: dupBytes * 0.19 / 1024.0);
-        }
-
-        SelectedRow = root;
+        SelectedRow = projectsRoot;
     }
 
     private void AddVisibleRow(
         string rootPath,
+        double scanRootTotalGb,
         string relativePath,
         int depth,
         bool hasLazyChildren,
         bool isExpanded,
-        double percentOfScanRoot,
-        double totalBytes,
+        double totalBytesGb,
         int fileCount,
         int dirCount,
         long duplicateFiles,
@@ -293,8 +131,9 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
             isScanRoot: false,
             hasLazyChildren: hasLazyChildren,
             isExpanded: isExpanded,
-            percentOfScanRoot: Math.Round(percentOfScanRoot, 1),
-            totalBytes: ToBytes(totalBytes),
+            percentOfScanRoot: Math.Round(totalBytesGb / scanRootTotalGb * 100.0, 1),
+            scanRootTotalBytes: ToBytes(scanRootTotalGb),
+            totalBytes: ToBytes(totalBytesGb),
             fileCount: fileCount,
             dirCount: dirCount,
             duplicateFiles: duplicateFiles,
@@ -309,6 +148,7 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
         bool hasLazyChildren,
         bool isExpanded,
         double percentOfScanRoot,
+        long scanRootTotalBytes,
         long totalBytes,
         int fileCount,
         int dirCount,
@@ -331,7 +171,7 @@ public sealed partial class ScanRootsTreeDesignViewModel : ObservableObject, ISc
             DuplicateFiles = duplicateFiles,
             DuplicateBytes = duplicateBytes,
             PercentOfScanRoot = percentOfScanRoot,
-            ScanRootTotalBytes = 128L * 1024 * 1024 * 1024
+            ScanRootTotalBytes = scanRootTotalBytes
         };
 
         var row = new ScanRootsRowViewModel(node, actions: null, deletionService: null, depth)
